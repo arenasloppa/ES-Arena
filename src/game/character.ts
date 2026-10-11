@@ -41,6 +41,8 @@ export const ARGONIAN = 7;
 /** Classes whose places in the game's list Arena's rules go by. */
 export const ACROBAT = 9;
 export const MONK = 12;
+export const ARCHER = 13;
+export const RANGER = 14;
 export const KNIGHT = 17;
 /** No attribute goes above this, bonus points included. */
 export const ATTRIBUTE_MAX = 100;
@@ -412,17 +414,21 @@ export function heroFor(character: Character, cls: ClassInfo, { levelled = false
     experience: cls.experience,
     damageBonus: d.damage,
     knack: KNACKS[race],
+    levelDamage: cls.id === RANGER,
     agility: to256(a[AGILITY]),
     evasive: cls.id === MONK || cls.id === ACROBAT,
     willpower: to256(a[WILLPOWER]),
     saves: s,
     resists: race === NORD ? COLD : race === BRETON ? MAGIC : undefined,
+    shrugsOff: cls.id === MONK,
     // High Elves and Knights can't be paralysed.
     paralysis: race === HIGH_ELF || cls.id === KNIGHT ? 0 : s[POISON],
     // Arena's base speed: 20 plus up to 20 more for Speed (OpenTESArena's getBaseSpeed), against the remake's walk at 40.
     pace: (20 + Math.trunc((Math.trunc((a[SPEED] * 256) / 100) * 20) / 256)) / 30,
     recovery: 0.8 + a[WILLPOWER] * 0.004,
     critical: cls.critical ? Math.max(0.02, 0.08 + 0.01 * step(LUCK)) : 0,
+    // Arena's Archers land critical hits only with bows, and every other class only with other weapons.
+    criticalWith: cls.id === ARCHER ? 'bows' : 'melee',
     lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * d.toHit + 0.02 * step(LUCK)) : 0,
     fortune: Math.max(0.5, 1 + 0.05 * step(LUCK)),
     carry: d.maxKilos,
@@ -433,6 +439,8 @@ export function heroFor(character: Character, cls: ClassInfo, { levelled = false
     swimTiring: race === ARGONIAN ? 12 / 30 : 1,
     // Arena's program lets Khajiit and Acrobats climb a pit's walls four times as fast.
     climbPace: race === KHAJIIT || cls.id === ACROBAT ? 4 : 1,
+    // An Acrobat's jumps go twice as high and last twice as long, as in Arena's program (0x2852B).
+    leap: cls.id === ACROBAT ? 2 : 1,
     gold: character.gold,
   };
 }

@@ -25,6 +25,8 @@ export interface PlayerState {
   z?: number;
   /** Upward speed while in the air. */
   vz?: number;
+  /** How many times longer than usual the jump in progress lasts (see jump); 1 when unset. */
+  leap?: number;
 }
 
 export interface MoveInput {
@@ -133,7 +135,7 @@ export function settle(level: Level, p: PlayerState, dt: number): number {
     vz = 0;
   } else {
     const before = z;
-    vz -= GRAVITY * dt;
+    vz -= (GRAVITY / (p.leap ?? 1)) * dt;
     z += vz * dt;
     if (z <= ground) {
       fell = Math.max(0, before - ground);
@@ -143,13 +145,20 @@ export function settle(level: Level, p: PlayerState, dt: number): number {
   }
   p.z = z;
   p.vz = vz;
+  if (vz === 0) p.leap = undefined;
   return fell;
 }
 
-/** Leaves the floor in a jump; false when already in the air. */
-export function jump(level: Level, p: PlayerState): boolean {
+/**
+ * Leaves the floor in a jump; false when already in the air. A `leap` of 2
+ * (an Acrobat's) goes twice as high and lasts twice as long, as in Arena,
+ * whose program holds each step of the jump for two frames rather than one:
+ * the same speed off the floor, with half the pull back down.
+ */
+export function jump(level: Level, p: PlayerState, leap = 1): boolean {
   if (airborne(level, p)) return false;
   p.vz = (4 * JUMP_HEIGHT) / JUMP_TIME;
+  p.leap = leap;
   return true;
 }
 

@@ -6,14 +6,17 @@ import {
   derivedAttributes,
   ACROBAT,
   AGILITY,
+  ARCHER,
   BRETON,
   DARK_ELF,
   ENDURANCE,
   HIGH_ELF,
   KHAJIIT,
   KNIGHT,
+  MONK,
   NORD,
   PERSONALITY,
+  RANGER,
   REDGUARD,
   saves,
   WOOD_ELF,
@@ -183,6 +186,16 @@ describe('character creation', () => {
     expect(heroFor(CHARACTER, { ...TINKER, id: KNIGHT }).paralysis).toBe(0);
     // Khajiit and Acrobats climb four times as fast.
     expect([as(KHAJIIT).climbPace, as(NORD).climbPace, heroFor(CHARACTER, { ...TINKER, id: ACROBAT }).climbPace]).toEqual([4, 1, 4]);
+  });
+
+  it('gives each class its abilities from Arena', () => {
+    const as = (id: number) => heroFor(CHARACTER, { ...TINKER, id });
+    // Archers land critical hits only with bows, the other classes only with other weapons.
+    expect([as(ARCHER).criticalWith, as(MONK).criticalWith]).toEqual(['bows', 'melee']);
+    // A Ranger's level adds to their blows; an Acrobat leaps twice as high and as long; a Monk takes nothing from a spell saved against.
+    expect([as(RANGER).levelDamage, as(KNIGHT).levelDamage]).toEqual([true, false]);
+    expect([as(ACROBAT).leap, as(RANGER).leap]).toEqual([2, 1]);
+    expect([as(MONK).shrugsOff, as(ACROBAT).shrugsOff]).toEqual([true, false]);
   });
 
   it('works out the saves against each element as Arena keeps them', () => {

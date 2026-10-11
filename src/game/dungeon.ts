@@ -32,6 +32,8 @@ import {
   drinkPotion,
   elementalDamage,
   knackDamage,
+  levelDamage,
+  mayCrit,
   levelUp,
   maxHealthFor,
   newPlayerStats,
@@ -393,6 +395,8 @@ export class Dungeon {
 
   private readonly weaponTable: WeaponInfo[];
   private readonly armourTable: ArmourTables;
+  /** The undead, by creature number, when the program's list can be read. */
+  private readonly undead: number[];
   private readonly unlocked = new Set<number>();
   private readonly pickedAt = new Map<number, number>();
   private readonly lockTried = new Set<number>();
@@ -451,6 +455,7 @@ export class Dungeon {
     this.creatureInfo = tables?.creatures ?? [];
     this.weaponTable = tables?.weapons ?? [];
     this.armourTable = armourTables(tables?.armour);
+    this.undead = tables?.hits?.undead ?? [];
     this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
     const held = this.inventory.weapon;
@@ -711,7 +716,7 @@ export class Dungeon {
   /** Jumps, when on the floor and not in water, a pit or a climb. */
   jump(): boolean {
     if (this.outcome || this.paralysed || this.climb || inChasm(this.level, this.player)) return false;
-    return jump(this.level, this.player);
+    return jump(this.level, this.player, this.hero.leap);
   }
 
   /** Held by a paralysing blow: the player can look about, but not move, fight, cast or use things. */
@@ -1079,12 +1084,16 @@ export class Dungeon {
       return;
     }
     if (target) {
+      // As Arena works it out (its program at 0x2AEB5): the weapon's roll, Strength and the race's knack,
+      // doubled for a critical hit, then a Ranger's level; then the remake's power attacks and sneak attacks.
       const bonus = this.hero.damageBonus + knackDamage(this.hero.knack, this.stats.level, false);
-      let damage = Math.max(1, roll(this.random, ...this.stats.weapon.damage) + bonus) * (s.power ? 2 : 1);
-      if (this.hero.critical > 0 && this.random() < this.hero.critical) {
+      let damage = Math.max(1, roll(this.random, ...this.stats.weapon.damage) + bonus);
+      if (mayCrit(this.hero, false) && this.random() < this.hero.critical) {
         damage *= 2;
         this.events.push({ type: 'notify', text: 'Critical strike!' });
       }
+      damage += levelDamage(this.hero, this.stats.level, target.info.id, this.undead);
+      if (s.power) damage *= 2;
       if (this.sneaking && isCalm(target)) {
         damage *= SNEAK_ATTACK;
         this.events.push({ type: 'notify', text: `Sneak attack for ${SNEAK_ATTACK}x damage!` });

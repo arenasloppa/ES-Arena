@@ -36,9 +36,9 @@ screenshots of earlier versions.
   among attributes rolled by Arena's rules on a sheet that shows what the original's does. Arena's paper doll shows you
   as you are so far beside every step, and tries on each class's clothes and gear as you look through them. Your race,
   class and attributes count in play: they set your health, fatigue, damage, pace and how much you can carry, which
-  armour and weapons you can use, and whether you can pick locks; and each race has its gifts from Arena, such as the
-  Redguard's way with weapons, the Khajiit's climbing, the Argonian's swimming and the High Elf's immunity to
-  paralysis.
+  armour and weapons you can use, and whether you can pick locks; and each race and class has its gifts from Arena,
+  such as the Redguard's way with weapons, the Khajiit's climbing, the Argonian's swimming, the High Elf's immunity to
+  paralysis, the Acrobat's leaps and the Ranger's extra damage.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
   find the Shift Gate.
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners

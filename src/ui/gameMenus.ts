@@ -13,7 +13,7 @@
  * or right) to use without opening a menu. The game waits while any of them
  * is open.
  */
-import { experienceFor, POTION_HEALS } from '../game/combat';
+import { experienceFor, knackDamage, POTION_HEALS } from '../game/combat';
 import type { Character, CreationData } from '../game/character';
 import type { Dungeon, MenuEntry } from '../game/dungeon';
 import type { GameMenu } from '../game/engine';
@@ -702,7 +702,9 @@ export class GameMenus {
     data.attributes.forEach((name, i) => attributes.append(el('dt', '', name), el('dd', '', String(c.attributes[i] ?? 0))));
     const next = experienceFor(s.level + 1, hero.experience);
     const [low, high] = s.weapon.damage;
-    const bonus = hero.damageBonus ? ` ${hero.damageBonus > 0 ? '+' : '−'}${Math.abs(hero.damageBonus)}` : '';
+    // Strength, the race's knack and a Ranger's level, as they add to a blow now.
+    const added = hero.damageBonus + knackDamage(hero.knack, s.level, false) + (hero.levelDamage ? s.level : 0);
+    const bonus = added ? ` ${added > 0 ? '+' : '−'}${Math.abs(added)}` : '';
     const rows: Array<[string, string]> = [
       ['Health', `${Math.ceil(s.health)} / ${s.maxHealth}`],
       ['Stamina', `${Math.floor(s.stamina)} / ${s.maxStamina}`],
@@ -713,7 +715,7 @@ export class GameMenus {
       ['Gold', String(s.gold)],
       ['Carrying', `${weight(d.inventory.weight(s.potions))} / ${hero.carry}`],
     ];
-    if (hero.critical > 0) rows.push(['Critical strikes', `${Math.round(hero.critical * 100)}%`]);
+    if (hero.critical > 0) rows.push(['Critical strikes', `${Math.round(hero.critical * 100)}%${hero.criticalWith === 'bows' ? ' with bows' : ''}`]);
     if (hero.lockpicking > 0) rows.push(['Lock picking', `${Math.round(Math.min(0.95, hero.lockpicking + 0.05 * (s.level - 1)) * 100)}%`]);
     const derived = el('dl', 'gm-derived');
     for (const [k, v] of rows) derived.append(el('dt', '', k), el('dd', '', v));

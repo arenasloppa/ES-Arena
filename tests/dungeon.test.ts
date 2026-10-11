@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExeData } from '../src/formats/exe';
 import {
   bodyPart,
+  BODY_PARTS,
   COLD,
   DEFAULT_HERO,
   elementalDamage,
@@ -12,7 +13,9 @@ import {
   experienceFor,
   gainExperience,
   knackDamage,
+  levelDamage,
   maxHealthFor,
+  mayCrit,
   newPlayerStats,
   POISON,
   recover,
@@ -99,9 +102,27 @@ describe('combat rules', () => {
     const nord = { ...saver, resists: COLD, saves: [0, 70, 0, 0, 0] };
     expect(elementalDamage(12, COLD, nord, always(0.5))).toBe(5);
     expect(elementalDamage(12, COLD, nord, always(0.8))).toBe(0);
+    // A Monk takes nothing from a spell saved against.
+    expect(elementalDamage(12, POISON, { ...saver, shrugsOff: true }, always(0.4))).toBe(0);
+    expect(elementalDamage(12, POISON, { ...saver, shrugsOff: true }, always(0.39))).toBe(10);
     // Spells of no element are only lessened by Willpower, which never heals.
     expect(elementalDamage(12, 5, saver, always(0))).toBe(10);
     expect(elementalDamage(1, FIRE, saver, always(0))).toBe(0);
+  });
+
+  it('lets Archers land critical hits only with bows, and everyone else only with other weapons', () => {
+    const lucky = { ...DEFAULT_HERO, critical: 0.1 };
+    expect([mayCrit(lucky, false), mayCrit(lucky, true)]).toEqual([true, false]);
+    const archer = { ...lucky, criticalWith: 'bows' as const };
+    expect([mayCrit(archer, false), mayCrit(archer, true)]).toEqual([false, true]);
+    expect(mayCrit(DEFAULT_HERO, false)).toBe(false);
+  });
+
+  it('adds a Ranger’s level to blows, except on the undead', () => {
+    const ranger = { ...DEFAULT_HERO, levelDamage: true };
+    expect(levelDamage(ranger, 6, 2, [5, 8])).toBe(6);
+    expect(levelDamage(ranger, 6, 5, [5, 8])).toBe(0);
+    expect(levelDamage(DEFAULT_HERO, 6, 2, [5, 8])).toBe(0);
   });
 
   it('picks a swing for each kind of weapon in the game’s list', () => {
@@ -752,6 +773,38 @@ describe('the character in the dungeon', () => {
     };
     expect(blow({ levels: 4, weapons: 'any' })).toMatchObject({ damage: 4 + 2 });
     expect(blow({ levels: 3, weapons: 'bows' })).toMatchObject({ damage: 4 });
+  });
+
+  it('adds a Ranger’s level to blows on all but the undead, and lands an Archer’s critical hits only with bows', () => {
+    const blow = (h: Partial<Hero>, tables = TABLES) => {
+      const d = new Dungeon(arena(), tables, always(0), hero(h));
+      d.stats.level = 5;
+      d.creatures[0].health = d.creatures[0].maxHealth = 30;
+      tick(d, 0.3, click);
+      return { hit: d.events.find((e) => e.type === 'hit'), notes: notes(d.events) };
+    };
+    expect(blow({ levelDamage: true }).hit).toMatchObject({ damage: 4 + 5 });
+    const undead = { ...TABLES, creatures: [fakeCreature({ id: 7, health: [3, 3] })], hits: { bodyParts: BODY_PARTS, undead: [7] } };
+    expect(blow({ levelDamage: true }, undead).hit).toMatchObject({ damage: 4 });
+    // A critical hit doubles the blow before the Ranger's level is added.
+    expect(blow({ levelDamage: true, critical: 1 }).hit).toMatchObject({ damage: 4 * 2 + 5 });
+    const archer = blow({ critical: 1, criticalWith: 'bows' });
+    expect(archer.hit).toMatchObject({ damage: 4 });
+    expect(archer.notes).not.toContain('Critical strike!');
+  });
+
+  it('jumps twice as high as an Acrobat', () => {
+    const peak = (leap: number) => {
+      const d = new Dungeon(arena(), TABLES, always(0.99), hero({ leap }));
+      expect(d.jump()).toBe(true);
+      let top = 0;
+      for (let t = 0; t < 1.5; t += 1 / 200) {
+        d.update(1 / 200, IDLE_INPUT);
+        top = Math.max(top, d.player.z ?? 0);
+      }
+      return top;
+    };
+    expect(peak(2) / peak(1)).toBeCloseTo(2, 1);
   });
 
   it('is paralysed now and then by a Lizard Man’s blow, unless immune, and can do nothing until it wears off', () => {

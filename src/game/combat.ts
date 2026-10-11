@@ -102,6 +102,8 @@ export interface SpellDefence {
   saves: number[];
   /** The element the race takes half of, and none of on a save. */
   resists?: number;
+  /** A Monk: a spell saved against does no harm at all, rather than half. */
+  shrugsOff?: boolean;
 }
 
 /**
@@ -110,8 +112,9 @@ export interface SpellDefence {
  * itself off, then the player saves against the element. A failed save takes
  * the whole damage and a successful one half, but the element the race
  * resists does half on a failed save and none on a successful one (Nords
- * and cold, Bretons and magic). Spells of no element are only lessened by
- * Willpower.
+ * and cold, Bretons and magic). A Monk takes nothing from any spell saved
+ * against, as the manual says (Arena's program leaves that out). Spells of
+ * no element are only lessened by Willpower.
  */
 export function elementalDamage(damage: number, element: number, t: SpellDefence, random: Random): number {
   damage = Math.max(0, damage - Math.floor(t.willpower / 26));
@@ -119,7 +122,7 @@ export function elementalDamage(damage: number, element: number, t: SpellDefence
   const failed = Math.floor(random() * 100) < (t.saves[element] ?? 0);
   const resisted = element === t.resists;
   if (failed) return resisted ? Math.floor(damage / 2) : damage;
-  return resisted ? 0 : Math.floor(damage / 2);
+  return resisted || t.shrugsOff ? 0 : Math.floor(damage / 2);
 }
 
 export interface Weapon {
@@ -178,22 +181,26 @@ export interface Hero {
   damageBonus: number;
   /** The race's knack with weapons, adding to blows as the character rises in level. */
   knack?: WeaponKnack;
+  /** A Ranger: blows do as much more damage as the character's level, except to the undead. */
+  levelDamage: boolean;
   /** Agility on Arena's scale of 0 to 255: the quicker the character, the fewer blows land (see hitChance). */
   agility: number;
   /** A Monk or Acrobat, hard to hit and harder with each level (see hitChance). */
   evasive: boolean;
-  /** Willpower on Arena's scale, the save against each element and the element the race resists (see elementalDamage). */
+  /** Willpower on Arena's scale, the save against each element, the element the race resists, and whether a save spares a Monk all harm (see elementalDamage). */
   willpower: number;
   saves: number[];
   resists?: number;
+  shrugsOff?: boolean;
   /** Chance out of 100 that a blow which can paralyse does: Arena's poison save, and none for those immune to paralysis. */
   paralysis: number;
   /** Multiplies walking and running speed. */
   pace: number;
   /** Multiplies how fast stamina comes back. */
   recovery: number;
-  /** Chance that a blow is a critical hit, doing double damage. */
+  /** Chance that a blow is a critical hit, doing double damage, and the weapons it can be with: an Archer's bows, everyone else's the others. */
   critical: number;
+  criticalWith: 'melee' | 'bows';
   /** Chance to pick an easy lock; 0 for classes that can't. */
   lockpicking: number;
   /** Multiplies the gold found. */
@@ -209,6 +216,8 @@ export interface Hero {
   swimTiring: number;
   /** How many times faster than others the character climbs out of a pit: Khajiit and Acrobats four times. */
   climbPace: number;
+  /** How many times as high, and as long, the character's jumps go: an Acrobat's twice. */
+  leap: number;
   /** Endurance's heal mod, for healing while camping (camping.ts). */
   healMod?: number;
   /** Gold rolled at creation, when the character has some. */
@@ -223,6 +232,7 @@ export const DEFAULT_HERO: Hero = {
   healthBonus: 3,
   experience: 1000,
   damageBonus: 0,
+  levelDamage: false,
   agility: MIDDLING_AGILITY,
   evasive: false,
   willpower: MIDDLING_AGILITY,
@@ -231,6 +241,7 @@ export const DEFAULT_HERO: Hero = {
   pace: 1,
   recovery: 1,
   critical: 0,
+  criticalWith: 'melee',
   lockpicking: 0,
   fortune: 1,
   carry: 200,
@@ -239,6 +250,7 @@ export const DEFAULT_HERO: Hero = {
   swimPace: 0.5,
   swimTiring: 1,
   climbPace: 1,
+  leap: 1,
 };
 
 export const POTION_HEALS = 25;
@@ -344,6 +356,16 @@ export function drinkPotion(p: PlayerStats): boolean {
   p.potions--;
   p.health = Math.min(p.maxHealth, p.health + POTION_HEALS);
   return true;
+}
+
+/** Whether a blow with a bow, or with another weapon, may be a critical hit (see Hero.criticalWith). */
+export function mayCrit(hero: Hero, bow: boolean): boolean {
+  return hero.critical > 0 && (hero.criticalWith === 'bows') === bow;
+}
+
+/** What a Ranger's level adds to a blow on a creature: nothing on the undead (by the creature's number), nor for anyone else. */
+export function levelDamage(hero: Hero, level: number, creature: number | undefined, undead: number[]): number {
+  return hero.levelDamage && !(creature !== undefined && undead.includes(creature)) ? level : 0;
 }
 
 /** Chance per blow that bashing a locked door breaks it open. */

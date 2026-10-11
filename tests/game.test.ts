@@ -284,6 +284,23 @@ describe('heights', () => {
     expect(p.z).toBe(0);
   });
 
+  it('jumps twice as high and twice as long for an Acrobat', () => {
+    const level = textLevel(['#####', '#@..#', '#####']);
+    const p: PlayerState = { x: 1.5, y: 1.5, yaw: 0, pitch: 0 };
+    expect(jump(level, p, 2)).toBe(true);
+    let peak = 0;
+    let t = 0;
+    while (t < 2 && (t === 0 || airborne(level, p))) {
+      settle(level, p, 1 / 240);
+      peak = Math.max(peak, p.z ?? 0);
+      t += 1 / 240;
+    }
+    expect(peak).toBeCloseTo(2 * JUMP_HEIGHT, 2);
+    expect(t).toBeCloseTo(2 * JUMP_TIME, 1);
+    // The next jump is an ordinary one unless asked for again.
+    expect(p.leap).toBeUndefined();
+  });
+
   it('steps up onto a low platform and stands on it, but not onto a tall one', () => {
     const level = textLevel(['######', '#@..R#', '######']);
     const low = level.cells[1 * 6 + 4];
