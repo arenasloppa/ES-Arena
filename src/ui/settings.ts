@@ -7,18 +7,19 @@ import type { StepEvent } from './menu';
 
 const KEY = 'es-arena.controls';
 
-type NumberSetting = 'lookSpeed' | 'volume';
+type NumberSetting = 'lookSpeed' | 'volume' | 'music';
 
 /**
  * Number settings go in steps: look speed in fifths from 0.2 to 2 times the
- * normal speed, volume in tenths from off to full.
+ * normal speed, sound and music volume in tenths from off to full.
  */
 const STEPS: Record<NumberSetting, { min: number; max: number; per: number }> = {
   lookSpeed: { min: 1, max: 10, per: 5 },
   volume: { min: 0, max: 10, per: 10 },
+  music: { min: 0, max: 10, per: 10 },
 };
 
-export const DEFAULT_SETTINGS: ControlSettings = { lookSpeed: 1, invertLook: false, vibration: true, volume: 0.8 };
+export const DEFAULT_SETTINGS: ControlSettings = { lookSpeed: 1, invertLook: false, vibration: true, volume: 0.8, music: 0.6, intro: true };
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -46,6 +47,8 @@ export function loadSettings(storage = browserStorage()): ControlSettings {
     invertLook: saved.invertLook === true,
     vibration: saved.vibration !== false,
     volume: number('volume'),
+    music: number('music'),
+    intro: saved.intro !== false,
   };
 }
 

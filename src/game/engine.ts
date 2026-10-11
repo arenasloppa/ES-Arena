@@ -108,6 +108,10 @@ export interface ControlSettings {
   vibration: boolean;
   /** Sound volume, 0 to 1. */
   volume: number;
+  /** Music volume, 0 to 1. */
+  music: number;
+  /** Plays Arena's opening cutscenes when the game folder is opened. */
+  intro: boolean;
 }
 
 export interface EngineOptions {
@@ -196,7 +200,7 @@ export class Engine {
   ) {
     this.canvas = renderer.domElement;
     this.autopilot = options.autopilot ?? false;
-    this.controls = options.controls ?? { lookSpeed: 1, invertLook: false, vibration: true, volume: 1 };
+    this.controls = options.controls ?? { lookSpeed: 1, invertLook: false, vibration: true, volume: 1, music: 1, intro: true };
     const canvas = this.canvas;
     this.scene.background = new THREE.Color(0x000000);
     // Arena's dungeons fade to black a few voxels away.

@@ -16,6 +16,7 @@ import {
   type FileSource,
 } from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
+import { MusicPlayer, SONGS } from './audio/music';
 import { SoundBank } from './audio/sound';
 import { parseClassAnswers, parseNameChunks, parseQuestions, type ClassChooser, type Question } from './formats/creation';
 import { readExeData, type ExeData } from './formats/exe';
@@ -39,6 +40,7 @@ import { SpellView } from './render/spellView';
 import { backdropLevel } from './render/backdrop';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { CharacterCreation } from './ui/creation';
+import { Cutscenes, deathVision, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
 import { GameMenus } from './ui/gameMenus';
 import { Hud } from './ui/hud';
 import { MenuNav } from './ui/menu';
@@ -73,6 +75,10 @@ let tables: ExeData | null | undefined;
 /** The game's spells; undefined until first needed. */
 let spells: SpellRecord[] | undefined;
 let sounds: SoundBank | undefined;
+/** Arena's music, played on an emulated AdLib with the game's own instruments. */
+let music: MusicPlayer | undefined;
+/** The opening plays once a visit, when the folder is first opened. */
+let openingShown = false;
 /** The paper doll and item pictures, read from the game folder. */
 let portraits: Portraits | undefined;
 /** Classes, races, questions and words for making a character, once read from the game folder. */
@@ -104,6 +110,23 @@ const screens: Record<Screen, HTMLElement> = {
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
 const creator = new CharacterCreation(screens.create);
+const cutscenes = new Cutscenes($('cutscene'), pad, () => data, () => sounds);
+input.onChange(() => input.render($('cutscene')));
+input.render($('cutscene'));
+
+/** Plays cutscenes over everything, with a song; the menu's focus comes back after. */
+async function showCutscene(shots: Parameters<Cutscenes['play']>[0], song?: string) {
+  if (song) music?.play(song);
+  await cutscenes.play(shots);
+  nav.focusFirst();
+}
+
+/** The character's first name, as the game's texts address them. */
+const firstName = (c: Character) => c.name.trim().split(/\s+/)[0] ?? c.name;
+if (import.meta.env.DEV) {
+  (window as unknown as { arenaVision?: (name: string, death?: boolean) => Promise<void> }).arenaVision = (name, death) =>
+    showCutscene(death ? deathVision(name) : firstVision(name), SONGS.vision);
+}
 
 const nav = new MenuNav(menu, pad, input, {
   back: () => {
@@ -121,6 +144,8 @@ function showScreen(next: Screen) {
   screen = next;
   for (const [name, el] of Object.entries(screens)) el.hidden = name !== next;
   menu.dataset.screen = next;
+  // The main menu's song, unless a map is being played (its music carries on under the pause menu) or a character is being made.
+  if (!playing() && next !== 'create') music?.play(SONGS.menu);
   updateHints();
   nav.focusFirst();
 }
@@ -235,18 +260,25 @@ async function enterDungeon(name: string) {
   else await createCharacter(name);
 }
 
-/** Opens character creation; the new character then plays the map. */
+/**
+ * Opens character creation, after the story of how the Emperor was betrayed,
+ * as a new game does in Arena; the new character then has Ria Silmane's
+ * vision and plays the map.
+ */
 async function createCharacter(map: string) {
   const made = await creationFor();
   if (!made) return;
+  await showCutscene(NEW_GAME, SONGS.story);
   showScreen('create');
+  music?.play(SONGS.creation);
   creator.start({
     data: made,
     weapons: tables?.weapons ?? [],
     portraits,
     finish: 'Enter the dungeon',
-    done: (character) => {
+    done: async (character) => {
       saveCharacter(character, made.classes[character.cls]);
+      await showCutscene(firstVision(firstName(character)), SONGS.vision);
       void startMap(map, character);
     },
     cancel: () => showScreen('play'),
@@ -334,6 +366,7 @@ async function startMap(name: string, character: Character) {
     };
     setEngine(next, name);
     runCharacter = character;
+    music?.play(SONGS.dungeons);
     textures = cache;
     $('map-name').textContent = level.name || name;
     if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
@@ -424,8 +457,10 @@ function pause() {
   }
 }
 
-function died() {
+async function died() {
   const d = engine!.dungeon;
+  // Ria Silmane says farewell, as in Arena.
+  if (runCharacter) await showCutscene(deathVision(firstName(runCharacter)), SONGS.vision);
   $('dead-notes').textContent = d.kills
     ? `You fell after ${d.kills === 1 ? 'one kill' : `${d.kills} kills`}, ${formatTime(d.time)} into the dungeon.`
     : `You fell ${formatTime(d.time)} into the dungeon.`;
@@ -474,7 +509,8 @@ let padWasConnected = false;
 function uiFrame(now: number) {
   pad.poll(now);
   input.update(pad);
-  if (!menu.hidden) nav.frame(now);
+  if (cutscenes.isPlaying) cutscenes.frame();
+  else if (!menu.hidden) nav.frame(now);
   else if (gameMenus.isOpen) gameMenus.frame(now);
   // Like Skyrim, pause if the controller goes away mid-game.
   else if (padWasConnected && !pad.connected && playing()) pause();
@@ -523,6 +559,11 @@ async function useSource(source: FileSource): Promise<boolean> {
     sounds = new SoundBank(data);
     sounds.setVolume(settings.volume);
     sounds.wake();
+    music?.play(undefined);
+    music = new MusicPlayer(data);
+    music.setVolume(settings.music);
+    music.wake();
+    if (import.meta.env.DEV) (window as unknown as { arenaMusic?: MusicPlayer }).arenaMusic = music;
   } catch (err) {
     folderError.textContent = `Could not read the game data: ${(err as Error).message}`;
     folderError.hidden = false;
@@ -543,6 +584,11 @@ async function useSource(source: FileSource): Promise<boolean> {
   setStatus(`Found ${data.bsa.entries.length} files in GLOBAL.BSA.`);
   // Read the classes now, to say who plays and to have character creation ready.
   void creationFor().then(updatePlayOptions);
+  music.play(SONGS.menu);
+  if (settings.intro && !openingShown) {
+    openingShown = true;
+    await showCutscene(OPENING);
+  }
   return true;
 }
 
@@ -631,6 +677,7 @@ folderInput.addEventListener('change', async () => {
 });
 
 $('change-folder').addEventListener('click', () => {
+  music?.play(undefined);
   setEngine(undefined);
   void showBackdrop();
   data = undefined;
@@ -649,6 +696,7 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-back]')) {
   el.addEventListener('click', () => showScreen(screenBeforeControls));
 }
 
+$('watch-intro').addEventListener('click', () => void showCutscene(OPENING, playing() ? undefined : SONGS.menu));
 resumeButton.addEventListener('click', resume);
 mapButton.addEventListener('click', openMap);
 playButton.addEventListener('click', () => enterDungeon(mapSelect.value));
@@ -661,9 +709,19 @@ mapSelect.addEventListener('choose', () => enterDungeon(mapSelect.value));
 
 bindSettingRows(screens.controls, settings, (key) => {
   if (key === 'volume') sounds?.setVolume(settings.volume);
+  if (key === 'music') music?.setVolume(settings.music);
 });
 // Browsers start sound only after a click or key press.
-for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, () => sounds?.wake(), true);
+for (const type of ['pointerdown', 'keydown']) {
+  window.addEventListener(
+    type,
+    () => {
+      sounds?.wake();
+      music?.wake();
+    },
+    true,
+  );
+}
 fillBindings();
 showScreen('folder');
 void showBackdrop();

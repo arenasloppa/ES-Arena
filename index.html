@@ -130,6 +130,7 @@
             </span>
           </div>
           <button class="option" data-screen="controls">Controls</button>
+          <button id="watch-intro" class="option">Watch the opening</button>
           <button id="change-folder" class="option">Change folder</button>
           <button class="option quit" hidden>Quit</button>
         </nav>
@@ -169,6 +170,23 @@
             <span class="row-value">
               <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
               <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option option-row" data-setting="music">
+            <span class="row-label">Music volume</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option option-row" data-setting="intro">
+            <span class="row-label">Opening cutscenes</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
               <span class="value"></span>
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
@@ -224,6 +242,15 @@
         <span class="hint" id="hint-back"><span data-glyph="back"></span><span id="hint-back-label">Back</span></span>
       </footer>
     </main>
+
+    <div id="cutscene" role="dialog" aria-label="Cutscene" hidden>
+      <canvas aria-hidden="true"></canvas>
+      <p class="cutscene-text" aria-live="polite"></p>
+      <footer class="hints cutscene-hints" aria-hidden="true">
+        <span class="hint"><span data-glyph="select"></span>Next</span>
+        <span class="hint"><span data-glyph="back"></span>Skip</span>
+      </footer>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -14,6 +14,14 @@ Magic, with Arena's own spells.
 - Bolts fly glowing in their element's colour and burst where they land; Fireball and the like catch everything near the burst, and touch spells work on the creature in reach.
 - A magicka bar at the bottom left, as in Skyrim, with the readied spell and its cost above it and the spells working on you, such as a shield's points left.
 
+Music and cutscenes.
+
+- Arena's music, as it sounded on an AdLib or Sound Blaster in 1994: the remake emulates the FM chip and its sound driver, and plays the game's own songs with the game's own instruments (SAMPLE.AD). The main menu plays its theme, character creation its own, Ria Silmane's visions theirs, and each dungeon one of Arena's five dungeon songs. Set the music's volume on the Controls screen.
+- The opening when you open your Arena folder: the book, the title, the quote and the scroll of how the Empire came to be. Turn it off on the Controls screen, or watch it again from the main menu.
+- Before a new character, the scroll and the nine pages of how Jagar Tharn betrayed the Emperor.
+- After making your character, Ria Silmane's vision in your cell, and her farewell when you die, in her own voice from the CD version, with her words beneath and your name in them.
+- In a cutscene, Enter, Space, a click or A goes on to the next picture or line, and Esc, B or Start skips the rest.
+
 ## 0.4.1 (2026-10-11)
 
 Skyrim's plus-shaped menu, and a steady map in character creation.

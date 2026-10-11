@@ -83,6 +83,41 @@ export class SoundBank {
     });
   }
 
+  /**
+   * Plays a voice, such as Ria Silmane's lines in a vision, at full volume
+   * and not from anywhere in particular. `done` settles when it ends, at
+   * once if it can't be played; stop() cuts it short.
+   */
+  speak(name: string): { done: Promise<boolean>; stop(): void } {
+    let source: AudioBufferSourceNode | undefined;
+    let stopped = false;
+    const ctx = this.files.has(name) ? this.audio() : undefined;
+    const done = !ctx || ctx.state !== 'running' || this.volume <= 0
+      ? Promise.resolve(false)
+      : this.buffer(name).then(
+          (buffer) =>
+            new Promise<boolean>((resolve) => {
+              if (!buffer || !this.output || stopped) return resolve(false);
+              source = ctx.createBufferSource();
+              source.buffer = buffer;
+              source.connect(this.output);
+              source.onended = () => resolve(true);
+              source.start();
+            }),
+        );
+    return {
+      done,
+      stop: () => {
+        stopped = true;
+        try {
+          source?.stop();
+        } catch {
+          // not started yet
+        }
+      },
+    };
+  }
+
   private audio(): AudioContext | undefined {
     if (!this.context) {
       try {
