@@ -32,6 +32,7 @@ export interface CutsceneFiles {
 
 /** Ria Silmane's blue and Jagar Tharn's gold, as the game colours their words. */
 export const RIA = 'rgb(105, 174, 207)';
+export const JAGAR = 'rgb(251, 207, 8)';
 export const THARN = 'rgb(251, 207, 8)';
 
 /** Seconds a page of a vision shows without a voice: enough to read it. */
@@ -272,6 +273,14 @@ export function dreamVisions(visions: Vision[], firstName: string): Shot[] {
   );
 }
 
-export function deathVision(firstName: string): Shot[] {
-  return [{ kind: 'vision', file: 'VISION.FLC', text: '1402', name: firstName, colour: RIA }];
+/**
+ * The vision on dying: Ria Silmane's farewell (#1402), or, once the player
+ * holds a piece of the Staff of Chaos, Jagar Tharn's taunt (JAGAR.FLC, #1403)
+ * as the wikis describe. The Imperial Dungeons hold no piece, so there it is
+ * always Ria's.
+ */
+export function deathVision(firstName: string, staffPieces = 0): Shot[] {
+  return staffPieces > 0
+    ? [{ kind: 'vision', file: 'JAGAR.FLC', text: '1403', name: firstName, colour: JAGAR }]
+    : [{ kind: 'vision', file: 'VISION.FLC', text: '1402', name: firstName, colour: RIA }];
 }

@@ -37,6 +37,7 @@ Camping and Ria's dreams.
 - Each hour of rest, monsters may come upon you: 20 percent an hour in the Imperial Dungeons, from the game's own encounter tables, by Arena's rules for which monsters and how many, appearing on open floor around you. If they're close, "There are enemies nearby..." and the rest is over. Encounters of people rather than creatures bring nobody yet, as the remake has no human foes so far.
 - The first rest after reaching level 2 brings Ria Silmane to your dreams, as UESP describes: the Staff of Chaos (STAFF.FLC, the game's text #1500 in her voice), then where its first piece lies, Fang Lair (#1294). As in the original, a player who reaches level 3 before resting only hears of Fang Lair.
 - The map moves to the menu of menus on a controller, as in Skyrim, where View is the wait button.
+- Every cutscene is checked against the original's order (OpenTESArena's): the opening (book, title, quote, scroll), the story before a new character, Ria's vision after making one, her dreams, and on death her farewell, or Jagar Tharn's taunt once the player holds a piece of the Staff (none can in the Imperial Dungeons). Leaving the Imperial Dungeons plays nothing in Arena either; it takes you to a town of your home province, which the remake doesn't have yet.
 
 Character creation by Arena's rules.
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FlcFormatError, parseFlc } from '../src/formats/flc';
 import { fillTemplate, pages, parseTemplates } from '../src/formats/template';
-import { deathVision, firstVision, NEW_GAME, OPENING } from '../src/ui/cutscene';
+import { deathVision, dreamVisions, firstVision, NEW_GAME, OPENING } from '../src/ui/cutscene';
 
 // ---- A made-up 4x2 FLC; none of it comes from the game ----
 
@@ -82,5 +82,12 @@ describe('the cutscenes', () => {
     expect(NEW_GAME.filter((s) => s.kind === 'picture')).toHaveLength(9);
     expect(firstVision('Ysolda')).toEqual([expect.objectContaining({ file: 'VISION.FLC', text: '1400', name: 'Ysolda' })]);
     expect(deathVision('Ysolda')).toEqual([expect.objectContaining({ text: '1402' })]);
+    // With a piece of the Staff, Jagar Tharn instead.
+    expect(deathVision('Ysolda', 1)).toEqual([expect.objectContaining({ file: 'JAGAR.FLC', text: '1403' })]);
+    // Ria's dreams: the Staff over its own animation, then Fang Lair.
+    expect(dreamVisions(['staffIntro', 'fangLair'], 'Ysolda')).toEqual([
+      expect.objectContaining({ file: 'STAFF.FLC', text: '1500', name: 'Ysolda' }),
+      expect.objectContaining({ file: 'VISION.FLC', text: '1294' }),
+    ]);
   });
 });
