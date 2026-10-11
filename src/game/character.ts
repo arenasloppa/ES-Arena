@@ -12,7 +12,7 @@
 import type { CharacterTables, ClassInfo, CreationTexts, RaceInfo } from '../formats/classes';
 import type { ClassChooser, Question } from '../formats/creation';
 import { roll, type Hero, type Random } from './combat';
-import { startingMagicka } from './magic';
+import { regainsMagicka, startingMagicka } from './magic';
 
 export type Gender = 'male' | 'female';
 
@@ -209,6 +209,7 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     fortune: Math.max(0.5, 1 + 0.1 * bonus(LUCK)),
     carry: 100 + 2 * a[STRENGTH],
     magicka: startingMagicka(cls, a[INTELLIGENCE]),
+    regainsMagicka: regainsMagicka(cls),
   };
 }
 

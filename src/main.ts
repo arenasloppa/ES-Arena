@@ -19,6 +19,7 @@ import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle
 import { SoundBank } from './audio/sound';
 import { parseClassAnswers, parseNameChunks, parseQuestions, type ClassChooser, type Question } from './formats/creation';
 import { readExeData, type ExeData } from './formats/exe';
+import { parseSpells, type SpellRecord } from './formats/spells';
 import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
@@ -34,6 +35,7 @@ import { buildLevelScene } from './render/levelScene';
 import { MapView } from './render/mapView';
 import { Portraits } from './render/portrait';
 import { WeaponView } from './render/weaponView';
+import { SpellView } from './render/spellView';
 import { backdropLevel } from './render/backdrop';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { CharacterCreation } from './ui/creation';
@@ -68,6 +70,8 @@ const settings = loadSettings();
 let data: GameData | undefined;
 /** Creature and weapon tables from the game's program, once read; null when they could not be. */
 let tables: ExeData | null | undefined;
+/** The game's spells; undefined until first needed. */
+let spells: SpellRecord[] | undefined;
 let sounds: SoundBank | undefined;
 /** The paper doll and item pictures, read from the game folder. */
 let portraits: Portraits | undefined;
@@ -274,6 +278,16 @@ async function loadTables(game: GameData): Promise<ExeData | null> {
   return null;
 }
 
+/** The game's spells, from SPELLSG.65; none when it can't be read, and then nobody casts. */
+async function loadSpells(game: GameData): Promise<SpellRecord[]> {
+  try {
+    return parseSpells(await game.read('SPELLSG.65'));
+  } catch (err) {
+    console.warn('Could not read the spells from SPELLSG.65:', err);
+    return [];
+  }
+}
+
 async function startMap(name: string, character: Character) {
   if (!data || !creationLoaded) return;
   const made = creationLoaded;
@@ -291,8 +305,9 @@ async function startMap(name: string, character: Character) {
     if (name === DEFAULT_MAP) level.name = 'Imperial Dungeons';
     const palette = parseCol(await data.read('PAL.COL'));
     if (tables === undefined) tables = await loadTables(data);
+    if (spells === undefined) spells = await loadSpells(data);
     const cache = new TextureCache(data, palette);
-    const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]));
+    const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
     const scene = await buildLevelScene(level, cache);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem));
     const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => cache.screenImages(file));
@@ -307,6 +322,7 @@ async function startMap(name: string, character: Character) {
       sounds,
       map: new MapView(dungeon, scene.material, $('map-north')),
       minimap: new Minimap($<HTMLCanvasElement>('minimap'), dungeon),
+      spells: new SpellView(),
     });
     next.onPause = pause;
     next.onMenu = openGameMenu;
@@ -500,6 +516,7 @@ async function useSource(source: FileSource): Promise<boolean> {
   try {
     data = await GameData.open(source);
     tables = undefined;
+    spells = undefined;
     creation = undefined;
     creationLoaded = undefined;
     portraits = new Portraits(data);

@@ -4,6 +4,7 @@ import type { GamepadInput } from '../input/gamepad';
 import type { CreatureView } from '../render/creatureView';
 import type { LevelScene } from '../render/levelScene';
 import type { MapView } from '../render/mapView';
+import { spellColour, type SpellView } from '../render/spellView';
 import type { WeaponView } from '../render/weaponView';
 import type { Minimap } from '../ui/minimap';
 import { isAlive } from './creatures';
@@ -30,6 +31,9 @@ const DEATH_FADE = 1.3;
 const ESCAPE_SCREEN = 1.1;
 /** Creatures hunting the player show on the compass this far away. */
 const COMPASS_RANGE = 16;
+/** The fog: where it begins and where it hides everything, in voxels, before a Light spell lengthens both. */
+const FOG_NEAR = 1.5;
+const FOG_FAR = 9;
 
 /** Something in front of the player that they can use, as the HUD shows it. */
 export interface HudTarget {
@@ -44,6 +48,16 @@ export interface Vitals {
   maxHealth: number;
   stamina: number;
   maxStamina: number;
+  /** Spell points; a max of 0 hides the bar. */
+  magicka: number;
+  maxMagicka: number;
+}
+
+/** The spell in hand, as the HUD shows it. */
+export interface ReadiedSpell {
+  name: string;
+  cost: number;
+  colour: string;
 }
 
 /** The menus over the game: Skyrim's menu of menus, the item and magic menus, the character sheet and the favourites. */
@@ -75,6 +89,14 @@ export interface EngineHud {
   detection(level: number | undefined): void;
   /** Darkens the screen to `opacity` over `seconds`. */
   fade(opacity: number, seconds: number): void;
+  /** The spell in hand, or none. */
+  readied(spell: ReadiedSpell | undefined): void;
+  /** A spell cast: the hand glows. */
+  cast(colour: string): void;
+  /** Too few spell points: the magicka bar flashes. */
+  noMagicka(): void;
+  /** The spells working on the player, such as "Shield (12)". */
+  effects(names: string[]): void;
 }
 
 /** The player's settings; shared with the menu, which changes them while the game runs. */
@@ -99,6 +121,7 @@ export interface EngineOptions {
   sounds?: SoundBank;
   map?: MapView;
   minimap?: Minimap;
+  spells?: SpellView;
 }
 
 /**
@@ -150,6 +173,8 @@ export class Engine {
   private deathShown = false;
   private deathFaded = false;
   private escapedAt: number | undefined;
+  private readiedKey = '';
+  private effectsKey = '';
   onPause?: () => void;
   /** The player asked for one of the menus over the game. */
   onMenu?: (which: GameMenu) => void;
@@ -175,9 +200,10 @@ export class Engine {
     const canvas = this.canvas;
     this.scene.background = new THREE.Color(0x000000);
     // Arena's dungeons fade to black a few voxels away.
-    this.scene.fog = new THREE.Fog(0x000000, 1.5, 9);
+    this.scene.fog = new THREE.Fog(0x000000, FOG_NEAR, FOG_FAR);
     this.scene.add(levelScene.group);
     if (options.creatures) this.scene.add(options.creatures.group);
+    if (options.spells) this.scene.add(options.spells.group);
     this.resize();
 
     window.addEventListener('resize', this.resize);
@@ -228,6 +254,7 @@ export class Engine {
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('mouseup', this.onMouseUp);
     this.options.map?.dispose();
+    this.options.spells?.dispose();
     const textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -364,7 +391,18 @@ export class Engine {
     const hud = this.options.hud;
     if (hud) {
       const s = d.stats;
-      hud.vitals({ health: s.health, maxHealth: s.maxHealth, stamina: s.stamina, maxStamina: s.maxStamina });
+      hud.vitals({ health: s.health, maxHealth: s.maxHealth, stamina: s.stamina, maxStamina: s.maxStamina, magicka: s.magicka, maxMagicka: s.maxMagicka });
+      const spell = d.readied;
+      const readiedKey = spell ? `${spell.index}:${d.spellCost(spell)}` : '';
+      if (readiedKey !== this.readiedKey) {
+        this.readiedKey = readiedKey;
+        hud.readied(spell && { name: spell.name, cost: d.spellCost(spell), colour: spellColour(spell) });
+      }
+      const effects = d.activeEffects();
+      if (effects.join('|') !== this.effectsKey) {
+        this.effectsKey = effects.join('|');
+        hud.effects(effects);
+      }
       hud.detection(d.sneaking ? d.detection() : undefined);
       this.showTarget();
     }
@@ -417,6 +455,16 @@ export class Engine {
         case 'bashed':
           hud?.enemy(e.creature.info.name, e.creature.health, e.creature.maxHealth);
           this.rumble(110, 0.4, 0.2);
+          break;
+        case 'cast':
+          hud?.cast(spellColour(e.spell));
+          this.rumble(70, 0.15, 0.35);
+          break;
+        case 'burst':
+          this.options.spells?.burst(e.spell, e.at.x, e.at.y, this.eye * d.level.height * 0.85, e.radius);
+          break;
+        case 'noMagicka':
+          hud?.noMagicka();
           break;
         case 'levelUp':
           hud?.banner(`Level ${e.level}`, 'Level up', `Health +${e.health} · Stamina +${e.stamina}`);
@@ -491,6 +539,12 @@ export class Engine {
       b.rotation.y = Math.atan2(this.camera.position.x - b.position.x, this.camera.position.z - b.position.z);
     }
     this.options.creatures?.update(this.camera.position);
+    this.options.spells?.update(d.bolts, eye * 0.85, dt);
+    // A Light spell lets the player see further into the dark.
+    const fog = this.scene.fog as THREE.Fog;
+    const reach = d.lightReach;
+    fog.near += (FOG_NEAR * reach - fog.near) * Math.min(1, dt * 2);
+    fog.far += (FOG_FAR * reach - fog.far) * Math.min(1, dt * 2);
     const lowered = this.diedAt === undefined ? 0 : Math.min(1, (d.time - this.diedAt) / 0.8);
     this.options.weapon?.draw(d.stats.weapon.cif, { swing: d.swing, walked: d.walked, lowered, guard: d.blocking, dt });
     this.options.minimap?.draw();

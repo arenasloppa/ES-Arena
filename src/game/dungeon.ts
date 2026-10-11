@@ -14,8 +14,16 @@
  * hard they hit, how often they are hit, how fast they move and more.
  * Monster stats, weapon damage and sounds come from the player's own game;
  * the loot rules are the remake's own.
+ *
+ * Magic works as in Skyrim's hands with Arena's spells (see magic.ts): a
+ * spell readied from the magic menu takes the place of the guard, so the
+ * block button casts it. Spells on the caster work at once, touch spells on
+ * the creature in reach, and the rest fly as a bolt that bursts on what it
+ * hits; area spells catch every creature near the burst. How fast bolts
+ * fly and how wide the areas are is the remake's own.
  */
 import type { ExeData, WeaponInfo } from '../formats/exe';
+import type { SpellRecord } from '../formats/spells';
 import {
   bashChance,
   DEFAULT_HERO,
@@ -35,6 +43,7 @@ import {
   hurtCreature,
   isAlive,
   isCalm,
+  paralyseCreature,
   spawnCreature,
   staggerCreature,
   updateCreature,
@@ -43,10 +52,43 @@ import {
   type CreatureWorld,
 } from './creatures';
 import { Exploration } from './explore';
+import {
+  castable,
+  CAUSE,
+  CAUSE_PARALYSIS,
+  CAUSE_POISON,
+  chance,
+  CONTINUOUS_DAMAGE,
+  CONTINUOUS_EVERY,
+  CREATE,
+  DAMAGE,
+  DAMAGE_HEALTH,
+  duration,
+  HEAL,
+  HEALTH,
+  INVISIBILITY,
+  LIGHT,
+  lightReach,
+  magickaCost,
+  magnitude,
+  nextSpell,
+  NON_TARGET,
+  offensive,
+  OPEN,
+  poisonDamage,
+  recoverMagicka,
+  REGENERATE,
+  regeneration,
+  ROUND,
+  spellKey,
+  startingSpells,
+  TRANSFER,
+  amount,
+} from './magic';
 import { armourReduce, Inventory, itemKey, POTION, randomGear, startingGear, weaponOf, type Item, type NewItem } from './items';
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
-import type { Level, LevelItem } from './level';
+import { isBlocking, type Level, type LevelItem } from './level';
 import { PLAYER_RADIUS, step, type Body, type PlayerState } from './player';
 
 export interface DoorState {
@@ -85,9 +127,10 @@ export interface MenuEntry {
   /** What use(), favourite() and setHotkey() take. */
   key: string;
   name: string;
-  category: 'weapons' | 'apparel' | 'potions' | 'misc';
+  category: 'weapons' | 'apparel' | 'potions' | 'misc' | 'spells';
   count: number;
   item?: Item;
+  spell?: SpellRecord;
   equipped: boolean;
   favourite: boolean;
   /** The number key it is on, 0 for 1. */
@@ -119,6 +162,12 @@ export type DungeonEvent =
   | { type: 'hit'; creature: Creature; damage: number; killed: boolean }
   | { type: 'bashed'; creature: Creature }
   | { type: 'levelUp'; level: number; health: number; stamina: number }
+  /** A spell cast; the engine plays the cast and flashes the hand. */
+  | { type: 'cast'; spell: SpellRecord }
+  /** A spell bursting where it hit; `radius` is the area it catches, 0 for one creature. */
+  | { type: 'burst'; spell: SpellRecord; at: { x: number; y: number }; radius: number }
+  /** Not enough spell points to cast; the HUD flashes the magicka bar. */
+  | { type: 'noMagicka' }
   | { type: 'questStarted'; name: string }
   | { type: 'objective'; text: string; done: boolean }
   /** Every creature in the dungeon is dead. */
@@ -188,6 +237,40 @@ const DEFAULT_WEAPON: Weapon = { name: 'Shortsword', damage: [2, 6], cif: 'SWORD
 /** A character of their own starts with these, as well as their gear. */
 const START_POTIONS = 1;
 const START_GOLD = 25;
+/** Seconds after casting before another spell can be cast. */
+const CAST_TIME = 0.7;
+/** Spell bolts fly this many voxels a second, and give up this far away. */
+const BOLT_SPEED = 7;
+const BOLT_RANGE = 25;
+export const BOLT_RADIUS = 0.12;
+/** How far a spell's area reaches from its burst, and from the caster. */
+export const AREA_RADIUS = 1.5;
+export const AREA_AROUND_CASTER = 2.5;
+/** Touch spells, and the Open spell, reach this far. */
+const TOUCH_REACH = 1.4;
+const OPEN_REACH = 2.5;
+
+/** A spell flying through the dungeon. */
+export interface Bolt {
+  id: number;
+  spell: SpellRecord;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  travelled: number;
+}
+
+/** Harm a spell keeps doing to a creature: poison or continuous damage, a blow every so many seconds. */
+interface Affliction {
+  creature: Creature;
+  spell: SpellRecord;
+  /** Damage of each blow: a fixed number, or the effect to roll. */
+  damage: number | SpellRecord['effects'][number];
+  every: number;
+  next: number;
+  until: number;
+}
 
 export class Dungeon {
   readonly player: PlayerState;
@@ -216,6 +299,12 @@ export class Dungeon {
   readonly quest?: Quest;
   /** The gear the player carries and wears. */
   readonly inventory: Inventory;
+  /** The spells the player knows, cheapest first. */
+  readonly spellbook: SpellRecord[] = [];
+  /** The spell in hand, cast with the block button. */
+  readied?: SpellRecord;
+  /** Spells in flight. */
+  readonly bolts: Bolt[] = [];
 
   private readonly weaponTable: WeaponInfo[];
   private readonly unlocked = new Set<number>();
@@ -238,13 +327,29 @@ export class Dungeon {
   private moving = false;
   private cleared = false;
   private sprintHeld = false;
+  private readonly allSpells: SpellRecord[];
+  private nextBolt = 0;
+  private sinceCast = Infinity;
+  private castHeld = false;
+  private readonly afflictions: Affliction[] = [];
+  /** Spells working on the player: when each ends (seconds of play) and what it holds. */
+  private shieldPoints = 0;
+  private sanctuary = { chance: 0, until: 0 };
+  private invisibleUntil = 0;
+  private light = { reach: 1, until: 0 };
+  private regen = { health: 0, every: 0, next: 0, until: 0 };
 
-  /** `hero` is what the player's character brings; without one, the player has no class and plain numbers. */
+  /**
+   * `hero` is what the player's character brings; without one, the player
+   * has no class and plain numbers. `spells` is the game's spell list, from
+   * which a spellcaster knows some.
+   */
   constructor(
     readonly level: Level,
     tables: ExeData | undefined,
     private readonly random: Random = Math.random,
     readonly hero: Hero = DEFAULT_HERO,
+    spells: SpellRecord[] = [],
   ) {
     this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0 };
     this.weaponTable = tables?.weapons ?? [];
@@ -255,6 +360,12 @@ export class Dungeon {
     if (hero.cls) {
       this.stats.potions = START_POTIONS;
       this.stats.gold = START_GOLD;
+    }
+    this.allSpells = spells;
+    if (hero.magicka > 0) {
+      this.spellbook.push(...startingSpells(spells));
+      this.readied = this.spellbook.find(offensive) ?? this.spellbook[0];
+      for (const s of this.spellbook) this.inventory.toggleFavourite(spellKey(s));
     }
     this.items = level.items.map((item, id) => ({ ...item, id }));
     level.cells.forEach((c, i) => {
@@ -291,6 +402,9 @@ export class Dungeon {
       // A raised guard holds stamina from coming back.
       if (this.blocking) this.sinceStamina = 0;
       recover(this.stats, dt, this.sinceStamina, this.sinceHurt, this.hero.recovery);
+      if (this.hero.regainsMagicka) recoverMagicka(this.stats, dt, this.sinceCast, this.hero.recovery);
+      this.sinceCast += dt;
+      this.updateMagic(dt);
       this.sinceStamina += dt;
       this.sinceHurt += dt;
       this.lookTimer -= dt;
@@ -400,6 +514,7 @@ export class Dungeon {
     w.player.y = this.player.y;
     w.player.level = this.stats.level;
     w.sneaking = sneaking;
+    w.invisible = this.invisible;
     w.now = this.time;
     for (const c of this.creatures) {
       updateCreature(c, w, dt, this.creatureEvents);
@@ -418,6 +533,8 @@ export class Dungeon {
     },
     swing: (c) => this.events.push({ type: 'sound', name: 'SWISH.VOC', at: { x: c.x, y: c.y }, volume: 0.5 }),
     strike: (c, damage) => {
+      // Sanctuary: a chance the creature ignores the player.
+      if (damage > 0 && this.time < this.sanctuary.until && this.random() * 100 < this.sanctuary.chance) return;
       if (!this.outcome && damage > 0) this.hurtPlayer(damage, c);
     },
   };
@@ -433,6 +550,16 @@ export class Dungeon {
       this.events.push({ type: 'blocked', damage }, { type: 'sound', name: 'CLANK.VOC', volume: 0.8 });
       if (damage <= 0) return;
     }
+    if (this.shieldPoints > 0) {
+      const absorbed = Math.min(damage, this.shieldPoints);
+      this.shieldPoints -= absorbed;
+      damage -= absorbed;
+      if (this.shieldPoints <= 0) this.events.push({ type: 'notify', text: 'Your shield is gone' });
+      if (damage <= 0) {
+        this.events.push({ type: 'blocked', damage: 0 }, { type: 'sound', name: 'CLANK.VOC', volume: 0.6 });
+        return;
+      }
+    }
     damage = armourReduce(damage, this.inventory.armourRating());
     this.stats.health = Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
@@ -447,6 +574,13 @@ export class Dungeon {
   // ---- Fighting ----
 
   private updateAttack(dt: number, input: DungeonInput): void {
+    // A readied spell takes the guard's place, as a spell in Skyrim's left hand does.
+    const castPressed = input.block && !this.castHeld;
+    this.castHeld = input.block;
+    if (this.readied) {
+      if (castPressed) this.cast(this.readied);
+      input = { ...input, block: false };
+    }
     const a = input.attack;
     if (input.block) {
       // Attacking with the guard up is a bash.
@@ -548,11 +682,19 @@ export class Dungeon {
     this.events.push({ type: 'sound', name: 'BODYFALL.VOC', at: { x: c.x, y: c.y } });
     const s = this.stats;
     const before = { health: s.maxHealth, stamina: s.maxStamina };
-    if (gainExperience(s, c.info.experience + c.info.experiencePerHealth * c.maxHealth, this.random, this.hero)) {
+    const gained = gainExperience(s, c.info.experience + c.info.experiencePerHealth * c.maxHealth, this.random, this.hero);
+    if (gained) {
       this.events.push(
         { type: 'levelUp', level: s.level, health: s.maxHealth - before.health, stamina: s.maxStamina - before.stamina },
         { type: 'sound', name: 'FANFARE1.VOC' },
       );
+      // Until there is a Mages Guild, each level teaches a spell.
+      for (let i = 0; i < gained && this.hero.magicka > 0; i++) {
+        const spell = nextSpell(this.allSpells, this.spellbook);
+        if (!spell) break;
+        this.spellbook.push(spell);
+        this.events.push({ type: 'notify', text: `Spell learned: ${spell.name}` });
+      }
     }
     if (!this.cleared && this.creatures.every((o) => !isAlive(o))) {
       this.cleared = true;
@@ -561,20 +703,282 @@ export class Dungeon {
   }
 
   /** The nearest living creature the swing can reach. */
-  private creatureInReach(): Creature | undefined {
+  private creatureInReach(reach = WEAPON_REACH): Creature | undefined {
     const p = this.player;
     let best: Creature | undefined;
     let bestDist = Infinity;
     for (const c of this.creatures) {
       if (!isAlive(c)) continue;
       const d = Math.hypot(c.x - p.x, c.y - p.y);
-      if (d > WEAPON_REACH || d >= bestDist) continue;
+      if (d > reach || d >= bestDist) continue;
       if (d > PLAYER_RADIUS + CREATURE_RADIUS && angleTo(p, c.x, c.y) > WEAPON_ARC) continue;
       if (!lineOfSight(this.level, p.x, p.y, c.x, c.y, this.openDoors)) continue;
       best = c;
       bestDist = d;
     }
     return best;
+  }
+
+  // ---- Magic ----
+
+  /** Invisible: the creatures can't see the player. */
+  get invisible(): boolean {
+    return this.time < this.invisibleUntil;
+  }
+
+  /** How far the dungeon can be seen, as a multiple of the usual: more under a Light spell. */
+  get lightReach(): number {
+    return this.time < this.light.until ? this.light.reach : 1;
+  }
+
+  /** Hit points left on a shield spell. */
+  get shield(): number {
+    return this.shieldPoints;
+  }
+
+  /** The spells working on the player now, for the HUD and the magic menu. */
+  activeEffects(): string[] {
+    const list: string[] = [];
+    if (this.shieldPoints > 0) list.push(`Shield (${this.shieldPoints})`);
+    if (this.time < this.sanctuary.until) list.push('Sanctuary');
+    if (this.invisible) list.push('Invisible');
+    if (this.time < this.light.until) list.push('Light');
+    if (this.time < this.regen.until) list.push('Regenerating');
+    return list;
+  }
+
+  /** Spell points the spell costs at the player's level. */
+  spellCost(spell: SpellRecord): number {
+    return magickaCost(spell, this.stats.level);
+  }
+
+  /** Casts a spell, if there are spell points enough and it has something to work on. */
+  cast(spell: SpellRecord): boolean {
+    if (this.outcome || this.swing || this.sinceCast < CAST_TIME) return false;
+    const notify = (text: string) => this.events.push({ type: 'notify', text });
+    if (!castable(spell)) return false;
+    const cost = this.spellCost(spell);
+    if (this.stats.magicka < cost) {
+      this.events.push({ type: 'noMagicka' });
+      notify(`You need ${cost} spell points to cast ${spell.name}`);
+      return false;
+    }
+    // In sanctuary, a caster may not cast offensive spells.
+    if (this.time < this.sanctuary.until && spell.target !== 'caster') {
+      notify('You can’t cast that in sanctuary');
+      return false;
+    }
+    let touched: Creature | undefined;
+    if (spell.target === 'touch') {
+      touched = this.creatureInReach(TOUCH_REACH);
+      if (!touched) {
+        notify('There is nothing in reach to touch');
+        return false;
+      }
+    }
+    const opens = spell.effects.some((e) => e.effect === OPEN);
+    const door = opens ? this.ahead(OPEN_REACH) : undefined;
+    if (opens && spell.effects.length === 1 && !(door?.kind === 'door' && this.locked(door.cell))) {
+      notify('There is no locked door in front of you');
+      return false;
+    }
+
+    this.stats.magicka -= cost;
+    this.sinceCast = 0;
+    this.events.push({ type: 'cast', spell }, { type: 'sound', name: spell.target === 'caster' ? 'BURST5.VOC' : 'SLOWBALL.VOC', volume: 0.7 });
+    const p = this.player;
+    switch (spell.target) {
+      case 'caster':
+        this.onCaster(spell, door?.kind === 'door' ? door.cell : undefined);
+        break;
+      case 'touch':
+        this.burst(spell, { x: touched!.x, y: touched!.y }, touched);
+        break;
+      case 'areaCaster':
+        this.burst(spell, { x: p.x, y: p.y }, undefined, AREA_AROUND_CASTER);
+        break;
+      default: {
+        // From just in front of the eyes, the way the player faces.
+        const dx = Math.cos(p.yaw);
+        const dy = Math.sin(p.yaw);
+        this.bolts.push({ id: this.nextBolt++, spell, x: p.x + dx * 0.3, y: p.y + dy * 0.3, dx, dy, travelled: 0 });
+      }
+    }
+    return true;
+  }
+
+  /** A spell on the caster: healing, a shield, sanctuary, invisibility, light, opening a lock or regenerating. */
+  private onCaster(spell: SpellRecord, door: number | undefined): void {
+    const level = this.stats.level;
+    const s = this.stats;
+    for (const e of spell.effects) {
+      switch (e.effect) {
+        case HEAL:
+          if (e.sub === HEALTH) s.health = Math.min(s.maxHealth, s.health + magnitude(e, level, this.random));
+          else s.stamina = Math.min(s.maxStamina, s.stamina + magnitude(e, level, this.random));
+          break;
+        case CREATE:
+          this.shieldPoints = Math.max(this.shieldPoints, amount(e, level));
+          this.events.push({ type: 'notify', text: `Shielded for ${this.shieldPoints} hit points` });
+          break;
+        case NON_TARGET:
+          this.sanctuary = { chance: chance(e, level), until: this.time + duration(e, level) };
+          break;
+        case INVISIBILITY:
+          this.invisibleUntil = this.time + duration(e, level);
+          this.events.push({ type: 'notify', text: 'You are invisible' });
+          break;
+        case LIGHT:
+          this.light = { reach: lightReach(e), until: this.time + duration(e, level) };
+          break;
+        case REGENERATE: {
+          const r = regeneration(e);
+          const every = r.everyRounds * ROUND;
+          this.regen = { health: r.health, every, next: this.time + every, until: this.time + duration(e, level) };
+          break;
+        }
+        case OPEN:
+          if (door === undefined || !this.locked(door)) break;
+          if (this.random() * 100 < chance(e, level)) {
+            this.unlocked.add(door);
+            this.events.push({ type: 'notify', text: 'The lock opens' });
+            this.openDoor(door);
+          } else this.events.push({ type: 'notify', text: 'The lock holds' }, { type: 'sound', name: 'LOCK.VOC', at: cellCentre(this.level, door) });
+          break;
+      }
+    }
+  }
+
+  /** A spell bursting at `at`: on `hit`, or on every creature in `radius` that the burst can reach. */
+  private burst(spell: SpellRecord, at: { x: number; y: number }, hit?: Creature, radius = spell.target === 'areaTarget' ? AREA_RADIUS : 0): void {
+    this.events.push({ type: 'burst', spell, at, radius }, { type: 'sound', name: radius ? 'EXPLODE.VOC' : 'BURST5.VOC', at });
+    if (radius === 0) {
+      if (hit) this.onCreature(spell, hit);
+      return;
+    }
+    for (const c of this.creatures) {
+      if (!isAlive(c) || Math.hypot(c.x - at.x, c.y - at.y) > radius + CREATURE_RADIUS) continue;
+      if (!lineOfSight(this.level, at.x, at.y, c.x, c.y, this.openDoors)) continue;
+      this.onCreature(spell, c);
+    }
+  }
+
+  /** A spell's effects on a creature it reached. */
+  private onCreature(spell: SpellRecord, c: Creature): void {
+    const level = this.stats.level;
+    let damage = 0;
+    for (const e of spell.effects) {
+      switch (e.effect) {
+        case DAMAGE:
+          if (e.sub === DAMAGE_HEALTH) damage += magnitude(e, level, this.random);
+          break;
+        case CONTINUOUS_DAMAGE:
+          if (e.sub !== DAMAGE_HEALTH) break;
+          this.afflict(c, spell, e, CONTINUOUS_EVERY * ROUND, duration(e, level));
+          break;
+        case TRANSFER: {
+          const taken = Math.min(e.params[0], c.health);
+          damage += taken;
+          this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + taken);
+          break;
+        }
+        case CAUSE:
+          if (this.random() * 100 >= chance(e, level)) {
+            this.events.push({ type: 'notify', text: `The ${c.info.name} resists` });
+            break;
+          }
+          if (e.sub === CAUSE_PARALYSIS) {
+            paralyseCreature(c, duration(e, level), this.world);
+            this.events.push({ type: 'notify', text: `The ${c.info.name} is paralyzed` });
+          } else if (e.sub === CAUSE_POISON) {
+            const p = poisonDamage(e);
+            this.afflict(c, spell, p.damage, p.everyRounds * ROUND, duration(e, level));
+            this.events.push({ type: 'notify', text: `The ${c.info.name} is poisoned` });
+          }
+          break;
+      }
+    }
+    // Whatever the spell does, the creature knows it was attacked.
+    this.hurtByMagic(c, damage);
+  }
+
+  private afflict(c: Creature, spell: SpellRecord, damage: Affliction['damage'], every: number, lasts: number): void {
+    if (lasts <= 0) return;
+    this.afflictions.push({ creature: c, spell, damage, every, next: this.time + every, until: this.time + lasts });
+  }
+
+  private hurtByMagic(c: Creature, damage: number): void {
+    const killed = hurtCreature(c, damage, this.world);
+    if (damage > 0) this.events.push({ type: 'hit', creature: c, damage, killed }, { type: 'sound', name: 'EHIT.VOC', at: { x: c.x, y: c.y } });
+    if (killed) this.killed(c);
+  }
+
+  /** Bolts in flight, harm that lasts, and spells on the player wearing off. */
+  private updateMagic(dt: number): void {
+    for (const b of [...this.bolts]) this.flyBolt(b, dt);
+    for (const a of [...this.afflictions]) {
+      if (!isAlive(a.creature) || this.time > a.until + 1e-6) {
+        this.afflictions.splice(this.afflictions.indexOf(a), 1);
+        continue;
+      }
+      if (this.time < a.next) continue;
+      a.next += a.every;
+      const damage = typeof a.damage === 'number' ? a.damage : magnitude(a.damage, this.stats.level, this.random);
+      this.hurtByMagic(a.creature, damage);
+    }
+    const r = this.regen;
+    if (r.until > 0) {
+      while (this.time >= r.next && r.next <= r.until) {
+        this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + r.health);
+        r.next += r.every;
+      }
+      if (this.time >= r.until) r.until = 0;
+    }
+    if (this.invisibleUntil > 0 && this.time >= this.invisibleUntil) {
+      this.invisibleUntil = 0;
+      this.events.push({ type: 'notify', text: 'You are visible again' });
+    }
+  }
+
+  private flyBolt(b: Bolt, dt: number): void {
+    const remove = () => this.bolts.splice(this.bolts.indexOf(b), 1);
+    for (let left = BOLT_SPEED * dt; left > 0; left -= 0.1) {
+      const stepLen = Math.min(0.1, left);
+      const nx = b.x + b.dx * stepLen;
+      const ny = b.y + b.dy * stepLen;
+      const hit = this.creatures.find((c) => isAlive(c) && Math.hypot(c.x - nx, c.y - ny) < CREATURE_RADIUS + BOLT_RADIUS);
+      if (hit) {
+        remove();
+        this.burst(b.spell, { x: nx, y: ny }, hit);
+        return;
+      }
+      const cell = cellIndex(this.level, nx, ny);
+      if (cell < 0 || isBlocking(this.level.cells[cell], this.openDoors, cell)) {
+        remove();
+        this.burst(b.spell, { x: b.x, y: b.y });
+        return;
+      }
+      b.x = nx;
+      b.y = ny;
+      b.travelled += stepLen;
+      if (b.travelled > BOLT_RANGE) {
+        remove();
+        return;
+      }
+    }
+  }
+
+  /** The spells the player knows, as the magic menu lists them. */
+  spellEntries(): MenuEntry[] {
+    const inv = this.inventory;
+    return this.spellbook.map((spell) => {
+      const key = spellKey(spell);
+      return { key, name: spell.name, category: 'spells', count: 1, spell, equipped: spell === this.readied, favourite: inv.isFavourite(key), hotkey: inv.hotkeyOf(key) };
+    });
+  }
+
+  private spellByKey(key: string): SpellRecord | undefined {
+    return this.spellbook.find((s) => spellKey(s) === key);
   }
 
   // ---- Using things ----
@@ -772,12 +1176,21 @@ export class Dungeon {
   }
 
   /**
-   * Uses an entry from the item menus: equips a piece of gear or takes it
-   * off, or drinks a healing potion. Returns what happened, to tell the
-   * player.
+   * Uses an entry from the item or magic menus: equips a piece of gear or
+   * takes it off, drinks a healing potion, or readies a spell or puts it
+   * away. Returns what happened, to tell the player.
    */
   use(key: string): string | undefined {
     if (this.outcome) return undefined;
+    const spell = this.spellByKey(key);
+    if (spell) {
+      if (this.readied === spell) {
+        this.readied = undefined;
+        return `${spell.name} put away`;
+      }
+      this.readied = spell;
+      return `${spell.name} readied`;
+    }
     if (key === POTION) {
       if (this.stats.potions <= 0) return 'No healing potions';
       if (this.stats.health >= this.stats.maxHealth) return 'Your health is full';
@@ -809,21 +1222,28 @@ export class Dungeon {
     return `${item.name} dropped`;
   }
 
-  /** Adds the entry to the favourites or takes it off; true when it is one now. Only gear and potions can be. */
+  /** Adds the entry to the favourites or takes it off; true when it is one now. Only gear, potions and spells can be. */
   favourite(key: string): boolean {
-    if (key !== POTION && !this.inventory.byKey(key)) return false;
+    if (!this.favourable(key)) return false;
     return this.inventory.toggleFavourite(key);
   }
 
   /** Puts a favourite on number key n + 1 (0 for 1). */
   setHotkey(n: number, key: string): void {
-    if (key === POTION || this.inventory.byKey(key)) this.inventory.setHotkey(n, key);
+    if (this.favourable(key)) this.inventory.setHotkey(n, key);
+  }
+
+  private favourable(key: string): boolean {
+    return key === POTION || !!this.inventory.byKey(key) || !!this.spellByKey(key);
   }
 
   /** Uses what is on number key n + 1 (0 for 1), with a note to say what happened. */
   hotkey(n: number): void {
     if (this.outcome) return;
     const key = this.inventory.hotkeys[n];
+    // A spell's key readies it, as in Skyrim, rather than putting it away again.
+    const spell = key === undefined ? undefined : this.spellByKey(key);
+    if (spell && this.readied === spell) return;
     const text = key === undefined ? `Nothing is on ${n + 1}: choose a favourite and press ${n + 1} to put it there` : this.use(key);
     if (text) this.events.push({ type: 'notify', text });
   }

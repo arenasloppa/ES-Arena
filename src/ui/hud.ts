@@ -8,7 +8,7 @@
  * for places, quests and levels, and the dungeon's messages along the
  * bottom.
  */
-import type { CompassMarker, EngineHud, HudTarget } from '../game/engine';
+import type { CompassMarker, EngineHud, HudTarget, ReadiedSpell, Vitals } from '../game/engine';
 
 const MESSAGE_MS = 7000;
 const TIPS_MS = 14000;
@@ -30,13 +30,6 @@ const LETTERS: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
 export function compassHeading(yaw: number): number {
   const deg = (yaw * 180) / Math.PI + 90;
   return ((deg % 360) + 360) % 360;
-}
-
-export interface Vitals {
-  health: number;
-  maxHealth: number;
-  stamina: number;
-  maxStamina: number;
 }
 
 class Bar {
@@ -85,6 +78,11 @@ export class Hud implements EngineHud {
   private readonly enemyBar: HTMLElement;
   private readonly health: Bar;
   private readonly stamina: Bar;
+  private readonly magickaEl: HTMLElement;
+  private readonly magicka: Bar;
+  private readonly hand: HTMLElement;
+  private readonly spellEl: HTMLElement;
+  private readonly effectsEl: HTMLElement;
   private readonly marks: HTMLElement;
   private readonly markerPool: HTMLElement[] = [];
   private readonly bannerEl: HTMLElement;
@@ -112,6 +110,13 @@ export class Hud implements EngineHud {
     this.enemyBar = $('enemy-bar');
     this.health = new Bar($('health'));
     this.stamina = new Bar($('stamina'));
+    this.magickaEl = $('magicka');
+    this.magicka = new Bar(this.magickaEl);
+    this.hand = $('hand');
+    this.spellEl = $('spell-readied');
+    this.effectsEl = $('effects');
+    this.hand.addEventListener('animationend', () => this.hand.classList.remove('cast'));
+    this.magickaEl.addEventListener('animationend', () => this.magickaEl.classList.remove('short'));
     this.marks = $('compass-marks');
     this.bannerEl = $('banner');
     this.eye = $('sneak-eye');
@@ -175,8 +180,46 @@ export class Hud implements EngineHud {
     const now = performance.now();
     this.health.set(v.health, v.maxHealth, now);
     this.stamina.set(v.stamina, v.maxStamina, now);
+    this.magickaEl.hidden = v.maxMagicka <= 0;
+    this.magicka.set(v.magicka, v.maxMagicka, now);
     this.root.classList.toggle('low-health', v.health > 0 && v.health / v.maxHealth < 0.25);
     this.enemyEl.classList.toggle('faded', now > this.enemyUntil);
+  }
+
+  readied(spell: ReadiedSpell | undefined): void {
+    this.spellEl.hidden = !spell;
+    this.hand.classList.toggle('ready', !!spell);
+    if (!spell) return;
+    this.spellEl.style.setProperty('--spell', spell.colour);
+    this.hand.style.setProperty('--spell', spell.colour);
+    this.spellEl.querySelector('#spell-name')!.textContent = spell.name;
+    this.spellEl.querySelector('#spell-cost')!.textContent = `${spell.cost} SP`;
+  }
+
+  cast(colour: string): void {
+    this.hand.style.setProperty('--spell', colour);
+    this.hand.classList.remove('cast');
+    void this.hand.offsetWidth; // restart the animation
+    this.hand.classList.add('cast');
+    this.magicka.flash(performance.now());
+  }
+
+  noMagicka(): void {
+    this.magickaEl.classList.remove('short');
+    void this.magickaEl.offsetWidth;
+    this.magickaEl.classList.add('short');
+    this.magicka.flash(performance.now());
+  }
+
+  effects(names: string[]): void {
+    this.effectsEl.hidden = !names.length;
+    this.effectsEl.replaceChildren(
+      ...names.map((n) => {
+        const li = document.createElement('li');
+        li.textContent = n;
+        return li;
+      }),
+    );
   }
 
   /** A short note in the corner, such as "Key added". */
@@ -304,6 +347,9 @@ export class Hud implements EngineHud {
     this.enemyUntil = 0;
     this.health.reset();
     this.stamina.reset();
+    this.magicka.reset();
+    this.readied(undefined);
+    this.effects([]);
     this.root.classList.remove('low-health');
     this.hurtEl.classList.remove('flash');
     this.target(undefined);

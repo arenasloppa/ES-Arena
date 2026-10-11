@@ -43,7 +43,7 @@
         <p class="tip"><span data-glyph="move"></span><span>Move</span></p>
         <p class="tip"><span data-glyph="look"></span><span>Look</span></p>
         <p class="tip"><span data-glyph="attack"></span><span>Attack, hold to power attack</span></p>
-        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash</span></p>
+        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash, or cast the readied spell</span></p>
         <p class="tip"><span data-glyph="activate"></span><span>Use, take, open</span></p>
         <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
         <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
@@ -56,7 +56,11 @@
         <div id="notes" role="status" aria-live="polite"></div>
       </div>
       <p id="message" role="status" aria-live="polite"></p>
+      <div id="hand" aria-hidden="true"></div>
+      <div id="spell-readied" hidden><span id="spell-name"></span><span id="spell-cost"></span></div>
+      <ul id="effects" aria-label="Spells on you" hidden></ul>
       <div id="vitals" aria-hidden="true">
+        <div class="bar" id="magicka" hidden><div class="bar-fill"></div></div>
         <div class="bar" id="health"><div class="bar-fill"></div></div>
         <div class="bar" id="stamina"><div class="bar-fill"></div></div>
       </div>

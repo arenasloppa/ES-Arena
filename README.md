@@ -38,6 +38,11 @@ screenshots of earlier versions.
   and fight.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
   three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you.
+- Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
+  Medusa's Gaze and the rest of the Mages Guild's list that the remake can do so far (30 of its 64). Spellcasting
+  classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Ready a
+  spell in the magic menu and cast it with the block button, as with a spell in Skyrim's left hand; bolts fly, area
+  spells burst, and paralysis, poison, shields and light last as many rounds as the game says.
 - Health, stamina, healing potions and levels. Search bodies and chests for gold, potions, weapons and armour, and open
   locked doors with their key, pick their locks or break them down.
 - Skyrim's menus: a menu of menus for your character, items, magic and the map; an item menu with the game's picture of
@@ -53,7 +58,7 @@ screenshots of earlier versions.
   that match your controller, jumping, sneaking and sprinting, the dungeon's name as you arrive, and a banner when you
   level up.
 
-Coming later: cities and the wilderness, spells, music and saving.
+Coming later: cities and the wilderness, the Mages Guild and the spellmaker, music and saving.
 
 ## Play it
 
@@ -104,7 +109,7 @@ controller, with the PlayStation button in brackets.
 | Look | Mouse (click the view to capture it) | Right stick |
 | Turn and walk | Arrow keys | |
 | Attack, hold for a power attack | Left mouse button | RT (R2) |
-| Block, attack while blocking to bash | Right mouse button | LT (L2) |
+| Block, attack while blocking to bash; with a spell readied, cast it | Right mouse button | LT (L2) |
 | Use, take, open | <kbd>E</kbd> | A (✕) |
 | Jump | <kbd>Space</kbd> | Y (△) |
 | Sprint | <kbd>Shift</kbd> | LB (L1) |
@@ -115,6 +120,9 @@ controller, with the PlayStation button in brackets.
 | Items, magic | <kbd>I</kbd>, <kbd>P</kbd> | |
 | Map | <kbd>M</kbd> | View (Share) |
 | Pause menu | <kbd>Esc</kbd> | Start (Options) |
+
+In the magic menu (<kbd>P</kbd>, or left from the menu of menus), ready a spell with <kbd>E</kbd> or A, make it a
+favourite with <kbd>F</kbd> or Y, or put it on a number key by pressing the number.
 
 In the item menu, pick a kind of item on the left (LB and RB also change it), then use or equip the picked one with
 <kbd>E</kbd> or A, make it a favourite with <kbd>F</kbd> or Y, and drop it with <kbd>R</kbd> or X. Pressing a number
@@ -137,7 +145,7 @@ The monsters' and weapons' stats come from the game's program, `ACD.EXE` or `A.E
 memory; the pictures, animations and sounds come from `GLOBAL.BSA`. Character creation reads its questions, classes,
 names and words from `QUESTION.TXT`, `CLASSES.DAT`, `NAMECHNK.DAT` and the game's program, the map of Tamriel from
 `TAMRIEL.MNU`, and the faces, clothes and armour of the paper doll from `GLOBAL.BSA`; without them it offers three
-classes of its own. Loose files take priority over the copies inside `GLOBAL.BSA`, as in the original. Saves and other
+classes of its own. The spells come from `SPELLSG.65`. Loose files take priority over the copies inside `GLOBAL.BSA`, as in the original. Saves and other
 files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`, `SOUND.CFG`, `VISION.EMS`) are ignored.
 
 ## How it works

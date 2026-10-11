@@ -4,7 +4,9 @@
  * the left, the items to the right and the map below, each opened by pushing
  * that way. The item menu lists what the character
  * carries by kind, with a picture of the picked piece and its numbers, and
- * anything in it can be equipped, made a favourite or dropped. The
+ * anything in it can be equipped, made a favourite or dropped. The magic
+ * menu lists the spells the character knows, with what each does at their
+ * level and costs, and readies one to cast. The
  * favourites (Q, or up or down on the D-pad) list down the left of the game,
  * where each can be put on a number key (on a controller, the D-pad's left
  * or right) to use without opening a menu. The game waits while any of them
@@ -15,6 +17,8 @@ import type { Character, CreationData } from '../game/character';
 import type { Dungeon, MenuEntry } from '../game/dungeon';
 import type { GameMenu } from '../game/engine';
 import { ARMOUR_TYPES, HOTKEYS, itemFrame, POTION } from '../game/items';
+import { describe as describeSpell, elementName, targetWords } from '../game/magic';
+import { spellColour } from '../render/spellView';
 import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
 import { PIXEL_ASPECT, type Portraits } from '../render/portrait';
 import { padHotkeyGlyph, type Action, type InputModeWatcher } from './controls';
@@ -71,6 +75,7 @@ export class GameMenus {
   private category = ALL;
   private column: 'categories' | 'list' = 'list';
   private row = 0;
+  private spellRow = 0;
   private favouriteRow = 0;
   private readonly repeater = new Repeater();
   private messageTimer: ReturnType<typeof setTimeout> | undefined;
@@ -90,6 +95,12 @@ export class GameMenus {
   private readonly doll: HTMLCanvasElement;
   private readonly sheet: HTMLElement;
   private readonly magicNote: HTMLElement;
+  private readonly spellList: HTMLElement;
+  private readonly spellCard: HTMLElement;
+  private readonly spellName: HTMLElement;
+  private readonly spellStats: HTMLElement;
+  private readonly spellEffects: HTMLElement;
+  private readonly spellNote: HTMLElement;
   private readonly favouriteList: HTMLElement;
   private readonly message: HTMLElement;
   private readonly bar: HTMLElement;
@@ -136,10 +147,21 @@ export class GameMenus {
     right.append(this.picture, this.card);
     items.append(this.categoryList, this.itemList, right);
 
-    // Magic: nothing to cast yet.
+    // Magic: the spells known, and a card for the picked one.
     const magic = el('section', 'gm-magic');
     this.magicNote = el('p', 'gm-empty');
-    magic.append(el('h2', '', 'Magic'), el('div', 'rule'), this.magicNote);
+    this.spellList = el('ul', 'gm-list active');
+    this.spellList.setAttribute('role', 'listbox');
+    this.spellList.setAttribute('aria-label', 'Spells');
+    this.spellCard = el('aside', 'gm-card gm-spell-card');
+    this.spellName = el('h3', 'gm-card-name');
+    this.spellStats = el('dl', 'gm-card-stats');
+    this.spellEffects = el('ul', 'gm-spell-effects');
+    this.spellNote = el('p', 'gm-card-note');
+    this.spellCard.append(this.spellName, el('div', 'rule'), this.spellEffects, this.spellStats, this.spellNote);
+    const spellRight = el('div', 'gm-right');
+    spellRight.append(this.spellCard);
+    magic.append(this.magicNote, this.spellList, spellRight);
 
     // The character sheet: the paper doll beside the numbers.
     const character = el('section', 'gm-character');
@@ -239,6 +261,12 @@ export class GameMenus {
         else this.row = step(this.row, direction === 'up' ? -1 : 1, this.shown().length);
         this.render();
         break;
+      case 'magic':
+        if (direction === 'up' || direction === 'down') {
+          this.spellRow = step(this.spellRow, direction === 'up' ? -1 : 1, this.spells().length);
+          this.render();
+        }
+        break;
       case 'favourites':
         if (direction === 'up' || direction === 'down') {
           this.favouriteRow = step(this.favouriteRow, direction === 'up' ? -1 : 1, this.favourites().length);
@@ -257,7 +285,8 @@ export class GameMenus {
     } else if (this.which === 'items') {
       if (this.column === 'categories') this.go('right');
       else this.use(this.selected());
-    } else if (this.which === 'favourites') this.use(this.favourites()[this.favouriteRow]);
+    } else if (this.which === 'magic') this.use(this.selectedSpell());
+    else if (this.which === 'favourites') this.use(this.favourites()[this.favouriteRow]);
   }
 
   /** B or Esc: from the item list to its kinds, otherwise back to the game. */
@@ -295,8 +324,8 @@ export class GameMenus {
 
   private toggleFavourite(): void {
     const d = this.host.run()?.dungeon;
-    const entry = this.which === 'favourites' ? this.favourites()[this.favouriteRow] : this.which === 'items' ? this.selected() : undefined;
-    if (!d || !entry || (entry.key !== POTION && !entry.item)) return;
+    const entry = this.picked();
+    if (!d || !entry || (entry.key !== POTION && !entry.item && !entry.spell)) return;
     const now = d.favourite(entry.key);
     this.showMessage(`${entry.name} ${now ? 'added to' : 'taken off'} the favourites`);
     this.render();
@@ -313,12 +342,26 @@ export class GameMenus {
   /** Puts the picked entry on number key n + 1, making it a favourite if it isn't. */
   private setHotkey(n: number): void {
     const d = this.host.run()?.dungeon;
-    const entry = this.which === 'favourites' ? this.favourites()[this.favouriteRow] : this.which === 'items' && this.column === 'list' ? this.selected() : undefined;
-    if (!d || !entry || (entry.key !== POTION && !entry.item)) return;
+    const entry = this.which === 'items' && this.column !== 'list' ? undefined : this.picked();
+    if (!d || !entry || (entry.key !== POTION && !entry.item && !entry.spell)) return;
     d.setHotkey(n, entry.key);
     const where = this.input.mode === 'gamepad' && n < 2 ? `the D-pad's ${n === 0 ? 'left' : 'right'}` : String(n + 1);
     this.showMessage(`${entry.name} put on ${where}`);
     this.render();
+  }
+
+  /** The entry picked in the open menu, if it has one. */
+  private picked(): MenuEntry | undefined {
+    switch (this.which) {
+      case 'favourites':
+        return this.favourites()[this.favouriteRow];
+      case 'items':
+        return this.selected();
+      case 'magic':
+        return this.selectedSpell();
+      default:
+        return undefined;
+    }
   }
 
   private showMessage(text: string): void {
@@ -346,11 +389,22 @@ export class GameMenus {
     return shown[this.row];
   }
 
+  /** The spells the character knows, cheapest first. */
+  private spells(): MenuEntry[] {
+    return this.host.run()?.dungeon.spellEntries() ?? [];
+  }
+
+  private selectedSpell(): MenuEntry | undefined {
+    const spells = this.spells();
+    this.spellRow = Math.min(this.spellRow, Math.max(0, spells.length - 1));
+    return spells[this.spellRow];
+  }
+
   /** The favourites the character still has, in the order they were chosen. */
   private favourites(): MenuEntry[] {
     const d = this.host.run()?.dungeon;
     if (!d) return [];
-    const byKey = new Map(d.entries().map((e) => [e.key, e]));
+    const byKey = new Map([...d.entries(), ...d.spellEntries()].map((e) => [e.key, e]));
     return d.inventory.favourites.flatMap((key) => byKey.get(key) ?? []);
   }
 
@@ -373,11 +427,7 @@ export class GameMenus {
         this.renderItems(run);
         break;
       case 'magic':
-        this.magicNote.textContent = run.data.classes[run.character.cls]?.spellcaster
-          ? 'You know no spells yet. Spells are not in the remake yet.'
-          : 'You know no spells. Spells are not in the remake yet.';
-        this.renderBar(run, true);
-        this.setHints([{ action: 'back', label: 'Back', run: () => this.back() }]);
+        this.renderMagic(run);
         break;
       case 'character':
         this.renderCharacter(run);
@@ -528,6 +578,67 @@ export class GameMenus {
     this.picture.hidden = false;
   }
 
+  private renderMagic(run: MenuRun): void {
+    const d = run.dungeon;
+    const spells = this.spells();
+    const picked = this.selectedSpell();
+    const caster = d.stats.maxMagicka > 0;
+    this.magicNote.hidden = spells.length > 0;
+    this.magicNote.textContent = !caster
+      ? `${run.data.classes[run.character.cls]?.name ?? 'Your class'}s cannot cast spells.`
+      : 'You know no spells: the game’s spell list (SPELLSG.65) could not be read.';
+    this.spellList.hidden = !spells.length;
+    this.spellList.replaceChildren(
+      ...spells.map((entry, i) => {
+        const li = this.entryRow(entry, i === this.spellRow);
+        const cost = d.spellCost(entry.spell!);
+        li.append(el('span', 'gm-count', `${cost}`));
+        if (cost > d.stats.magicka) li.classList.add('forbidden');
+        li.addEventListener('mouseenter', () => {
+          if (this.spellRow === i) return;
+          this.spellRow = i;
+          this.render();
+        });
+        li.addEventListener('click', () => this.use(entry));
+        return li;
+      }),
+    );
+    this.spellList.querySelector('.picked')?.scrollIntoView({ block: 'nearest' });
+    this.spellCard.hidden = !picked;
+    if (picked?.spell) {
+      const spell = picked.spell;
+      this.spellCard.style.setProperty('--spell', spellColour(spell));
+      this.spellName.textContent = spell.name;
+      this.spellEffects.replaceChildren(...describeSpell(spell, d.stats.level).map((line) => el('li', '', line)));
+      const rows: Array<[string, string]> = [
+        ['Cost', `${d.spellCost(spell)} spell points`],
+        ['Target', targetWords(spell)],
+      ];
+      const element = elementName(spell);
+      if (element) rows.push(['Element', element]);
+      this.spellStats.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', '', k), el('dd', '', v)]));
+      this.spellNote.textContent = picked.equipped ? 'Readied: cast it with the block button' : 'Costs less at each level';
+    }
+    this.renderMagicBar(run);
+    const hints: Hint[] = [];
+    if (picked) {
+      hints.push({ action: 'use', label: picked.equipped ? 'Put away' : 'Ready', run: () => this.use(picked) });
+      hints.push({ action: 'favourite', label: picked.favourite ? 'Unfavourite' : 'Favourite', run: () => this.toggleFavourite() });
+    }
+    hints.push({ action: 'back', label: 'Close', run: () => this.back() });
+    this.setHints(hints);
+  }
+
+  /** The magic menu's bottom bar: spell points and the spells working on the character. */
+  private renderMagicBar(run: MenuRun): void {
+    const d = run.dungeon;
+    const s = d.stats;
+    this.bar.hidden = false;
+    this.bar.replaceChildren(stat('Spell points', `${Math.floor(s.magicka)}/${s.maxMagicka}`), stat('Level', String(s.level)));
+    const effects = d.activeEffects();
+    if (effects.length) this.bar.append(stat('Active', effects.join(', ')));
+  }
+
   private renderCharacter(run: MenuRun): void {
     const { dungeon: d, character: c, data } = run;
     const cls = data.classes[c.cls];
@@ -549,6 +660,7 @@ export class GameMenus {
     const rows: Array<[string, string]> = [
       ['Health', `${Math.ceil(s.health)} / ${s.maxHealth}`],
       ['Stamina', `${Math.floor(s.stamina)} / ${s.maxStamina}`],
+      ...(s.maxMagicka > 0 ? [['Spell points', `${Math.floor(s.magicka)} / ${s.maxMagicka}`] as [string, string]] : []),
       ['Armour', String(d.inventory.armourRating())],
       ['Damage', `${low}–${high}${bonus}`],
       ['Experience', `${s.experience} / ${next}`],
@@ -648,7 +760,7 @@ export class GameMenus {
     const which = this.which;
     const code = e.code;
     const handled = () => e.preventDefault();
-    if (code === 'Tab' || (code === 'KeyI' && which === 'items') || (code === 'KeyQ' && which === 'favourites')) {
+    if (code === 'Tab' || (code === 'KeyI' && which === 'items') || (code === 'KeyP' && which === 'magic') || (code === 'KeyQ' && which === 'favourites')) {
       handled();
       this.host.resume();
       return;
@@ -693,7 +805,7 @@ export class GameMenus {
       return;
     }
     const digit = /^(?:Digit|Numpad)([1-8])$/.exec(code);
-    if (digit && (which === 'favourites' || which === 'items')) {
+    if (digit && (which === 'favourites' || which === 'items' || which === 'magic')) {
       handled();
       this.setHotkey(Number(digit[1]) - 1);
     }

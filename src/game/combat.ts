@@ -83,6 +83,8 @@ export interface Hero {
   carry: number;
   /** Spell points; 0 for classes that can't cast spells (see magic.ts). */
   magicka: number;
+  /** Spell points come back over time; a Sorcerer's don't. */
+  regainsMagicka: boolean;
 }
 
 /** The player without a character of their own: no class, and nothing added or taken away. */
@@ -101,6 +103,7 @@ export const DEFAULT_HERO: Hero = {
   fortune: 1,
   carry: 200,
   magicka: 0,
+  regainsMagicka: true,
 };
 
 export const POTION_HEALS = 25;

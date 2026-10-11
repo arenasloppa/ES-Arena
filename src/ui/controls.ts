@@ -38,6 +38,7 @@ export type Action =
   | 'hotkey'
   | 'tween'
   | 'items'
+  | 'magic'
   | 'map'
   | 'menu'
   | 'select'
@@ -63,7 +64,7 @@ export const BINDINGS: Record<Action, Binding> = {
   move: { label: 'Move', keys: ['W', 'A', 'S', 'D'], pad: ['LStick'] },
   look: { label: 'Look', keys: ['Mouse'], pad: ['RStick'] },
   attack: { label: 'Attack, hold to power attack', keys: ['Click'], pad: ['RT'] },
-  block: { label: 'Block, attack while blocking to bash', keys: ['RClick'], pad: ['LT'] },
+  block: { label: 'Block, attack while blocking to bash; casts the readied spell instead', keys: ['RClick'], pad: ['LT'] },
   activate: { label: 'Use, take, open', keys: ['E'], pad: ['A'] },
   jump: { label: 'Jump', keys: ['Space'], pad: ['Y'] },
   sprint: { label: 'Sprint', keys: ['Shift'], pad: ['LB'] },
@@ -72,6 +73,7 @@ export const BINDINGS: Record<Action, Binding> = {
   hotkey: { label: 'Use the favourite on a hotkey', keys: ['1–8'], pad: ['DLeftRight'] },
   tween: { label: 'Character, items, magic and map', keys: ['Tab'], pad: ['B'] },
   items: { label: 'Items', keys: ['I'], pad: [] },
+  magic: { label: 'Magic', keys: ['P'], pad: [] },
   map: { label: 'Map', keys: ['M'], pad: ['View'] },
   menu: { label: 'Pause menu', keys: ['Esc'], pad: ['Start'] },
   select: { label: 'Select', keys: ['Enter'], pad: ['A'] },
@@ -103,6 +105,7 @@ export const GAME_ACTIONS: Action[] = [
   'hotkey',
   'tween',
   'items',
+  'magic',
   'map',
   'menu',
 ];
