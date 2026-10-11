@@ -143,8 +143,9 @@ describe('character creation', () => {
     // Fatigue is Strength plus Endurance.
     expect(hero.stamina).toBe(70 + 62);
     expect(hero.healthBonus).toBe(derivedAttributes(CHARACTER.attributes).health);
-    // Agility 65 is three steps, and Luck 81 six more of a smaller share.
-    expect(hero.dodge).toBeCloseTo(3 * 0.02 + 6 * 0.005);
+    // Agility 65 is 166 on Arena's scale; only Monks and Acrobats are hard to hit for their level.
+    expect(hero).toMatchObject({ agility: 166, evasive: false });
+    expect([9, 12, 13].map((id) => heroFor(CHARACTER, { ...TINKER, id }).evasive)).toEqual([true, true, false]);
     // Arena's base speed for Speed 30: 20 + 76 * 20 / 256, against the remake's 30.
     expect(hero.pace).toBeCloseTo(25 / 30);
     expect(hero.critical).toBeCloseTo(0.14);

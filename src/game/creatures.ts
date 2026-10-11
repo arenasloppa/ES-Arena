@@ -16,7 +16,7 @@
  * The sixth file is the death: two frames of falling, then the body.
  */
 import type { CreatureInfo } from '../formats/exe';
-import { creatureHitChance, roll } from './combat';
+import { blowLands, MIDDLING_AGILITY, roll } from './combat';
 import { blockedFor, cellIndex, lineOfSight, nextStep } from './grid';
 import { isBlocking, type Level } from './level';
 
@@ -59,8 +59,15 @@ export interface Creature {
 export interface CreatureWorld {
   level: Level;
   openDoors: Set<number>;
-  /** `dodge` is taken off the chance of a blow landing on the player. */
-  player: { x: number; y: number; level: number; dodge?: number };
+  /**
+   * Where the player is, and what decides whether a blow lands on them (see
+   * hitChance): their level and Agility (0 to 255; 50 out of 100 when not
+   * given), the protection on each body part (none when not given), and
+   * whether they are a Monk or Acrobat.
+   */
+  player: { x: number; y: number; level: number; agility?: number; protection?: number[]; evasive?: boolean };
+  /** Where blows land, from the program when it can be read (see bodyPart). */
+  bodyParts?: number[];
   /** Sneaking players are noticed from closer. */
   sneaking: boolean;
   /** An invisible player can't be seen at all. */
@@ -244,7 +251,9 @@ export function updateCreature(c: Creature, w: CreatureWorld, dt: number, events
       c.facing = Math.atan2(w.player.y - c.y, w.player.x - c.x);
       if (!c.struck && c.time >= STRIKE_AT) {
         c.struck = true;
-        const lands = dist <= REACH + 0.35 && w.random() < creatureHitChance(c.info.level, w.player.level, w.player.dodge);
+        const p = w.player;
+        const defender = { level: p.level, agility: p.agility ?? MIDDLING_AGILITY, protection: p.protection ?? [], evasive: !!p.evasive };
+        const lands = dist <= REACH + 0.35 && blowLands({ level: c.info.level, agility: c.info.agility ?? MIDDLING_AGILITY }, defender, w.random, w.bodyParts);
         events.strike?.(c, lands ? roll(w.random, c.info.damage[0], c.info.damage[1]) : 0);
       }
       if (c.time >= ATTACK_TIME) {

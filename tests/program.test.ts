@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readArmourTables, readHitTables, type ArmourTables, type HitTables } from '../src/formats/armour';
 import { readCharacterTables } from '../src/formats/classes';
-import { readCreatures, readExeData, readWeapons } from '../src/formats/exe';
+import { readCreatureAttributes, readCreatures, readExeData, readWeapons } from '../src/formats/exe';
 import { inflate, unpackExe, UnsupportedExeError } from '../src/formats/pklite';
 import {
   encodePklite,
+  makeArmourTables,
   makeCharacterTables,
   makeExeImage,
   makePkliteExe,
@@ -226,5 +228,63 @@ describe('character tables', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(readExeData(makeExeImage(CREATURES, SOUNDS, WEAPONS)).character).toBeUndefined();
     warn.mockRestore();
+  });
+});
+
+/** Made-up armour tables: none of these numbers come from the game. */
+const ARMOUR: ArmourTables = {
+  protection: [48, 31, 14],
+  materialProtection: [-3, 0, 2, 4, 9, 13, 18, 30],
+  materialChances: [9, 40, 66, 80, 90, 95, 99, 101],
+  materialPrices: [2, 4, 16, 36, 90, 180, 360, 1500],
+  shieldProtection: [3, 9, 14, 22],
+  shieldCovers: [[0], [0, 2], [0, 1, 2], [0, 1, 2, 4, 6]],
+  weights: [
+    [14.5, 7, 11, 7.25, 7.25, 9, 7],
+    [7.5, 3.5, 5, 4, 4, 5.5, 3],
+    [3.5, 1.5, 2.5, 2, 2, 2.5, 2],
+  ].map((row) => [...row, 1.5, 4, 7, 9.5]),
+  prices: [
+    [90, 42, 75, 55, 55, 70, 45],
+    [44, 28, 36, 28, 28, 36, 28],
+    [22, 13, 18, 13, 13, 18, 13],
+  ].map((row) => [...row, 11, 21, 32, 48]),
+};
+const HITS: HitTables = { bodyParts: [2, 6, 9, 12, 14, 16, 19], undead: [6, 9, 11, 14, 16, 20, 21] };
+
+describe('armour tables', () => {
+  it('reads protection, materials, weights, prices, shields and where blows land', () => {
+    const image = new Uint8Array(makeArmourTables(ARMOUR, HITS));
+    expect(readArmourTables(image)).toEqual(ARMOUR);
+    expect(readHitTables(image)).toEqual(HITS);
+  });
+
+  it('leaves out whatever is implausible, keeping the rest', () => {
+    const tables = (t: Partial<ArmourTables>) => readArmourTables(new Uint8Array(makeArmourTables({ ...ARMOUR, ...t }, HITS)));
+    // Leather protecting more than chain, a material chance falling back, a shield weighing nothing.
+    expect(tables({ protection: [48, 14, 31] }).protection).toBeUndefined();
+    const chances = tables({ materialChances: [9, 40, 30, 80, 90, 95, 99, 101] });
+    expect(chances.materialChances).toBeUndefined();
+    expect(chances.materialProtection).toEqual(ARMOUR.materialProtection);
+    const weights = tables({ weights: ARMOUR.weights.map((row) => row.map((w, i) => (i === 8 ? 0 : w))) });
+    expect([weights.weights, weights.prices]).toEqual([undefined, undefined]);
+    expect(weights.protection).toEqual(ARMOUR.protection);
+    expect(readHitTables(new Uint8Array(makeArmourTables(ARMOUR, { ...HITS, bodyParts: [2, 6, 9, 12, 14, 16, 18] })))).toBeUndefined();
+    expect(readArmourTables(new Uint8Array(100))).toEqual({});
+  });
+
+  it('reads each creature’s Agility from the attributes that follow the races’', () => {
+    // The CD program's layout: its marker string, and the race attributes, at known places.
+    const image = new Uint8Array(0x40000);
+    image.set(makeExeImage(CREATURES, SOUNDS, WEAPONS));
+    image.set(new TextEncoder().encode('exp_ab.cfa\0'), 0x3f508);
+    const rows = Array.from({ length: 24 }, (_, i) => [40, 50, 60, 70 + i, 80, 90, 100, 110]);
+    image.set(rows.flat(), 0x361c3 + 25 * 8);
+    expect(readCreatureAttributes(image)).toEqual(rows);
+    const creatures = readCreatures(image);
+    expect(creatures[0].agility).toBe(70);
+    expect(creatures[22].agility).toBe(92);
+    // Without them, the creatures have none.
+    expect(readCreatures(makeExeImage(CREATURES, SOUNDS, WEAPONS))[0].agility).toBeUndefined();
   });
 });

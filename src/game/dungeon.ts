@@ -9,11 +9,12 @@
  * and does double damage, and every swing hits whatever is in front within
  * reach. Blocking takes most of the sting out of blows from the front for
  * stamina, and attacking while blocking bashes. Striking a creature that
- * has not noticed the player sneaking does triple damage. Worn armour takes
- * blows down, and the player's class and attributes (the Hero) change how
- * hard they hit, how often they are hit, how fast they move and more.
- * Monster stats, weapon damage and sounds come from the player's own game;
- * the loot rules are the remake's own.
+ * has not noticed the player sneaking does triple damage. Whether a monster's
+ * blow lands is Arena's rule: the levels on both sides, the armour on the
+ * body part it strikes and both sides' Agility (combat.ts's hitChance). The
+ * player's class and attributes (the Hero) change how hard they hit, how
+ * fast they move and more. Monster stats, weapon damage, armour and sounds
+ * come from the player's own game; the loot rules are the remake's own.
  *
  * Magic works as in Skyrim's hands with Arena's spells (see magic.ts): a
  * spell readied from the magic menu takes the place of the guard, so the
@@ -86,7 +87,8 @@ import {
   TRANSFER,
   amount,
 } from './magic';
-import { armourReduce, Inventory, itemKey, POTION, randomGear, startingGear, weaponOf, type Item, type NewItem } from './items';
+import { armourTables, Inventory, itemKey, POTION, randomGear, startingGear, weaponOf, type Item, type NewItem } from './items';
+import type { ArmourTables } from '../formats/armour';
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
 import { isBlocking, type DoorSounds, type Level, type LevelItem } from './level';
@@ -385,6 +387,7 @@ export class Dungeon {
   dreamt = false;
 
   private readonly weaponTable: WeaponInfo[];
+  private readonly armourTable: ArmourTables;
   private readonly unlocked = new Set<number>();
   private readonly pickedAt = new Map<number, number>();
   private readonly lockTried = new Set<number>();
@@ -440,6 +443,7 @@ export class Dungeon {
     this.encounters = tables?.encounters;
     this.creatureInfo = tables?.creatures ?? [];
     this.weaponTable = tables?.weapons ?? [];
+    this.armourTable = armourTables(tables?.armour);
     this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
     const held = this.inventory.weapon;
@@ -469,7 +473,8 @@ export class Dungeon {
     this.world = {
       level,
       openDoors: this.openDoors,
-      player: { x: this.player.x, y: this.player.y, level: this.stats.level, dodge: hero.dodge },
+      player: { x: this.player.x, y: this.player.y, level: this.stats.level, agility: hero.agility, protection: this.inventory.protection(), evasive: hero.evasive },
+      bodyParts: tables?.hits?.bodyParts,
       sneaking: false,
       now: 0,
       random,
@@ -882,6 +887,9 @@ export class Dungeon {
     w.player.x = this.player.x;
     w.player.y = this.player.y;
     w.player.level = this.stats.level;
+    w.player.agility = this.hero.agility;
+    w.player.evasive = this.hero.evasive;
+    w.player.protection = this.inventory.protection();
     w.sneaking = sneaking;
     w.invisible = this.invisible;
     w.now = this.time;
@@ -929,7 +937,6 @@ export class Dungeon {
         return;
       }
     }
-    damage = armourReduce(damage, this.inventory.armourRating());
     this.stats.health = Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
     this.events.push({ type: 'hurt', damage }, { type: 'sound', name: 'UHIT.VOC' });
@@ -1470,7 +1477,7 @@ export class Dungeon {
         return;
       case 'equipment': {
         item.taken = true;
-        if (this.weaponTable.length && this.random() < 0.75) this.addGear(randomGear(this.weaponTable, this.stats.level, this.random));
+        if (this.weaponTable.length && this.random() < 0.75) this.addGear(randomGear(this.weaponTable, this.stats.level, this.random, this.armourTable));
         else if (this.random() < 0.5) this.addPotion();
         else this.addGold(roll(this.random, 5, 25));
         return;
@@ -1484,7 +1491,7 @@ export class Dungeon {
         item.searched = true;
         this.addGold(roll(this.random, 20, 80));
         if (this.random() < 0.4) this.addPotion();
-        if (this.weaponTable.length && this.random() < 0.3) this.addGear(randomGear(this.weaponTable, this.stats.level + 1, this.random));
+        if (this.weaponTable.length && this.random() < 0.3) this.addGear(randomGear(this.weaponTable, this.stats.level + 1, this.random, this.armourTable));
         return;
     }
   }

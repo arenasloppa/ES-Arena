@@ -17,7 +17,7 @@ import { experienceFor, POTION_HEALS } from '../game/combat';
 import type { Character, CreationData } from '../game/character';
 import type { Dungeon, MenuEntry } from '../game/dungeon';
 import type { GameMenu } from '../game/engine';
-import { ARMOUR_TYPES, HOTKEYS, itemFrame, POTION } from '../game/items';
+import { ARMOUR_TYPES, armourRating, HOTKEYS, itemFrame, POTION } from '../game/items';
 import { describe as describeSpell, elementName, targetWords } from '../game/magic';
 import { spellColour } from '../render/spellView';
 import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
@@ -589,7 +589,7 @@ export class GameMenus {
     let note = '';
     if (item) {
       if (item.kind === 'weapon' && item.damage) rows.push(['Damage', `${item.damage[0]}–${item.damage[1]}`]);
-      else rows.push(['Armour', String(item.rating ?? 0)]);
+      else rows.push(['Armour', String(armourRating(item))]);
       rows.push(['Weight', weight(item.weight)], ['Value', String(item.value)]);
       const kind = item.kind === 'armour' ? `${ARMOUR_TYPES[item.armour ?? 0]} armour` : item.kind === 'shield' ? 'Shield' : item.twoHanded ? 'Two-handed' : 'One-handed';
       note = run.dungeon.inventory.forbidden(item) ?? (entry.equipped ? `${kind}, equipped` : kind);

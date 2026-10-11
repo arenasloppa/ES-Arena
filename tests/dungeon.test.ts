@@ -2,8 +2,9 @@ import { LEATHER, makeArmour } from '../src/game/items';
 import { describe, expect, it } from 'vitest';
 import type { ExeData } from '../src/formats/exe';
 import {
-  creatureHitChance,
+  bodyPart,
   DEFAULT_HERO,
+  hitChance,
   drinkPotion,
   experienceFor,
   gainExperience,
@@ -41,11 +42,36 @@ describe('combat rules', () => {
     expect(roll(always(0.999), 2, 5)).toBe(5);
   });
 
-  it('lets stronger creatures hit more often, within limits', () => {
-    expect(creatureHitChance(1, 1)).toBeCloseTo(0.55);
-    expect(creatureHitChance(3, 1)).toBeGreaterThan(creatureHitChance(1, 1));
-    expect(creatureHitChance(40, 1)).toBe(0.9);
-    expect(creatureHitChance(1, 40)).toBe(0.2);
+  const bare = { level: 1, agility: 128, protection: [0, 0, 0, 0, 0, 0, 0], evasive: false };
+  const plated = (part: number, percent: number) => bare.protection.map((p, i) => (i === part ? percent : p));
+
+  it('lands creatures’ blows as Arena does: by level, the armour where they strike and Agility', () => {
+    const rat = { level: 1, agility: 128 };
+    expect(hitChance(rat, bare, 0)).toBe(128);
+    // 5% (13 of 256) more for each level the creature has over the player.
+    expect(hitChance({ level: 3, agility: 128 }, bare, 0)).toBe(128 + 26);
+    // Protection comes off in percent, and only on the part it is worn on: 20% is 51 of 256.
+    expect(hitChance(rat, { ...bare, protection: plated(0, 20) }, 0)).toBe(128 - 51);
+    expect(hitChance(rat, { ...bare, protection: plated(0, 20) }, 1)).toBe(128);
+    // Agility on both sides.
+    expect(hitChance({ level: 1, agility: 150 }, { ...bare, agility: 100 }, 0)).toBe(128 + 50);
+    // However well armoured, a fifth of blows land, and a percent more for each of the player's levels.
+    expect(hitChance(rat, { ...bare, protection: plated(0, 90) }, 0)).toBe(2 + 51);
+    expect(hitChance(rat, { ...bare, level: 10, protection: plated(0, 90) }, 0)).toBe(25 + 51);
+  });
+
+  it('makes Monks and Acrobats hard to hit, and harder as they rise in level', () => {
+    const monk = { ...bare, evasive: true };
+    // A 32nd of the chance, times one more than their level: 128 makes 8, under the least there is.
+    expect(hitChance({ level: 1, agility: 128 }, monk, 0)).toBe(53);
+    expect(hitChance({ level: 20, agility: 230 }, { ...monk, level: 15 }, 0)).toBe(9 * 16);
+    // A chance below nothing is nothing, not a blow that always lands.
+    expect(hitChance({ level: 1, agility: 50 }, { ...monk, agility: 200, protection: plated(0, 90) }, 0)).toBe(53);
+  });
+
+  it('picks the body part a blow lands on from a roll of 0 to 19', () => {
+    const parts = [1, 2, 5, 9, 14, 17, 19];
+    expect([0, 0.1, 0.15, 0.3, 0.7, 0.86, 0.999].map((r) => bodyPart(always(r), parts))).toEqual([0, 1, 2, 3, 4, 5, 6]);
   });
 
   it('picks a swing for each kind of weapon in the game’s list', () => {
@@ -116,10 +142,6 @@ describe('combat rules', () => {
     expect(maxHealthFor(p, 0)).toBe(40 + 12 + 2);
   });
 
-  it('lets an agile character dodge some blows, within the same limits', () => {
-    expect(creatureHitChance(1, 1, 0.1)).toBeCloseTo(0.45);
-    expect(creatureHitChance(1, 40, 0.1)).toBe(0.2);
-  });
 });
 
 function world(level: Level, player: { x: number; y: number }, creatures: Creature[], random = always(0.1)): CreatureWorld {
@@ -208,6 +230,21 @@ describe('creatures', () => {
     const c = spawnCreature(0, fakeCreature(), 6.5, 1.5, always(0.1));
     const w = world(hall, { x: 7.5, y: 1.5 }, [c], always(0.95));
     expect(run(c, w, 3).every((d) => d === 0)).toBe(true);
+  });
+
+  it('miss more against armour on the body part they strike, and less against quicker players', () => {
+    // A roll of 0.3 strikes the gauntlets (by the remake's own table) and needs a chance over 76 of 256.
+    const strikes = (player: Partial<CreatureWorld['player']>, info = fakeCreature()) => {
+      const c = spawnCreature(0, info, 6.5, 1.5, always(0.1));
+      const w = world(hall, { x: 7.5, y: 1.5 }, [c], always(0.3));
+      Object.assign(w.player, player);
+      return run(c, w, 3);
+    };
+    expect(strikes({}).some((d) => d > 0)).toBe(true);
+    expect(strikes({ protection: [0, 25, 0, 0, 0, 0, 0] }).every((d) => d === 0)).toBe(true);
+    expect(strikes({ protection: [25, 0, 0, 0, 0, 0, 0] }).some((d) => d > 0)).toBe(true);
+    expect(strikes({ agility: 190 }).every((d) => d === 0)).toBe(true);
+    expect(strikes({ agility: 190 }, fakeCreature({ agility: 160 })).some((d) => d > 0)).toBe(true);
   });
 
   it('find their way round corners once hurt', () => {
@@ -639,14 +676,20 @@ describe('the character in the dungeon', () => {
     expect(new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER })).stats.weapon.name).toBe('Dagger');
   });
 
-  it('takes blows down by the armour worn', () => {
-    const bare = new Dungeon(arena(), TABLES, always(0));
+  it('keeps blows off with the armour worn where they strike, rather than softening them', () => {
+    // A roll of 0.3 strikes the gauntlets and needs a chance over 76 of 256.
+    const bare = new Dungeon(arena(), TABLES, always(0.3));
     tick(bare, 2);
     expect(firstHurt(bare)).toMatchObject({ damage: 2 });
-    const armoured = new Dungeon(arena(), TABLES, always(0));
-    armoured.inventory.equip(armoured.inventory.add({ kind: 'armour', name: 'Test Plate', type: 0, armour: 0, rating: 100, weight: 1, value: 1 }));
+    const armoured = new Dungeon(arena(), TABLES, always(0.3));
+    armoured.inventory.equip(armoured.inventory.add({ kind: 'armour', name: 'Test Gauntlets', type: 1, armour: 0, protection: 25, weight: 1, value: 1 }));
     tick(armoured, 2);
-    expect(firstHurt(armoured)).toMatchObject({ damage: 1 });
+    expect(firstHurt(armoured)).toBeUndefined();
+    // Where blows land comes from the game when it can be read: here every blow strikes the helm.
+    const helmed = new Dungeon(arena(), { ...TABLES, hits: { bodyParts: [-1, -1, -1, -1, -1, 19, 19], undead: [] } }, always(0.3));
+    helmed.inventory.equip(helmed.inventory.add({ kind: 'armour', name: 'Test Helm', type: 5, armour: 0, protection: 25, weight: 1, value: 1 }));
+    tick(helmed, 2);
+    expect(firstHurt(helmed)).toBeUndefined();
   });
 
   it('adds the character’s strength to blows, and lands critical strikes for double damage', () => {

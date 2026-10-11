@@ -3,10 +3,11 @@
  * gear. Pure logic so it can be unit tested.
  *
  * Damage, health and levels come from the game's own tables (see
- * formats/exe.ts). How often blows land is the remake's own rule, kept
- * simple in the spirit of Arena: the higher level side hits more often.
- * The player's swings always connect, as in Skyrim. What the character's
- * class and attributes add is worked out in character.ts.
+ * formats/exe.ts). Whether a creature's blow lands is Arena's own rule: the
+ * levels on both sides, the armour on the body part it strikes and both
+ * sides' Agility (see hitChance). The player's swings always connect, as in
+ * Skyrim. What the character's class and attributes add is worked out in
+ * character.ts.
  */
 import type { ClassInfo } from '../formats/classes';
 
@@ -17,9 +18,60 @@ export function roll(random: Random, min: number, max: number): number {
   return min + Math.floor(random() * (max - min + 1));
 }
 
-/** Chance that a creature's blow lands on the player, less the player's knack for dodging. */
-export function creatureHitChance(creatureLevel: number, playerLevel: number, dodge = 0): number {
-  return Math.min(0.9, Math.max(0.2, 0.55 + 0.05 * (creatureLevel - playerLevel) - dodge));
+/** Out of 100 to Arena's 0 to 255 (its program at 0x17474): times 2.56, rounded half away from zero. */
+export function to256(value: number): number {
+  const q = Math.floor((Math.abs(value) * 256 + 50) / 100);
+  return value < 0 ? -q : q;
+}
+
+/** Agility of 50 out of 100 on Arena's scale: a creature's when the program's can't be read, and a player's with no character. */
+export const MIDDLING_AGILITY = 128;
+/**
+ * Where blows land when the program's table can't be read, the remake's own:
+ * a roll of 0 to 19 hits the first body part (cuirass, gauntlets, greaves,
+ * left and right pauldron, helm, boots) whose value it is no more than.
+ */
+export const BODY_PARTS = [4, 7, 10, 12, 14, 15, 19];
+
+/** What a creature's blow has to get past to land. */
+export interface Defender {
+  level: number;
+  /** Agility, 0 to 255. */
+  agility: number;
+  /** How well each body part is protected, in percent: the piece worn there, and the shield if it covers it. */
+  protection: number[];
+  /** A Monk or Acrobat: their level, more than their armour, keeps blows off them. */
+  evasive: boolean;
+}
+
+/**
+ * Chance out of 256 that a creature's blow lands on a body part, as Arena
+ * works it out (its program at 0x2AF9B): an even chance, 5% more for each
+ * level the creature has over the player (and less for each it lacks), less
+ * the protection on that part, plus the creature's Agility less the
+ * player's. For a Monk or Acrobat it is a 32nd of that, times one more than
+ * their level. However well protected, a blow lands a fifth of the time and
+ * a percent more for each of the player's levels. (Arena works the Monk's
+ * figure on 16 bits, so one below nothing wraps round to a blow that always
+ * lands; here it counts as nothing.)
+ */
+export function hitChance(attacker: { level: number; agility: number }, d: Defender, part: number): number {
+  let chance = 128 + to256(5 * (attacker.level - d.level)) - to256(d.protection[part] ?? 0) + attacker.agility - d.agility;
+  if (d.evasive) chance = Math.floor(Math.max(0, chance) / 32) * (d.level + 1);
+  return Math.max(chance, Math.floor((d.level * 256) / 100) + 51);
+}
+
+/** The body part a blow lands on: a roll of 0 to 19 down the table (Arena's program at 0x2B097). */
+export function bodyPart(random: Random, parts: number[] = BODY_PARTS): number {
+  const r = Math.floor(random() * 20);
+  const part = parts.findIndex((top) => r <= top);
+  return part < 0 ? parts.length - 1 : part;
+}
+
+/** Whether a creature's blow lands: on a body part, then a roll out of 256 below the chance there. */
+export function blowLands(attacker: { level: number; agility: number }, d: Defender, random: Random, parts?: number[]): boolean {
+  const part = bodyPart(random, parts);
+  return Math.floor(random() * 256) < hitChance(attacker, d, part);
 }
 
 export interface Weapon {
@@ -76,8 +128,10 @@ export interface Hero {
   experience: number;
   /** Added to every blow. */
   damageBonus: number;
-  /** Taken off creatures' chance to land a blow. */
-  dodge: number;
+  /** Agility on Arena's scale of 0 to 255: the quicker the character, the fewer blows land (see hitChance). */
+  agility: number;
+  /** A Monk or Acrobat, hard to hit and harder with each level (see hitChance). */
+  evasive: boolean;
   /** Multiplies walking and running speed. */
   pace: number;
   /** Multiplies how fast stamina comes back. */
@@ -111,7 +165,8 @@ export const DEFAULT_HERO: Hero = {
   healthBonus: 3,
   experience: 1000,
   damageBonus: 0,
-  dodge: 0,
+  agility: MIDDLING_AGILITY,
+  evasive: false,
   pace: 1,
   recovery: 1,
   critical: 0,

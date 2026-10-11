@@ -14,7 +14,7 @@
 import type { CharacterTables, ClassInfo, CreationTexts, RaceInfo } from '../formats/classes';
 import type { ClassChooser, Question } from '../formats/creation';
 import type { GameMessages } from '../formats/messages';
-import type { Hero, Random } from './combat';
+import { to256, type Hero, type Random } from './combat';
 import { regainsMagicka, startingMagicka } from './magic';
 
 export type Gender = 'male' | 'female';
@@ -31,6 +31,9 @@ export const LUCK = 7;
 export const ATTRIBUTE_COUNT = 8;
 /** The races, in the game's order. */
 export const ARGONIAN = 7;
+/** Classes whose places in the game's list Arena's rules go by. */
+export const ACROBAT = 9;
+export const MONK = 12;
 /** No attribute goes above this, bonus points included. */
 export const ATTRIBUTE_MAX = 100;
 /** Faces each race has to choose from. */
@@ -244,11 +247,8 @@ export function arenaRoll(n: number, random: Random): number {
   }
 }
 
-/** Out of 100 to Arena's 0 to 255 (its program at 0x17474): times 2.56, rounded half away from zero. */
-export function to256(value: number): number {
-  const q = Math.floor((Math.abs(value) * 256 + 50) / 100);
-  return value < 0 ? -q : q;
-}
+
+export { to256 };
 
 /** Arena's 0 to 255 to the 100 the sheet shows, rounded. */
 export function to100(raw: number): number {
@@ -349,7 +349,7 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
   const d = derivedAttributes(a);
   // The remake's own rules turn the sheet's steps into chances: a step is five points of Agility or Luck.
   // Arena keeps what Luck does hidden; UESP says it nudges nearly everything (fights, locks, bargains), so here
-  // it adds a little to dodging, picking locks, critical hits and the gold found.
+  // it adds a little to picking locks, critical hits and the gold found.
   const step = (i: number) => Math.trunc((a[i] - 50) / 5);
   return {
     cls,
@@ -361,7 +361,8 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     healMod: d.healMod,
     experience: cls.experience,
     damageBonus: d.damage,
-    dodge: d.toDefend * 0.02 + step(LUCK) * 0.005,
+    agility: to256(a[AGILITY]),
+    evasive: cls.id === MONK || cls.id === ACROBAT,
     // Arena's base speed: 20 plus up to 20 more for Speed (OpenTESArena's getBaseSpeed), against the remake's walk at 40.
     pace: (20 + Math.trunc((Math.trunc((a[SPEED] * 256) / 100) * 20) / 256)) / 30,
     recovery: 0.8 + a[WILLPOWER] * 0.004,

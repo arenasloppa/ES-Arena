@@ -2,6 +2,7 @@
  * Test-only encoders that build synthetic Arena files, so the parsers can be
  * tested without any of Bethesda's data.
  */
+import type { ArmourTables, HitTables } from '../../src/formats/armour';
 import { D_CODE, D_LEN, HuffTree, LZHUF } from '../../src/formats/compression';
 
 class BitWriter {
@@ -349,6 +350,36 @@ export function makeCharacterTables(t: FakeCharacterTables): number[] {
     out.push(...t.classes.map((c) => c.armour), ...zs(['Green', 'Blue']));
   }
   if (t.texts) out.push(...zs([...t.texts.messages, ...t.texts.phrases, t.texts.closing]));
+  return out;
+}
+
+/**
+ * Bytes laid out like the game's armour, shield and hit tables (see
+ * src/formats/armour.ts), for makeExeImage's `more`; the names and messages
+ * are made up but for the pieces the reader looks for.
+ */
+export function makeArmourTables(t: ArmourTables, hits: HitTables): number[] {
+  const zs = (list: string[]) => list.flatMap((s) => [...ascii(s), 0]);
+  const out: number[] = [];
+  // The item maker's code: each kind, then its protection.
+  t.protection.forEach((p, kind) => out.push(0x90, 0xc6, 0x44, 0x10, kind, 0xc6, 0x44, 0x04, p, 0x90));
+  // Pieces and shields, where each is worn, then prices and weights for leather, chain and plate.
+  out.push(...zs(['Cuirass', 'Gauntlets', 'Leggings', 'Left', 'Right', 'Cap', 'Shoes', 'Small', 'Round', 'Kite', 'Tall']));
+  out.push(...zs(['Chest', 'Hands', 'Legs', 'Arm', 'Arm', 'Head', 'Feet', 'Any', 'Any', 'Any', 'Any']));
+  for (const k of [2, 1, 0]) out.push(...t.prices[k]);
+  for (const k of [2, 1, 0]) out.push(...t.weights[k].flatMap((w) => u16(Math.round(w * 256))));
+  // Materials, their protection and chances, pointers to three name lists (each with 11 more bytes), then price multipliers.
+  out.push(...zs(['Iron', 'Steel', 'Brass', 'Bronze', 'Glass', 'Crystal', 'Star', 'Moon']), ...t.materialProtection.map((v) => v & 0xff), ...t.materialChances);
+  const lists = ['Plate', 'Chain', 'Leather'].map((kind) => [...zs(Array.from({ length: 11 }, (_, i) => `${kind} ${i}`)), ...new Array(11).fill(3)]);
+  const starts = [0x4000, 0x4000 + lists[0].length, 0x4000 + lists[0].length + lists[1].length];
+  out.push(...starts.flatMap(u16), ...lists.flat(), ...t.materialPrices.flatMap(u16));
+  // Shields' protection, then the position message.
+  out.push(...t.shieldProtection, 0, 0, ...zs(['You stand at position is %d, %d.']));
+  // Pointers to what each shield covers (the bytes right after them), then the condition grades and their first name.
+  const covers = t.shieldCovers.map((parts) => Array.from({ length: 7 }, (_, i) => (parts.includes(i) ? 0xfe : 0)));
+  out.push(...[0, 1, 2, 3].flatMap((i) => u16(0x5008 + i * 7)), ...covers.flat(), 2, 6, 12, 33, 55, 77, 99, ...zs(['Broken', 'Worn']));
+  // Where blows land, after the broken gear message, then the undead.
+  out.push(...zs(['That %s is broken.']), ...hits.bodyParts, ...hits.undead, ...zs(['filler']));
   return out;
 }
 

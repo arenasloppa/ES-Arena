@@ -5,10 +5,15 @@
  *
  * A weapon's damage, weight and price come from the player's own game
  * (formats/exe.ts), its damage raised or lowered by its material. Armour and
- * shield ratings, weights and values, what each material is worth and what
- * turns up where are the remake's own numbers. Worn armour takes blows down
- * by its rating: 100 points halve them.
+ * shields protect, weigh and cost what the game says (formats/armour.ts), as
+ * in Arena: each piece keeps blows off the body part it is worn on, and a
+ * shield off the parts it covers, by its protection in percent (see
+ * combat.ts's hitChance); only plate and shields come in the metals, which
+ * add to it. Arena shows a fifth of the protection as the armour rating.
+ * What a weapon's material does to it and what turns up where are the
+ * remake's own.
  */
+import type { ArmourTables } from '../formats/armour';
 import type { ClassInfo } from '../formats/classes';
 import type { WeaponInfo } from '../formats/exe';
 import { weaponCif, type Random, type Weapon } from './combat';
@@ -45,15 +50,33 @@ export const LEATHER = 2;
 export const PIECES = ['Cuirass', 'Gauntlets', 'Greaves', 'Left Pauldron', 'Right Pauldron', 'Helm', 'Boots'];
 export const SHIELDS = ['Buckler', 'Round Shield', 'Kite Shield', 'Tower Shield'];
 
-/** Each piece's share of a suit. */
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+/** Each piece's share of a suit, for the remake's own weights and prices. */
 const PIECE_SHARE = [3, 1, 2, 1, 1, 1, 1];
 /** Per share of a suit, by armour type. */
-const ARMOUR_RATING = [6, 4, 2.5];
 const ARMOUR_WEIGHT = [2.4, 1.6, 0.8];
 const ARMOUR_VALUE = [40, 25, 10];
-const SHIELD_RATING = [4, 6, 8, 11];
 const SHIELD_WEIGHT = [2, 4, 6, 9];
 const SHIELD_VALUE = [15, 30, 50, 80];
+
+/** The remake's own armour numbers, for whatever of the game's can't be read (formats/armour.ts says what each holds). */
+export const FALLBACK_ARMOUR: ArmourTables = {
+  protection: [40, 25, 10],
+  materialProtection: [-4, 0, 2, 4, 8, 12, 16, 20],
+  materialChances: [15, 55, 72, 84, 91, 95, 98, 101],
+  materialPrices: [2, 4, 8, 16, 24, 36, 52, 80],
+  shieldProtection: [4, 8, 12, 16],
+  shieldCovers: [[0], [0, 1], [0, 1, 3], [0, 1, 2, 3]],
+  weights: ARMOUR_WEIGHT.map((w) => [...PIECE_SHARE.map((share) => round1(w * share)), ...SHIELD_WEIGHT]),
+  prices: ARMOUR_VALUE.map((v) => [...PIECE_SHARE.map((share) => v * share), ...SHIELD_VALUE]),
+};
+
+/** The game's armour tables, with the remake's own standing in for any it lacks. */
+export function armourTables(read?: Partial<ArmourTables>): ArmourTables {
+  return { ...FALLBACK_ARMOUR, ...read };
+}
+
 /** For a game whose weapon table has no weights and prices: the remake's own, by place in the weapon list. */
 const WEAPON_WEIGHT = [2.2, 0.6, 2.6, 3.7, 3.3, 4.1, 6.3, 0.9, 2.3, 3.6, 5.8, 4.6, 5.1, 7.2, 5.3, 7.6, 1.3, 1.9];
 const WEAPON_VALUE = [12, 14, 35, 55, 48, 70, 95, 22, 45, 85, 120, 40, 52, 66, 58, 88, 60, 90];
@@ -72,14 +95,16 @@ export interface Item {
    * cuirass to 6 boots. Shields: 0 buckler to 3 tower.
    */
   type: number;
-  /** 0 Iron to 7 Ebony; leather has none. */
+  /** 0 Iron to 7 Ebony; chain, leather and plain plate have none. */
   material?: number;
   /** Armour: 0 plate, 1 chain, 2 leather. */
   armour?: number;
   damage?: [number, number];
   twoHanded?: boolean;
-  /** What it adds to the armour rating when worn. */
-  rating?: number;
+  /** Armour and shields: how much less often, in percent, a blow lands where it is worn. */
+  protection?: number;
+  /** Shields: the body parts they cover. */
+  covers?: number[];
   /** Kilograms. */
   weight: number;
   value: number;
@@ -89,8 +114,6 @@ export type NewItem = Omit<Item, 'id'>;
 
 /** Where an item is worn: the weapon hand, the shield arm or an armour piece. */
 export type Slot = 'weapon' | 'shield' | `armour${number}`;
-
-const round1 = (v: number) => Math.round(v * 10) / 10;
 
 /** A weapon of the material; a plain one (as the player starts with) has no material in its name. */
 export function makeWeapon(weapons: WeaponInfo[], type: number, material: number, plain = false): NewItem {
@@ -108,33 +131,48 @@ export function makeWeapon(weapons: WeaponInfo[], type: number, material: number
   };
 }
 
-export function makeArmour(armour: number, piece: number, material: number): NewItem {
-  const share = PIECE_SHARE[piece];
-  // Leather is leather: it comes in no metal.
-  const m = armour === LEATHER ? MATERIALS[STEEL] : MATERIALS[material];
+/** A material's price: the plain item's times the material's multiplier, in quarters, as Arena works it out (at least 1). */
+function materialPrice(price: number, material: number | undefined, t: ArmourTables): number {
+  return material === undefined ? price : Math.max(1, Math.floor((price * t.materialPrices[material]) / 4));
+}
+
+/**
+ * A piece of armour. As in Arena, only plate comes in a metal (from Iron to
+ * Ebony), which adds to how well it protects and to its price but not to
+ * its weight; chain and leather, and plain plate, have none.
+ */
+export function makeArmour(armour: number, piece: number, material?: number, t: ArmourTables = FALLBACK_ARMOUR): NewItem {
+  const metal = armour === PLATE ? material : undefined;
   return {
     kind: 'armour',
-    name: armour === LEATHER ? `Leather ${PIECES[piece]}` : `${m.name} ${ARMOUR_TYPES[armour]} ${PIECES[piece]}`,
+    name: `${metal === undefined ? '' : `${MATERIALS[metal].name} `}${ARMOUR_TYPES[armour]} ${PIECES[piece]}`,
     type: piece,
     armour,
-    material: armour === LEATHER ? undefined : material,
-    rating: Math.max(1, Math.round(ARMOUR_RATING[armour] * share * m.quality)),
-    weight: round1(ARMOUR_WEIGHT[armour] * share * m.weight),
-    value: Math.round(ARMOUR_VALUE[armour] * share * m.value),
+    material: metal,
+    protection: t.protection[armour] + (metal === undefined ? 0 : t.materialProtection[metal]),
+    weight: t.weights[armour][piece],
+    value: materialPrice(t.prices[armour][piece], metal, t),
   };
 }
 
-export function makeShield(shield: number, material: number): NewItem {
-  const m = MATERIALS[material];
+/** A shield, plain or of a metal; however good the metal, no shield protects more than plate (Arena's rule). */
+export function makeShield(shield: number, material?: number, t: ArmourTables = FALLBACK_ARMOUR): NewItem {
+  const part = PIECES.length + shield;
   return {
     kind: 'shield',
-    name: `${m.name} ${SHIELDS[shield]}`,
+    name: `${material === undefined ? '' : `${MATERIALS[material].name} `}${SHIELDS[shield]}`,
     type: shield,
     material,
-    rating: Math.round(SHIELD_RATING[shield] * m.quality),
-    weight: round1(SHIELD_WEIGHT[shield] * m.weight),
-    value: Math.round(SHIELD_VALUE[shield] * m.value),
+    protection: Math.min(t.protection[PLATE], t.shieldProtection[shield] + (material === undefined ? 0 : t.materialProtection[material])),
+    covers: [...t.shieldCovers[shield]],
+    weight: t.weights[PLATE][part],
+    value: materialPrice(t.prices[PLATE][part], material, t),
   };
+}
+
+/** The armour rating Arena shows for a piece or shield: a fifth of its protection. */
+export function armourRating(item: Pick<Item, 'protection'>): number {
+  return Math.floor((item.protection ?? 0) / 5);
 }
 
 /** The weapon as the fighting rules and the first-person view need it. */
@@ -154,12 +192,6 @@ export function itemFrame(item: Pick<Item, 'kind' | 'type' | 'armour'>): number 
   return [18, 29, 36][item.armour ?? 0] + item.type;
 }
 
-/** Damage after the armour worn takes its share: 100 points of armour halve it. Always at least 1. */
-export function armourReduce(damage: number, rating: number): number {
-  if (damage <= 0) return 0;
-  return Math.max(1, Math.round((damage * 100) / (100 + Math.max(0, rating))));
-}
-
 /** A material that gets better, and rarer, the higher the player's level. */
 export function materialFor(level: number, random: Random): number {
   const reach = Math.min(MATERIALS.length, 2 + level);
@@ -167,16 +199,16 @@ export function materialFor(level: number, random: Random): number {
 }
 
 /** A piece of gear found in the dungeon: mostly weapons, then armour, sometimes a shield. */
-export function randomGear(weapons: WeaponInfo[], level: number, random: Random): NewItem {
+export function randomGear(weapons: WeaponInfo[], level: number, random: Random, armour: ArmourTables = FALLBACK_ARMOUR): NewItem {
   const kind = random();
   const usable = usableWeapons(weapons);
   const material = materialFor(level, random);
   if (kind < 0.55 && usable.length) return makeWeapon(weapons, usable[Math.floor(random() * usable.length)], material);
   if (kind < 0.9 || !usable.length) {
     const type = Math.floor(random() * ARMOUR_TYPES.length);
-    return makeArmour(type, Math.floor(random() * PIECES.length), material);
+    return makeArmour(type, Math.floor(random() * PIECES.length), material, armour);
   }
-  return makeShield(Math.floor(random() * SHIELDS.length), material);
+  return makeShield(Math.floor(random() * SHIELDS.length), material, armour);
 }
 
 /** Places in the game's weapon list. */
@@ -266,8 +298,19 @@ export class Inventory {
     return this.equipped('weapon');
   }
 
+  /** The armour ratings of everything worn, added up, for the menus. */
   armourRating(): number {
-    return this.wornItems().reduce((sum, i) => sum + (i.rating ?? 0), 0);
+    return this.wornItems().reduce((sum, i) => sum + armourRating(i), 0);
+  }
+
+  /**
+   * How well each body part is protected, in percent (cuirass, gauntlets,
+   * greaves, left and right pauldron, helm, boots): the piece worn there,
+   * and the shield if it covers that part, as Arena adds them up.
+   */
+  protection(): number[] {
+    const shield = this.equipped('shield');
+    return PIECES.map((_, part) => (this.equipped(`armour${part}`)?.protection ?? 0) + (shield?.covers?.includes(part) ? (shield.protection ?? 0) : 0));
   }
 
   /** Kilograms carried, potions included. */

@@ -41,7 +41,8 @@ screenshots of earlier versions.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
   find the Shift Gate.
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners
-  and fight.
+  and fight, landing their blows by Arena's rule: the armour where they strike, your Agility against theirs and the
+  levels on both sides decide whether a blow lands.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
   three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you.
 - Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
@@ -181,7 +182,7 @@ files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`,
 
 | Path | What it does |
 |---|---|
-| `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, CIF and CFA animations, VOC sounds, MIF maps, INF level definitions, the game's program (unpacking it and reading the creature, weapon and class tables and the character creation words), the class questions and name pieces, the LZSS and LZHUF decompressors, the spells, the XMI music and its instruments, the FLC cutscenes and the game's texts. No browser or Three.js code. |
+| `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, CIF and CFA animations, VOC sounds, MIF maps, INF level definitions, the game's program (unpacking it and reading the creature, weapon, armour and class tables and the character creation words), the class questions and name pieces, the LZSS and LZHUF decompressors, the spells, the XMI music and its instruments, the FLC cutscenes and the game's texts. No browser or Three.js code. |
 | `src/data/` | Finding and reading the player's `ARENA` folder, and checking the required files. |
 | `src/game/` | The level model built from a MIF map and its INF file, movement and collision, the character and what their class and attributes do, the monsters, combat, the inventory, the quest, what the player has explored, and the game loop. |
 | `src/audio/` | Arena's sound effects, played through the Web Audio API so each comes from where it happens, and its music: an emulated AdLib FM chip, a sound driver that plays the songs on it as the game's did, and a player that makes each song into sound in the background and loops it. |

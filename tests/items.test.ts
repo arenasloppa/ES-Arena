@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { ArmourTables } from '../src/formats/armour';
 import type { ClassInfo } from '../src/formats/classes';
 import type { WeaponInfo } from '../src/formats/exe';
 import {
-  armourReduce,
+  armourRating,
+  armourTables,
   CHAIN,
+  FALLBACK_ARMOUR,
   Inventory,
   itemFrame,
   itemKey,
@@ -24,6 +27,26 @@ import { always } from './helpers/level';
 const NAMES = ['Staff', 'Dagger', 'Shortsword', 'Broadsword', 'Saber', 'Longsword', 'Claymore', 'Tanto', 'Wakizashi', 'Katana', 'Dai-Katana', 'Mace', 'Flail', 'War Hammer', 'War Axe', 'Battle Axe', 'Short Bow', 'Long Bow'];
 const WEAPONS: WeaponInfo[] = NAMES.map((name, i) => ({ name, damage: [1 + (i % 4), 10 + i], twoHanded: [0, 6, 10, 15, 16, 17].includes(i), weight: 1 + i / 2, price: 20 + i }));
 
+/** Made-up armour tables; none of these numbers come from the game. */
+const ARMOUR: ArmourTables = {
+  protection: [52, 33, 17],
+  materialProtection: [-6, 0, 1, 6, 11, 16, 21, 26],
+  materialChances: [12, 50, 70, 80, 90, 94, 97, 101],
+  materialPrices: [2, 4, 12, 24, 60, 120, 240, 1200],
+  shieldProtection: [6, 11, 16, 30],
+  shieldCovers: [[0], [0, 3], [0, 1, 3], [0, 1, 2, 3, 6]],
+  weights: [
+    [13, 7, 11, 6, 6, 9, 7, 3, 4, 7, 11],
+    [7, 3, 5, 4, 4, 5, 3, 3, 4, 7, 11],
+    [3, 1, 2, 2, 2, 2, 2, 3, 4, 7, 11],
+  ],
+  prices: [
+    [90, 40, 70, 50, 50, 70, 45, 12, 22, 33, 55],
+    [45, 25, 35, 25, 25, 35, 25, 12, 22, 33, 55],
+    [20, 12, 18, 12, 12, 18, 12, 12, 22, 33, 55],
+  ],
+};
+
 function cls(overrides: Partial<ClassInfo> = {}): ClassInfo {
   return { name: 'Tinker', healthDie: 9, experience: 800, spellcaster: false, critical: false, thief: false, armour: CHAIN, shields: [0, 1], weapons: [1, 2, 6], ...overrides };
 }
@@ -36,12 +59,19 @@ describe('gear', () => {
     expect(makeWeapon(WEAPONS, 0, 0).damage).toEqual([1, 9]);
   });
 
-  it('makes armour of plate, chain and leather, and shields, rated by what they are made of', () => {
-    expect(makeArmour(PLATE, 0, 1)).toMatchObject({ kind: 'armour', name: 'Steel Plate Cuirass', type: 0, armour: PLATE, rating: 18 });
-    expect(makeArmour(CHAIN, 5, 0)).toMatchObject({ name: 'Iron Chain Helm', rating: 3 });
-    expect(makeArmour(LEATHER, 6, 7)).toMatchObject({ name: 'Leather Boots', material: undefined, rating: 3 });
-    expect(makeShield(3, 5)).toMatchObject({ kind: 'shield', name: 'Mithril Tower Shield', rating: 17 });
-    expect(makeArmour(PLATE, 0, 7).rating!).toBeGreaterThan(makeArmour(PLATE, 0, 1).rating!);
+  it('makes armour and shields from the game’s tables, with only plate and shields in metals that protect better', () => {
+    expect(makeArmour(PLATE, 0, 1, ARMOUR)).toEqual({ kind: 'armour', name: 'Steel Plate Cuirass', type: 0, armour: PLATE, material: 1, protection: 52, weight: 13, value: 90 });
+    expect(makeArmour(PLATE, 5, 7, ARMOUR)).toMatchObject({ name: 'Ebony Plate Helm', protection: 78, weight: 9, value: 21000 });
+    expect(makeArmour(PLATE, 5, undefined, ARMOUR)).toMatchObject({ name: 'Plate Helm', material: undefined, protection: 52, value: 70 });
+    expect(makeArmour(CHAIN, 5, 0, ARMOUR)).toMatchObject({ name: 'Chain Helm', material: undefined, protection: 33, weight: 5, value: 35 });
+    expect(makeArmour(LEATHER, 6, 7, ARMOUR)).toMatchObject({ name: 'Leather Boots', material: undefined, protection: 17, weight: 2 });
+    expect(makeShield(3, 5, ARMOUR)).toEqual({ kind: 'shield', name: 'Mithril Tower Shield', type: 3, material: 5, protection: 46, covers: [0, 1, 2, 3, 6], weight: 11, value: 1650 });
+    expect(makeShield(0, undefined, ARMOUR)).toMatchObject({ name: 'Buckler', protection: 6, covers: [0] });
+    // No shield protects more than plate.
+    expect(makeShield(3, 7, ARMOUR).protection).toBe(52);
+    // Arena shows a fifth of the protection as the armour rating.
+    expect(armourRating(makeArmour(PLATE, 5, 7, ARMOUR))).toBe(15);
+    expect(armourTables({ protection: [70, 50, 30] })).toEqual({ ...FALLBACK_ARMOUR, protection: [70, 50, 30] });
   });
 
   it('finds each item’s picture among the game’s equipment pictures', () => {
@@ -50,13 +80,6 @@ describe('gear', () => {
     expect(itemFrame(makeShield(2, 1) as never)).toBe(27);
     expect(itemFrame(makeArmour(CHAIN, 0, 1) as never)).toBe(29);
     expect(itemFrame(makeArmour(LEATHER, 6, 1) as never)).toBe(42);
-  });
-
-  it('takes blows down by the armour worn: 100 points halve them, and some always get through', () => {
-    expect(armourReduce(10, 0)).toBe(10);
-    expect(armourReduce(10, 100)).toBe(5);
-    expect(armourReduce(1, 400)).toBe(1);
-    expect(armourReduce(0, 50)).toBe(0);
   });
 
   it('turns up better materials at higher levels, and never bows', () => {
@@ -109,9 +132,18 @@ describe('the inventory', () => {
     inv.equip(helm);
     expect(inv.isEquipped(a)).toBe(false);
     expect(inv.wornItems()).toEqual([b, helm]);
-    expect(inv.armourRating()).toBe(b.rating! + helm.rating!);
+    expect(inv.armourRating()).toBe(armourRating(b) + armourRating(helm));
     expect(inv.toggle(helm)).toEqual({ ok: true });
-    expect(inv.armourRating()).toBe(b.rating);
+    expect(inv.armourRating()).toBe(armourRating(b));
+  });
+
+  it('protects each body part with the piece worn there and the shield if it covers it', () => {
+    const inv = new Inventory();
+    inv.equip(inv.add(makeArmour(PLATE, 0, 1, ARMOUR)));
+    inv.equip(inv.add(makeArmour(LEATHER, 5, undefined, ARMOUR)));
+    inv.equip(inv.add(makeShield(1, undefined, ARMOUR)));
+    expect(inv.protection()).toEqual([52 + 11, 0, 0, 11, 0, 17, 0]);
+    expect(inv.armourRating()).toBe(10 + 3 + 2);
   });
 
   it('puts the shield away for a two-handed weapon, and keeps a weapon in hand', () => {

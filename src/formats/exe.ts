@@ -14,11 +14,14 @@
  *   -0x1DD u8   1 = leaves no body
  *   -0x1C5 u16  scale (0 = none)
  *   -0x195 u8   level
- *   -0x17D u16  elemental flags (4 fire, 8 frost)
+ *   -0x17D u16  the elements it resists (4 fire, 8 cold, 16 shock, 64 poison)
  *   -0x14D u16  hit points, lowest and highest
  *   -0x0ED u32  experience
  *   -0x08D u8   extra experience per hit point
  *   -0x075 u8   damage, lowest and highest
+ * Each creature's attributes, 8 bytes on Arena's scale of 0 to 255 in the
+ * attributes' order, follow the race attribute table, after 9 more rows.
+ *
  * Weapons: 18 names ("Staff", "Dagger", ...), then one byte each for one or
  * two hands; the damage pairs end right where "of Strength" (the first
  * enchantment name) begins. In the CD version 72 bytes sit between the two:
@@ -27,6 +30,7 @@
  *
  * The character tables (classes, races, creation texts) are in classes.ts.
  */
+import { readArmourTables, readHitTables, type ArmourTables, type HitTables } from './armour';
 import { readCalendar, type Calendar } from './calendar';
 import { readCharacterTables, type CharacterTables } from './classes';
 import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
@@ -52,8 +56,10 @@ export interface CreatureInfo {
   lift: number;
   /** Ghosts and the like leave no body. */
   noCorpse: boolean;
-  /** Elemental flags: 4 fire, 8 frost. */
+  /** The elements it resists: 4 fire, 8 cold, 16 shock, 64 poison. */
   flags: number;
+  /** Agility on Arena's scale of 0 to 255, when the program's creature attributes can be read: the quicker land more blows. */
+  agility?: number;
   /** The game's scale value, 0 when unset. */
   scale: number;
 }
@@ -101,6 +107,10 @@ export interface ExeData {
   encounters?: EncounterTables;
   /** Classes, races and the words of character creation; missing when they could not be read. */
   character?: CharacterTables;
+  /** Whatever of the armour and shield tables could be read (see armour.ts). */
+  armour?: Partial<ArmourTables>;
+  /** Where blows land and which creatures are undead; missing when they could not be read. */
+  hits?: HitTables;
 }
 
 /** Creatures that can appear in levels; the final boss is left out. */
@@ -109,7 +119,17 @@ const TABLE_ENTRIES = 24;
 const WEAPONS = 18;
 
 export function readExeData(image: Uint8Array): ExeData {
-  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image), raceAttributes: readRaceAttributes(image), encounters: readEncounters(image), calendar: readCalendar(image) };
+  const data: ExeData = {
+    creatures: readCreatures(image),
+    weapons: readWeapons(image),
+    platforms: readRaisedPlatforms(image),
+    messages: readMessages(image),
+    raceAttributes: readRaceAttributes(image),
+    encounters: readEncounters(image),
+    calendar: readCalendar(image),
+    armour: readArmourTables(image),
+    hits: readHitTables(image),
+  };
   try {
     data.character = readCharacterTables(image);
   } catch (err) {
@@ -125,6 +145,9 @@ const VERSIONS = [
   { name: 'CD', anchor: 0x3f508, platforms: 0x48594, raceAttributes: 0x361c3, chances: 0x42210, table: 0x36cbe, indices: 0x36818 },
   { name: 'floppy', anchor: 0x3f1cc, platforms: 0x48206, raceAttributes: 0x35fc3, chances: 0x41e6e, table: 0x36abe, indices: 0x36618 },
 ];
+/** From the race attribute table to the creatures': 16 race rows and 9 more, of 8 bytes. */
+const CREATURE_ATTRIBUTES = 25 * 8;
+const AGILITY = 3;
 
 function version(image: Uint8Array) {
   return VERSIONS.find((v) => cString(image, v.anchor) === 'exp_ab.cfa');
@@ -169,6 +192,15 @@ export function readRaceAttributes(image: Uint8Array): number[][] | undefined {
   return rows.every((row) => row.every((a) => a >= 25 && a <= 230)) ? rows : undefined;
 }
 
+/** Each creature's attributes, 0 to 255, in the game's order of creatures; missing as above. */
+export function readCreatureAttributes(image: Uint8Array): number[][] | undefined {
+  const v = version(image);
+  const at = v ? v.raceAttributes + CREATURE_ATTRIBUTES : -1;
+  if (!v || at + TABLE_ENTRIES * 8 > image.length) return undefined;
+  const rows = Array.from({ length: TABLE_ENTRIES }, (_, r) => Array.from(image.subarray(at + r * 8, at + r * 8 + 8)));
+  return rows.every((row) => row.every((a) => a > 0)) ? rows : undefined;
+}
+
 export function readRaisedPlatforms(image: Uint8Array): RaisedPlatforms | undefined {
   const v = version(image);
   if (!v || v.platforms + 56 * 2 > image.length) return undefined;
@@ -204,6 +236,7 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
   const u8 = (back: number, i: number) => image[at(back) + i];
   const u16 = (back: number, i: number) => view.getUint16(at(back) + i * 2, true);
 
+  const attributes = readCreatureAttributes(image);
   const creatures: CreatureInfo[] = [];
   for (let i = 0; i < CREATURES; i++) {
     const anim = anims[i].toUpperCase();
@@ -231,6 +264,7 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
       c.damage[0] >= 1 &&
       c.damage[0] <= c.damage[1];
     if (!sane) throw new ExeLayoutError(`creature ${i} (${c.name}) has implausible stats`);
+    if (attributes) c.agility = attributes[i][AGILITY];
     creatures.push(c);
   }
   return creatures;
