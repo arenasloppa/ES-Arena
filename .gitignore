@@ -1,0 +1,29 @@
+node_modules/
+dist/
+.env
+.env.*
+*.local
+
+# Original Arena game data must never be committed (Bethesda license: personal use only).
+# Players load their own copy at runtime.
+arena/
+ARENA/
+*.BSA
+*.bsa
+*.MIF
+*.RMD
+*.INF
+*.VOC
+*.FLC
+*.EXE
+*.exe
+*.COL
+*.IMG
+*.SET
+*.CIF
+*.CFA
+*.DFA
+*.XMI
+*.65
+*.00
+*.64

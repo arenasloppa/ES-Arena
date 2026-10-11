@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ES Arena</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div id="hud" hidden>
+      <div id="crosshair">+</div>
+      <div id="message" hidden></div>
+      <div id="help">WASD move · Mouse look · Shift run · E or click open doors · Esc menu</div>
+    </div>
+
+    <section id="menu" class="panel">
+      <canvas id="title-art" width="320" height="200" hidden></canvas>
+      <h1>The Elder Scrolls: Arena</h1>
+      <p class="sub">A Three.js remake. Bring your own copy of the game.</p>
+
+      <div id="step-folder">
+        <p>
+          This remake ships none of Bethesda's files. Choose the Arena folder from your own copy
+          (the one that contains <code>GLOBAL.BSA</code>). Arena is free from Bethesda if you need it.
+        </p>
+        <div class="buttons">
+          <button id="reuse-folder" hidden>Use my Arena folder again</button>
+          <button id="pick-folder">Choose Arena folder…</button>
+          <label id="pick-fallback" class="button" hidden>
+            Choose Arena folder…
+            <input id="folder-input" type="file" webkitdirectory multiple hidden />
+          </label>
+        </div>
+        <ul id="checks"></ul>
+        <p id="folder-error" class="error" hidden></p>
+      </div>
+
+      <div id="step-play" hidden>
+        <label>
+          Map
+          <select id="map-select"></select>
+        </label>
+        <div class="buttons">
+          <button id="play">Enter the dungeon</button>
+          <button id="change-folder" class="secondary">Change folder</button>
+        </div>
+      </div>
+      <p id="status"></p>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
