@@ -157,10 +157,9 @@ function setState(c: Creature, state: CreatureState, span = 0): void {
   c.span = span;
 }
 
-/** Cells creatures won't walk into: pits and lava. */
+/** Cells creatures won't walk into: pits, water and lava. They wait at the edge instead, as in Arena (UESP: monsters stand at the exit of a pool). */
 function avoids(level: Level, cell: number): boolean {
-  const chasm = level.cells[cell]?.chasm;
-  return chasm === 'dry' || chasm === 'lava';
+  return !!level.cells[cell]?.chasm;
 }
 
 function canSee(c: Creature, w: CreatureWorld, range: number): boolean {

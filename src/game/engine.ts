@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { SoundBank } from '../audio/sound';
 import type { GamepadInput } from '../input/gamepad';
 import type { CreatureView } from '../render/creatureView';
-import type { LevelScene } from '../render/levelScene';
+import { poseDoor, type LevelScene } from '../render/levelScene';
 import type { MapView } from '../render/mapView';
 import { spellColour, type SpellView } from '../render/spellView';
 import type { WeaponView } from '../render/weaponView';
@@ -10,17 +10,16 @@ import type { Minimap } from '../ui/minimap';
 import { isAlive } from './creatures';
 import type { Dungeon } from './dungeon';
 import { lineOfSight } from './grid';
-import { cellIndex, startJump, stepJump, type Jump } from './player';
+import { ARENA_HEIGHT } from './level';
 
-const EYE = 0.55; // eye height as a fraction of room height
-const SNEAK_EYE = 0.36;
-const DEAD_EYE = 0.1;
+/** Eye height above the feet: Arena's 60 units (OpenTESArena); lower when sneaking, as Skyrim crouches, and on the floor when dead. */
+const EYE = 60 * ARENA_HEIGHT;
+const SNEAK_EYE = 40 * ARENA_HEIGHT;
+const DEAD_EYE = 10 * ARENA_HEIGHT;
 const MOUSE_SENSITIVITY = 0.0022;
 const TURN_SPEED = 2.4; // radians per second for arrow keys
 const STICK_TURN = 3.2; // radians per second at full right-stick tilt
 const STICK_PITCH = 2;
-const JUMP_APEX = 0.22; // fraction of room height
-const JUMP_TIME = 0.55; // seconds from take-off to landing
 const FOV = 70;
 /** Sprinting widens the view by this many degrees. */
 const SPRINT_FOV = 7;
@@ -145,7 +144,6 @@ export class Engine {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.02, 100);
   private readonly keys = new Set<string>();
-  private readonly jump: Jump = { height: 0, speed: 0 };
   private running = false;
   private frameRequest = 0;
   private last = 0;
@@ -177,12 +175,14 @@ export class Engine {
   private deathShown = false;
   private deathFaded = false;
   private escapedAt: number | undefined;
+  private deathCause: string | undefined;
   private readiedKey = '';
   private effectsKey = '';
   onPause?: () => void;
   /** The player asked for one of the menus over the game. */
   onMenu?: (which: GameMenu) => void;
-  onDeath?: () => void;
+  /** The player died; `cause` is the game's words for how, when there are some. */
+  onDeath?: (cause?: string) => void;
   onEscape?: () => void;
   /** The map screen opened (true) or closed. */
   onMap?: (open: boolean) => void;
@@ -379,13 +379,12 @@ export class Engine {
     }
     d.update(dt, { forward, strafe, sprint, sneaking: this.sneaking, block, attack });
     this.playEvents();
-    stepJump(this.jump, JUMP_APEX * d.level.height, JUMP_TIME, dt);
     const eye = d.outcome === 'dead' ? DEAD_EYE : this.sneaking ? SNEAK_EYE : EYE;
     this.eye += (eye - this.eye) * Math.min(1, dt * (d.outcome ? 3 : 10));
 
     for (const [index, door] of d.doors) {
-      const mesh = this.levelScene.doors.get(index)?.mesh;
-      if (mesh) mesh.position.y = door.open * d.level.height * 0.95;
+      const mesh = this.levelScene.doors.get(index);
+      if (mesh) poseDoor(mesh, door.open, d.level.height);
     }
     for (const item of d.items) {
       const sprite = this.levelScene.items[item.id];
@@ -416,7 +415,7 @@ export class Engine {
     }
     if (d.outcome === 'dead' && !this.deathShown && this.diedAt !== undefined && d.time - this.diedAt > DEATH_SCREEN) {
       this.deathShown = true;
-      this.onDeath?.();
+      this.onDeath?.(this.deathCause);
     }
     if (this.escapedAt !== undefined && d.time - this.escapedAt > ESCAPE_SCREEN) {
       this.escapedAt = undefined;
@@ -465,7 +464,7 @@ export class Engine {
           this.rumble(70, 0.15, 0.35);
           break;
         case 'burst':
-          this.options.spells?.burst(e.spell, e.at.x, e.at.y, this.eye * d.level.height * 0.85, e.radius);
+          this.options.spells?.burst(e.spell, e.at.x, e.at.y, (d.player.z ?? 0) + this.eye * 0.85, e.radius);
           break;
         case 'noMagicka':
           hud?.noMagicka();
@@ -484,6 +483,7 @@ export class Engine {
           break;
         case 'died':
           this.diedAt = d.time;
+          this.deathCause = e.cause;
           this.sneaking = false;
           break;
         case 'escaped':
@@ -526,10 +526,8 @@ export class Engine {
     const d = this.dungeon;
     const p = d.player;
     const h = d.level.height;
-    const cell = d.level.cells[cellIndex(d.level, p.x, p.y)];
-    let eye = this.eye * h + this.jump.height;
-    if (cell?.chasm === 'wet' || cell?.chasm === 'lava') eye -= 0.15 * h; // wading
-    eye = Math.max(0.05, Math.min(eye, h - 0.05));
+    // The eye rides on the feet: up on platforms and in jumps, down in water and pits.
+    const eye = Math.min((p.z ?? 0) + this.eye, h - 0.03);
     // Sprinting widens the view a little, as in Skyrim.
     const fov = FOV + (d.running ? SPRINT_FOV : 0);
     if (Math.abs(this.camera.fov - fov) > 0.01) {
@@ -599,7 +597,7 @@ export class Engine {
   }
 
   private startJump(): void {
-    if (startJump(this.jump, JUMP_APEX * this.dungeon.level.height, JUMP_TIME)) this.sneaking = false;
+    if (this.dungeon.jump()) this.sneaking = false;
   }
 
   private tilt(amount: number): void {

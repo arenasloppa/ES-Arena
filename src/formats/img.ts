@@ -74,7 +74,7 @@ export function parseSet(data: Uint8Array): IndexedImage[] {
 }
 
 /** Simple byte RLE: a control byte < 0x80 copies n+1 literals, otherwise repeats the next byte (n & 0x7F)+1 times. */
-function decodeRle(src: Uint8Array, outLength: number): Uint8Array {
+export function decodeRle(src: Uint8Array, outLength: number): Uint8Array {
   const out = new Uint8Array(outLength);
   let s = 0;
   let d = 0;

@@ -332,7 +332,8 @@ async function startMap(name: string, character: Character) {
     const levelIndex = Math.min(mif.startingLevelIndex, mif.levels.length - 1);
     const infName = mif.levels[levelIndex].info;
     const inf = parseInf(await data.read(infName));
-    const level = buildLevel(mif, levelIndex, inf);
+    if (tables === undefined) tables = await loadTables(data);
+    const level = buildLevel(mif, levelIndex, inf, tables?.platforms);
     // Arena's first dungeon, under the Imperial Palace.
     if (name === DEFAULT_MAP) level.name = 'Imperial Dungeons';
     const palette = parseCol(await data.read('PAL.COL'));
@@ -341,7 +342,7 @@ async function startMap(name: string, character: Character) {
     const cache = new TextureCache(data, palette);
     const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
     const scene = await buildLevelScene(level, cache);
-    const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem));
+    const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem), level);
     const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => cache.screenImages(file));
     await weapon.use(dungeon.stats.weapon.cif);
     weapon.useBlood(await cache.screenAnimation('BLOODEXP.CFA'));
@@ -371,7 +372,7 @@ async function startMap(name: string, character: Character) {
     $('map-name').textContent = level.name || name;
     if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
     if (scene.skippedFlats.length) {
-      console.info(`Not drawn yet (animated sprites): ${[...new Set(scene.skippedFlats)].join(', ')}`);
+      console.warn(`Could not draw: ${[...new Set(scene.skippedFlats)].join(', ')}`);
     }
     setStatus('');
     if (!tables && level.creatures.length) {
@@ -450,13 +451,10 @@ function pause() {
   showMenu('play');
 }
 
-async function died() {
-  const d = engine!.dungeon;
-  // Ria Silmane says farewell, as in Arena.
+/** The game's words for how the player died (drowning and the like) show first, then Ria Silmane's farewell, as in Arena. */
+async function died(cause?: string) {
+  $('dead-notes').textContent = cause ?? '';
   if (runCharacter) await showCutscene(deathVision(firstName(runCharacter)), SONGS.vision);
-  $('dead-notes').textContent = d.kills
-    ? `You fell after ${d.kills === 1 ? 'one kill' : `${d.kills} kills`}, ${formatTime(d.time)} into the dungeon.`
-    : `You fell ${formatTime(d.time)} into the dungeon.`;
   showMenu('dead');
 }
 

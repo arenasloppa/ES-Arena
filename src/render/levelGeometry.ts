@@ -5,7 +5,7 @@
  * World axes: X = MIF column, Z = MIF row, Y = up. One voxel is 1x1 wide
  * and Level.height tall.
  */
-import type { Cell, Level } from '../game/level';
+import { chasmFloor, type Cell, type DoorKind, type Level, type Side } from '../game/level';
 
 /** "wall:3", "floor:1", "glass:8" (index 0 transparent) or "liquid:wet" (animated chasm surface). */
 export type TextureKey = string;
@@ -22,6 +22,9 @@ export interface DoorGeometry {
   y: number;
   key: TextureKey;
   batch: QuadBatch;
+  /** How it opens, and for sliding and swinging doors the way it goes: along x (true) or y. */
+  kind: DoorKind;
+  alongX: boolean;
 }
 
 export interface LevelGeometry {
@@ -38,9 +41,12 @@ const SIDES: Array<{ dx: number; dy: number; normal: V3 }> = [
   { dx: -1, dy: 0, normal: [-1, 0, 0] },
 ];
 
+/** Where a chasm's surface is drawn: a dry pit's floor, or the top of the water or lava. */
 export function chasmDepth(cell: Cell, height: number): number {
-  return cell.chasm === 'dry' ? -height : -0.15 * height;
+  return cell.chasm ? chasmFloor(cell.chasm, height) : 0;
 }
+
+const SIDE_NORMALS: Record<Side, V3> = { north: [0, 0, -1], east: [1, 0, 0], south: [0, 0, 1], west: [-1, 0, 0] };
 
 export function buildLevelGeometry(level: Level): LevelGeometry {
   const batches = new Map<TextureKey, QuadBatch>();
@@ -63,7 +69,9 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
 
       if (c.kind === 'wall') {
         for (const s of SIDES) {
-          if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(wallKey), x, y, s.normal, 0, h);
+          const n = at(x + s.dx, y + s.dy);
+          // Beside water or a pit the wall goes on down to its surface or floor.
+          if (!solid(n)) sideFace(batch(wallKey), x, y, s.normal, n?.chasm ? chasmDepth(n, h) : 0, h, false, n?.chasm ? 1 - chasmDepth(n, h) / h : 1);
         }
         continue;
       }
@@ -85,12 +93,23 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
 
       switch (c.kind) {
         case 'raised': {
-          const top = (c.raisedHeight ?? 1) * h;
+          const bottom = c.raisedBottom ?? 0;
+          const top = Math.max(bottom, c.raisedTop ?? h);
           for (const s of SIDES) {
-            if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(wallKey), x, y, s.normal, 0, top, false, top / h);
+            if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(wallKey), x, y, s.normal, bottom, top, false, (top - bottom) / h);
           }
           const capKey = c.capTex === undefined ? wallKey : `${c.capIsWall ? 'wall' : 'floor'}:${c.capTex}`;
           horizontal(batch(capKey), x, y, top, true);
+          // A platform off the floor shows its underside, in the ceiling's texture, and the floor beneath.
+          if (bottom > 0) {
+            horizontal(batch(`floor:${level.ceilingTex}`), x, y, bottom, false);
+            horizontal(batch(`floor:${c.floorTex}`), x, y, 0, true);
+          }
+          break;
+        }
+        case 'edge': {
+          const e = c.edge!;
+          sideFace(batch(`glass:${c.wallTex}`), x, y, SIDE_NORMALS[e.side], e.lift, Math.min(h, e.lift + h), false, 1, true);
           break;
         }
         case 'transparent':
@@ -102,7 +121,9 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
         case 'door': {
           const b: QuadBatch = { positions: [], uvs: [], indices: [] };
           for (const s of SIDES) sideFace(b, x, y, s.normal, 0, h);
-          doors.push({ cellIndex: i, x, y, key: c.seeThrough ? `glass:${c.wallTex}` : wallKey, batch: b });
+          // A door slides or swings toward the walls beside it.
+          const alongX = solid(at(x - 1, y)) || solid(at(x + 1, y));
+          doors.push({ cellIndex: i, x, y, key: c.seeThrough ? `glass:${c.wallTex}` : wallKey, batch: b, kind: c.door ?? 'raising', alongX });
           break;
         }
         default:
@@ -126,9 +147,11 @@ function quad(b: QuadBatch, bl: V3, br: V3, tr: V3, tl: V3, uv: [number, number,
  * spanning y0..y1 vertically. vTop < 1 shows only the lower part of the
  * tile, so short faces (platform sides) are not squashed.
  */
-function sideFace(b: QuadBatch, x: number, y: number, n: V3, y0: number, y1: number, inward = false, vTop = 1) {
-  const cx = x + 0.5 + n[0] * 0.5;
-  const cz = y + 0.5 + n[2] * 0.5;
+function sideFace(b: QuadBatch, x: number, y: number, n: V3, y0: number, y1: number, inward = false, vTop = 1, inset = false) {
+  // An inset face sits just inside the cell's edge (fences), not on it.
+  const out = inset ? 0.49 : 0.5;
+  const cx = x + 0.5 + n[0] * out;
+  const cz = y + 0.5 + n[2] * out;
   // Viewer looks along -n; their right is (-n) x up = (n.z, 0, -n.x).
   let rx = n[2];
   let rz = -n[0];

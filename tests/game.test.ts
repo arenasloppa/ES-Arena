@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { parseInf } from '../src/formats/inf';
 import { parseMif } from '../src/formats/mif';
-import { buildLevel, isBlocking } from '../src/game/level';
-import { blockedAt, doorInFront, startJump, step, stepJump, type PlayerState } from '../src/game/player';
+import { ARENA_HEIGHT, buildLevel, isBlocking } from '../src/game/level';
+import { airborne, blockedAt, doorInFront, groundUnder, jump, JUMP_HEIGHT, JUMP_TIME, settle, step, type PlayerState } from '../src/game/player';
+import { textLevel } from './helpers/level';
 import { buildLevelGeometry } from '../src/render/levelGeometry';
 import { encryptInf, makeMif } from './helpers/encode';
 
@@ -130,7 +131,8 @@ describe('buildLevel', () => {
     expect(l.creatures).toEqual([{ x: 2.5, y: 1.5, type: 1 }]);
     expect(l.flats).toEqual([
       { x: 1.5, y: 1.5, name: 'BARREL.IMG' },
-      { x: 2.5, y: 2.5, name: 'BARREL.IMG', base: 0x18 / 128 },
+      // Without the game's tables, thickness step 3 of 16 even steps: 25 Arena units.
+      { x: 2.5, y: 2.5, name: 'BARREL.IMG', base: 25 * ARENA_HEIGHT },
     ]);
     expect(l.cells[2 * 6 + 3]).toMatchObject({ kind: 'door', wallTex: 6, seeThrough: true });
     expect(l.locks).toEqual(new Map([[2 * 6 + 3, 10]]));
@@ -188,20 +190,50 @@ describe('level geometry', () => {
   });
 });
 
-describe('jumping', () => {
-  it('peaks at the apex halfway through and lands after the full time', () => {
-    const j = { height: 0, speed: 0 };
-    expect(startJump(j, 0.2, 0.5)).toBe(true);
-    expect(startJump(j, 0.2, 0.5)).toBe(false);
+describe('heights', () => {
+  it('jumps 30 Arena units high and lands after the jump’s time', () => {
+    const level = textLevel(['#####', '#@..#', '#####']);
+    const p: PlayerState = { x: 1.5, y: 1.5, yaw: 0, pitch: 0 };
+    expect(jump(level, p)).toBe(true);
+    expect(jump(level, p)).toBe(false);
     let peak = 0;
     let t = 0;
-    while (t < 1 && (t === 0 || j.height > 0)) {
-      stepJump(j, 0.2, 0.5, 1 / 240);
-      peak = Math.max(peak, j.height);
+    while (t < 1 && (t === 0 || airborne(level, p))) {
+      settle(level, p, 1 / 240);
+      peak = Math.max(peak, p.z ?? 0);
       t += 1 / 240;
     }
-    expect(peak).toBeCloseTo(0.2, 2);
-    expect(t).toBeCloseTo(0.5, 1);
-    expect(j).toEqual({ height: 0, speed: 0 });
+    expect(peak).toBeCloseTo(JUMP_HEIGHT, 2);
+    expect(t).toBeCloseTo(JUMP_TIME, 1);
+    expect(p.z).toBe(0);
+  });
+
+  it('steps up onto a low platform and stands on it, but not onto a tall one', () => {
+    const level = textLevel(['######', '#@..R#', '######']);
+    const low = level.cells[1 * 6 + 4];
+    Object.assign(low, { kind: 'raised', raisedBottom: 0, raisedTop: 25 * ARENA_HEIGHT });
+    const p: PlayerState = { x: 1.5, y: 1.5, yaw: 0, pitch: 0, z: 0 };
+    for (let i = 0; i < 60; i++) {
+      step(level, p, { forward: 1, strafe: 0, run: false }, 1 / 30, new Set());
+      settle(level, p, 1 / 30);
+    }
+    expect(p.x).toBeGreaterThan(4.2);
+    expect(p.z).toBeCloseTo(25 * ARENA_HEIGHT);
+    Object.assign(low, { raisedTop: 70 * ARENA_HEIGHT });
+    const q: PlayerState = { x: 1.5, y: 1.5, yaw: 0, pitch: 0, z: 0 };
+    for (let i = 0; i < 60; i++) step(level, q, { forward: 1, strafe: 0, run: false }, 1 / 30, new Set());
+    expect(q.x).toBeLessThan(3.81);
+  });
+
+  it('drops into water and can’t walk out of it', () => {
+    const level = textLevel(['######', '#@~~.#', '######']);
+    const p: PlayerState = { x: 1.5, y: 1.5, yaw: 0, pitch: 0, z: 0 };
+    for (let i = 0; i < 40; i++) {
+      step(level, p, { forward: 1, strafe: 0, run: false }, 1 / 30, new Set());
+      settle(level, p, 1 / 30);
+    }
+    expect(p.z).toBeCloseTo(-25 * ARENA_HEIGHT);
+    expect(groundUnder(level, p)).toBeCloseTo(-25 * ARENA_HEIGHT);
+    expect(p.x).toBeLessThan(3.81);
   });
 });

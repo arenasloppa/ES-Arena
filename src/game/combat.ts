@@ -85,6 +85,9 @@ export interface Hero {
   magicka: number;
   /** Spell points come back over time; a Sorcerer's don't. */
   regainsMagicka: boolean;
+  /** Swimming speed as a share of walking, and how fast swimming tires: Argonians swim at full speed and tire less than half as fast. */
+  swimPace: number;
+  swimTiring: number;
 }
 
 /** The player without a character of their own: no class, and nothing added or taken away. */
@@ -104,6 +107,8 @@ export const DEFAULT_HERO: Hero = {
   carry: 200,
   magicka: 0,
   regainsMagicka: true,
+  swimPace: 0.5,
+  swimTiring: 1,
 };
 
 export const POTION_HEALS = 25;

@@ -89,7 +89,8 @@ import { armourReduce, Inventory, itemKey, POTION, randomGear, startingGear, wea
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
 import { isBlocking, type Level, type LevelItem } from './level';
-import { PLAYER_RADIUS, step, type Body, type PlayerState } from './player';
+import { airborne, groundUnder, inChasm, jump, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
+import type { GameMessages } from '../formats/messages';
 
 export interface DoorState {
   /** 0 closed to 1 open. */
@@ -172,7 +173,8 @@ export type DungeonEvent =
   | { type: 'objective'; text: string; done: boolean }
   /** Every creature in the dungeon is dead. */
   | { type: 'cleared' }
-  | { type: 'died' }
+  /** The player died; `cause` is the game's words for how, when it has some (drowning). */
+  | { type: 'died'; cause?: string }
   | { type: 'escaped' };
 
 export interface DungeonInput {
@@ -198,6 +200,8 @@ export const IDLE_INPUT: DungeonInput = {
 
 const DOOR_SPEED = 1.6; // of a full opening per second
 const SNEAK_PACE = 0.5;
+/** How close the player comes to a solid decoration's middle. */
+const SOLID_FLAT_RADIUS = 0.3;
 const BLOCK_PACE = 0.6;
 const SPRINT_STAMINA = 12; // per second
 const POWER_STAMINA = 20;
@@ -237,6 +241,23 @@ const DEFAULT_WEAPON: Weapon = { name: 'Shortsword', damage: [2, 6], cif: 'SWORD
 /** A character of their own starts with these, as well as their gear. */
 const START_POTIONS = 1;
 const START_GOLD = 25;
+/**
+ * Swimming tires the player: Arena's waking loss of 11/64 fatigue a game
+ * minute, at 13 game seconds a real one, 30 times over, on its 0-256 scale
+ * (OpenTESArena's reading); about 0.44 points a second.
+ */
+const SWIM_TIRING = ((11 / 64) * (86400 / 6646.153846153846)) / 60 * 30 * (100 / 256);
+/** Lava burns 10 health a second (OpenTESArena). */
+const LAVA_BURN = 10;
+/** Pushing forward against the edge this long starts a climb out of water or a pit. */
+const CLIMB_PUSH = 0.25;
+/**
+ * Seconds a climb out takes. UESP says getting out of water "takes a few
+ * precious seconds" and a blow, or attacking, throws you back in; the
+ * exact times are the remake's own.
+ */
+const CLIMB_WATER = 2;
+const CLIMB_PIT = 4;
 /** Seconds after casting before another spell can be cast. */
 const CAST_TIME = 0.7;
 /** Spell bolts fly this many voxels a second, and give up this far away. */
@@ -295,6 +316,10 @@ export class Dungeon {
   sneaking = false;
   /** Sprinting this moment, for the camera's widening view. */
   running = false;
+  /** In water or lava. */
+  swimming = false;
+  /** Climbing out of water or a pit: how far along (0 to 1), and where it ends. */
+  climb?: { progress: number; seconds: number; from: number; to: { x: number; y: number } };
   /** Objectives toward the way out; undefined in a dungeon without one. */
   readonly quest?: Quest;
   /** The gear the player carries and wears. */
@@ -316,10 +341,11 @@ export class Dungeon {
   private readonly growlAt = new Map<number, number>();
   private here = -1;
   private sinceStamina = Infinity;
+  private pushing = 0;
+  private readonly messages: GameMessages;
   private sinceHurt = Infinity;
   private lookTimer = 0;
   private nextStep = STRIDE;
-  private footstep = 0;
   private armedAt: number | undefined;
   private queued: boolean | undefined;
   private combo = 0;
@@ -351,7 +377,8 @@ export class Dungeon {
     readonly hero: Hero = DEFAULT_HERO,
     spells: SpellRecord[] = [],
   ) {
-    this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0 };
+    this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0, z: 0, vz: 0 };
+    this.messages = tables?.messages ?? {};
     this.weaponTable = tables?.weapons ?? [];
     this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
@@ -442,8 +469,18 @@ export class Dungeon {
 
   // ---- Moving ----
 
+  /** Jumps, when on the floor and not in water, a pit or a climb. */
+  jump(): boolean {
+    if (this.outcome || this.climb || inChasm(this.level, this.player)) return false;
+    return jump(this.level, this.player);
+  }
+
   private move(dt: number, input: DungeonInput): void {
     const p = this.player;
+    if (this.climb) {
+      this.updateClimb(dt);
+      return;
+    }
     let forward = clamp(input.forward, -1, 1);
     let strafe = clamp(input.strafe, -1, 1);
     const moving = forward !== 0 || strafe !== 0;
@@ -451,7 +488,7 @@ export class Dungeon {
     const laden = this.inventory.weight(this.stats.potions) > this.hero.carry;
     if (laden && input.sprint && moving && !this.sprintHeld) this.events.push({ type: 'notify', text: 'You are carrying too much to run' });
     this.sprintHeld = input.sprint && moving;
-    let run = input.sprint && moving && this.stats.stamina > 0 && !this.blocking && !laden;
+    let run = input.sprint && moving && this.stats.stamina > 0 && !this.blocking && !laden && !this.swimming;
     if (run) {
       spendStamina(this.stats, SPRINT_STAMINA * dt);
       this.sinceStamina = 0;
@@ -468,19 +505,106 @@ export class Dungeon {
     const bodies: Body[] = this.creatures.filter(isAlive).map((c) => ({ x: c.x, y: c.y, r: CREATURE_RADIUS }));
     const x0 = p.x;
     const y0 = p.y;
-    step(this.level, p, { forward, strafe, run, pace: this.hero.pace }, dt, this.openDoors, bodies);
+    for (const f of this.level.flats) if (f.solid) bodies.push({ x: f.x, y: f.y, r: SOLID_FLAT_RADIUS });
+    const pace = this.swimming ? this.hero.swimPace : this.hero.pace;
+    step(this.level, p, { forward, strafe, run, pace }, dt, this.openDoors, bodies);
     const moved = Math.hypot(p.x - x0, p.y - y0);
     this.moving = moved > 0;
     this.running = run && this.moving;
     this.walked += moved;
-    if (this.walked >= this.nextStep) {
+    this.updateHeight(dt);
+    // Pushing on against the edge of water or a pit climbs out of it.
+    const edge = this.swimming || inChasm(this.level, p) ? this.climbTarget() : undefined;
+    if (edge && input.forward > 0.5 && moved < 0.2 * dt) {
+      this.pushing += dt;
+      if (this.pushing >= CLIMB_PUSH) this.startClimb(edge);
+    } else this.pushing = 0;
+    if (this.walked >= this.nextStep && !airborne(this.level, p)) {
       this.nextStep = this.walked + STRIDE;
-      const cell = this.level.cells[cellIndex(this.level, p.x, p.y)];
-      const wading = cell?.chasm === 'wet' || cell?.chasm === 'lava';
-      if (!input.sneaking) {
-        this.events.push({ type: 'sound', name: wading ? 'SPLASH.VOC' : this.footstep++ % 2 ? 'DIRTR.VOC' : 'DIRTL.VOC', volume: wading ? 0.25 : 0.3 });
-      }
+      // Arena only ever plays the left footstep (OpenTESArena); swimming has its own stroke.
+      if (this.swimming) this.events.push({ type: 'sound', name: 'SWIMMING.VOC', volume: 0.4 });
+      else if (!input.sneaking) this.events.push({ type: 'sound', name: 'DIRTL.VOC', volume: 0.3 });
     }
+  }
+
+  /** Falls, lands, steps up, and goes into or out of water and lava, with what that does. */
+  private updateHeight(dt: number): void {
+    const p = this.player;
+    settle(this.level, p, dt);
+    const cell = this.level.cells[cellIndex(this.level, p.x, p.y)];
+    const swimming = (cell?.chasm === 'wet' || cell?.chasm === 'lava') && inChasm(this.level, p);
+    if (swimming && !this.swimming) this.events.push({ type: 'sound', name: 'SPLASH.VOC' });
+    this.swimming = swimming;
+    if (!swimming) return;
+    // Swimming tires, and fatigue doesn't come back meanwhile; with none left the player drowns.
+    this.stats.stamina = Math.max(0, this.stats.stamina - SWIM_TIRING * this.hero.swimTiring * dt);
+    this.sinceStamina = 0;
+    if (this.stats.stamina <= 0) {
+      this.die(this.messages.drowning ?? 'You drown.');
+      return;
+    }
+    if (cell?.chasm === 'lava') this.burn(LAVA_BURN * dt);
+  }
+
+  /** The point on firm ground ahead that a climb out of water or a pit would end at. */
+  private climbTarget(): { x: number; y: number } | undefined {
+    const p = this.player;
+    const fx = Math.cos(p.yaw);
+    const fy = Math.sin(p.yaw);
+    for (const reach of [PLAYER_RADIUS + 0.12, PLAYER_RADIUS + 0.3]) {
+      const x = p.x + fx * reach;
+      const y = p.y + fy * reach;
+      const i = cellIndex(this.level, x, y);
+      const cell = this.level.cells[i];
+      if (!cell || cell.chasm) continue;
+      // Up onto the floor (or a low platform) beside, if there is room to stand there.
+      const to = { x: p.x + fx * (PLAYER_RADIUS * 2 + 0.25), y: p.y + fy * (PLAYER_RADIUS * 2 + 0.25) };
+      if (!playerBlocked(this.level, to.x, to.y, groundUnder(this.level, { ...p, ...to, z: 0 }), this.openDoors)) return to;
+    }
+    return undefined;
+  }
+
+  private startClimb(to: { x: number; y: number }): void {
+    const cell = this.level.cells[cellIndex(this.level, this.player.x, this.player.y)];
+    this.pushing = 0;
+    this.swing = undefined;
+    this.climb = { progress: 0, seconds: cell?.chasm === 'dry' ? CLIMB_PIT : CLIMB_WATER, from: this.player.z ?? 0, to };
+  }
+
+  private updateClimb(dt: number): void {
+    const c = this.climb!;
+    const p = this.player;
+    c.progress = Math.min(1, c.progress + dt / c.seconds);
+    p.z = c.from * (1 - c.progress);
+    p.vz = 0;
+    this.moving = false;
+    if (c.progress < 1) return;
+    p.x = c.to.x;
+    p.y = c.to.y;
+    p.z = groundUnder(this.level, p);
+    this.climb = undefined;
+    this.swimming = false;
+  }
+
+  /** A blow, or attacking, while climbing out throws the player back in (UESP). */
+  private fallBack(): void {
+    if (!this.climb) return;
+    this.player.z = this.climb.from;
+    this.climb = undefined;
+  }
+
+  private burn(damage: number): void {
+    this.stats.health = Math.max(0, this.stats.health - damage);
+    this.sinceHurt = 0;
+    if (this.stats.health <= 0) this.die();
+  }
+
+  private die(cause?: string): void {
+    if (this.outcome) return;
+    this.outcome = 'dead';
+    this.swing = undefined;
+    this.climb = undefined;
+    this.events.push({ type: 'sound', name: 'MDIE.VOC' }, { type: 'died', cause });
   }
 
   private updateDoors(dt: number): void {
@@ -564,16 +688,18 @@ export class Dungeon {
     this.stats.health = Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
     this.events.push({ type: 'hurt', damage }, { type: 'sound', name: 'UHIT.VOC' });
-    if (this.stats.health <= 0) {
-      this.outcome = 'dead';
-      this.swing = undefined;
-      this.events.push({ type: 'sound', name: 'MDIE.VOC' }, { type: 'died' });
-    }
+    this.fallBack();
+    if (this.stats.health <= 0) this.die();
   }
 
   // ---- Fighting ----
 
   private updateAttack(dt: number, input: DungeonInput): void {
+    if (this.climb) {
+      // Attacking too soon while climbing out drops the player back in.
+      if (input.attack.pressed) this.fallBack();
+      return;
+    }
     // A readied spell takes the guard's place, as a spell in Skyrim's left hand does.
     const castPressed = input.block && !this.castHeld;
     this.castHeld = input.block;

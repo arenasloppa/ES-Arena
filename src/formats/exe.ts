@@ -29,6 +29,7 @@
  */
 import { readCharacterTables, type CharacterTables } from './classes';
 import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
+import { readMessages, type GameMessages } from './messages';
 
 export { ExeLayoutError };
 
@@ -66,10 +67,26 @@ export interface WeaponInfo {
   price?: number;
 }
 
+/**
+ * The raised platforms of dungeons (interiors), in Arena units: the eight
+ * heights a platform's bottom can sit at, and the sixteen thicknesses it
+ * can have. A MAP1 platform's high byte picks one of each (bits 0-2 and
+ * 3-6). Read from the fixed places OpenTESArena found them at in each
+ * version of the program ([RaisedPlatforms] in its exe offset lists).
+ */
+export interface RaisedPlatforms {
+  heights: number[];
+  thicknesses: number[];
+}
+
 export interface ExeData {
   /** Indexed like the levels' creature items: *ITEM 32 is creatures[0]. */
   creatures: CreatureInfo[];
   weapons: WeaponInfo[];
+  /** Missing when the program is laid out differently from the two versions known. */
+  platforms?: RaisedPlatforms;
+  /** The game's own messages (drowning, camping and the like). */
+  messages?: GameMessages;
   /** Classes, races and the words of character creation; missing when they could not be read. */
   character?: CharacterTables;
 }
@@ -80,7 +97,7 @@ const TABLE_ENTRIES = 24;
 const WEAPONS = 18;
 
 export function readExeData(image: Uint8Array): ExeData {
-  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image) };
+  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image) };
   try {
     data.character = readCharacterTables(image);
   } catch (err) {
@@ -89,6 +106,26 @@ export function readExeData(image: Uint8Array): ExeData {
     console.warn('Could not read the class tables:', err.message);
   }
   return data;
+}
+
+/** Where each version keeps the platform tables, found by a string that sits at a known place in it. */
+const VERSIONS = [
+  { name: 'CD', anchor: 0x3f508, platforms: 0x48594 },
+  { name: 'floppy', anchor: 0x3f1cc, platforms: 0x48206 },
+];
+
+export function readRaisedPlatforms(image: Uint8Array): RaisedPlatforms | undefined {
+  const anchor = 'exp_ab.cfa\0';
+  const version = VERSIONS.find((v) => cString(image, v.anchor) + '\0' === anchor);
+  if (!version || version.platforms + 56 * 2 > image.length) return undefined;
+  const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
+  const u16 = (i: number) => view.getUint16(version.platforms + i * 2, true);
+  const heights = Array.from({ length: 8 }, (_, i) => u16(i));
+  const thicknesses = Array.from({ length: 16 }, (_, i) => u16(24 + i));
+  // Both rise from the floor; anything else means the table isn't where it was expected.
+  const rising = (a: number[]) => a.every((v, i) => i === 0 || v > a[i - 1]);
+  if (heights[0] !== 0 || !rising(heights) || !rising(thicknesses) || thicknesses[15] > 1000) return undefined;
+  return { heights, thicknesses };
 }
 
 export function readCreatures(image: Uint8Array): CreatureInfo[] {

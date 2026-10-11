@@ -26,6 +26,8 @@ export const ENDURANCE = 5;
 export const PERSONALITY = 6;
 export const LUCK = 7;
 export const ATTRIBUTE_COUNT = 8;
+/** The races, in the game's order. */
+export const ARGONIAN = 7;
 /** No attribute goes above this, bonus points included. */
 export const ATTRIBUTE_MAX = 100;
 /** Faces each race has to choose from. */
@@ -210,6 +212,9 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     carry: 100 + 2 * a[STRENGTH],
     magicka: startingMagicka(cls, a[INTELLIGENCE]),
     regainsMagicka: regainsMagicka(cls),
+    // OpenTESArena's values for the original: everyone swims at half speed and 30 times their usual tiring, Argonians at full speed and 12 times.
+    swimPace: character.race === ARGONIAN ? 1 : 0.5,
+    swimTiring: character.race === ARGONIAN ? 12 / 30 : 1,
   };
 }
 

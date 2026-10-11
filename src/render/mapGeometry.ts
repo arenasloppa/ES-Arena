@@ -77,7 +77,7 @@ export function buildMapGeometry(level: Level, seen: (cell: number) => boolean, 
           if (n && !n.chasm) side(batch(key), x, y, s.dx, s.dy, d, 0, shadeFor(-s.dx, -s.dy) * 0.6, -d / level.height, true);
         }
       } else if (c.kind === 'raised') {
-        const top = Math.min((c.raisedHeight ?? 1) * level.height, wallHeight);
+        const top = Math.min(c.raisedTop ?? level.height, wallHeight);
         for (const s of SIDES) side(batch(`wall:${c.wallTex}`), x, y, s.dx, s.dy, 0, top, shadeFor(s.dx, s.dy), top / level.height);
         const capKey = c.capTex === undefined ? `wall:${c.wallTex}` : `${c.capIsWall ? 'wall' : 'floor'}:${c.capTex}`;
         flat(batch(capKey), x, y, top, 1);
