@@ -208,7 +208,7 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * bonus(AGILITY)) : 0,
     fortune: Math.max(0.5, 1 + 0.1 * bonus(LUCK)),
     carry: 100 + 2 * a[STRENGTH],
-    magicka: startingMagicka(cls.spellcaster, a[INTELLIGENCE]),
+    magicka: startingMagicka(cls, a[INTELLIGENCE]),
   };
 }
 

@@ -3,21 +3,27 @@
  * hard they hit and how long they last. Pure logic so it can be unit tested;
  * the dungeon casts them (dungeon.ts).
  *
- * The spells themselves (names, targets, elements, effects and their
- * numbers) come from the player's own SPELLSG.65 (formats/spells.ts). Each
- * effect has six numbers. Damage and healing read them as Arena's
- * spellmaker shows them: lowest to highest, plus lowest to highest again
- * for every so many of the caster's levels. Other effects take the first
- * as a base, the second as what each so many levels add (the fifth number),
- * and the sixth as a duration in rounds; which of these each effect uses is
- * a guess still to be checked against the original game.
+ * The spells themselves (names, targets, elements, effects and their six
+ * numbers) come from the player's own SPELLSG.65 (formats/spells.ts). What
+ * the six numbers mean for each effect is as the game's own spellmaker
+ * describes it in SPELLMKR.TXT, where %0 to %5 are the six numbers, e.g.
+ * "%0 to %1 pts damage to health +%2 to %3 pts per %4 level(s)" and
+ * "%0%% chance to paralyze. +%1%% every %4 level(s). Duration is %5 rnd(s)
+ * per %2 level(s)". "Per level" counts each of the caster's levels.
  *
- * Magicka is the remake's own, after Skyrim: spellcasting classes have
- * twice their Intelligence, ten more each level, and it comes back over
- * time. A spell costs a fifth of the game's cost for it. Since there is no
- * Mages Guild to buy spells from yet, a spellcaster knows every spell the
- * remake can cast that costs at most half their magicka, and learns more as
- * they level up.
+ * From UESP (Arena:The Known Spellbook, Arena:Classes, Arena:Magic):
+ * - A round is a minute of game time, five seconds of play.
+ * - Casting costs the spell's cost (half its price in gold) divided by the
+ *   caster's level: Pitfalls, 600, costs a level 10 caster 60 spell points.
+ * - Spell points are Intelligence times the class's multiplier; classes
+ *   without one can't cast. Sorcerers never get spell points back.
+ * - A new character starts with one healing spell and one offensive spell.
+ * - Wildfire's continuous damage comes every 5 rounds.
+ *
+ * The remake's own rules, until there are cities, resting and a Mages
+ * Guild: spell points come back slowly over time (except a Sorcerer's), and
+ * each level gained teaches the cheapest spell from the guild's list not
+ * yet known.
  */
 import { EFFECT_NAMES, ELEMENTS, type SpellEffect, type SpellRecord, type SpellTarget } from '../formats/spells';
 import { roll, type Random } from './combat';
@@ -44,35 +50,40 @@ export const HEALTH = 1;
 export const STAMINA = 0;
 export const DAMAGE_HEALTH = 0;
 
-/** Seconds in one of Arena's rounds, for spells that last; the remake's own. */
+/** Seconds in one of Arena's rounds. */
 export const ROUND = 5;
-/** Rounds a spell shield lasts, if not used up; the remake's own. */
-export const SHIELD_ROUNDS = 12;
-/** Rounds a regeneration lasts; the remake's own. */
-export const REGENERATE_ROUNDS = 6;
-/** Health a poison takes each round; the remake's own. */
-export const POISON_DAMAGE = 2;
+/** Rounds between the blows of continuous damage. */
+export const CONTINUOUS_EVERY = 5;
 
-/** Magicka per point of Intelligence, for spellcasting classes. */
-export const MAGICKA_PER_INTELLIGENCE = 2;
-/** Share of their magicka that comes back each second, after a short pause. */
-const MAGICKA_REGEN = 0.02;
-const MAGICKA_PAUSE = 1.5;
-const COST_DIVISOR = 5;
+/** Spell points per point of Intelligence, by class (UESP; the Spellsword's from the Elder Scrolls Wiki). */
+const SPELL_POINT_MULTIPLIERS: Record<string, number> = {
+  Sorcerer: 3,
+  Mage: 2,
+  Healer: 2,
+  Battlemage: 1.75,
+  Nightblade: 1.5,
+  Spellsword: 1.5,
+  Bard: 1,
+};
+/** For a spellcasting class the table doesn't know (the remake's own Mage among them). */
+const DEFAULT_MULTIPLIER = 2;
+
+/** Share of their spell points that comes back each second, after a short pause; the remake's own. */
+const MAGICKA_REGEN = 0.01;
+const MAGICKA_PAUSE = 2;
 
 /** What the remake makes of one of a spell's effects. */
 export type EffectSupport = 'works' | 'harmless' | 'missing';
 
 /**
  * Whether the remake can do an effect yet. Some do nothing to the
- * creatures of the dungeons, which have no stamina, magicka or spells of
- * their own; a spell with only those can't be cast, but they don't stop
+ * creatures of the dungeons, which have no stamina, spell points or spells
+ * of their own; a spell with only those can't be cast, but they don't stop
  * one that also does something else.
  */
 export function effectSupport(e: SpellEffect): EffectSupport {
   switch (e.effect) {
     case DAMAGE:
-      return e.sub === DAMAGE_HEALTH ? 'works' : 'harmless';
     case CONTINUOUS_DAMAGE:
       return e.sub === DAMAGE_HEALTH ? 'works' : 'harmless';
     case HEAL:
@@ -103,72 +114,116 @@ export function castable(spell: SpellRecord): boolean {
   return support.includes('works') && !support.includes('missing');
 }
 
-/** Magicka a spell costs. */
-export function magickaCost(spell: SpellRecord): number {
-  return Math.max(1, Math.ceil(spell.cost / COST_DIVISOR));
+/** Spell points it costs a caster of `level` to cast the spell. */
+export function magickaCost(spell: SpellRecord, level: number): number {
+  return Math.max(1, Math.ceil(spell.cost / Math.max(1, level)));
 }
 
-/** A character's magicka at level 1: none for classes that can't cast. */
-export function startingMagicka(spellcaster: boolean, intelligence: number): number {
-  return spellcaster ? Math.max(10, Math.round(intelligence * MAGICKA_PER_INTELLIGENCE)) : 0;
+/** A character's spell points: Intelligence times the class's multiplier, none for classes that can't cast. */
+export function startingMagicka(cls: { name: string; spellcaster: boolean }, intelligence: number): number {
+  if (!cls.spellcaster) return 0;
+  return Math.floor(intelligence * (SPELL_POINT_MULTIPLIERS[cls.name] ?? DEFAULT_MULTIPLIER));
 }
 
-/** The spells a caster with this much magicka knows, cheapest first. */
-export function knownSpells(spells: SpellRecord[], maxMagicka: number): SpellRecord[] {
-  if (maxMagicka <= 0) return [];
-  return spells
-    .filter((s) => castable(s) && magickaCost(s) <= maxMagicka / 2)
-    .sort((a, b) => magickaCost(a) - magickaCost(b) || a.index - b.index);
+/** Whether the class gets spell points back over time: a Sorcerer doesn't. */
+export function regainsMagicka(cls: { name: string } | undefined): boolean {
+  return cls?.name !== 'Sorcerer';
 }
 
-/** How many times the "per level" part of an effect counts at `level`. */
-function steps(level: number, every: number): number {
+/** Restores health: a healing spell. */
+export function heals(spell: SpellRecord): boolean {
+  return spell.effects.some((e) => e.effect === HEAL && e.sub === HEALTH);
+}
+
+/** Harms what it hits. */
+export function offensive(spell: SpellRecord): boolean {
+  return spell.effects.some((e) => (e.effect === DAMAGE || e.effect === CONTINUOUS_DAMAGE) && e.sub === DAMAGE_HEALTH);
+}
+
+const byCost = (a: SpellRecord, b: SpellRecord) => a.cost - b.cost || a.index - b.index;
+
+/** The spells a new caster knows: the cheapest healing spell and the cheapest offensive spell the remake can cast. */
+export function startingSpells(spells: SpellRecord[]): SpellRecord[] {
+  const cheapest = (pick: (s: SpellRecord) => boolean) => spells.filter((s) => castable(s) && pick(s)).sort(byCost)[0];
+  return [cheapest(heals), cheapest(offensive)].filter((s): s is SpellRecord => !!s);
+}
+
+/** The next spell a caster learns when they gain a level: the cheapest castable one they don't know. */
+export function nextSpell(spells: SpellRecord[], known: SpellRecord[]): SpellRecord | undefined {
+  const have = new Set(known.map((s) => s.index));
+  return spells.filter((s) => castable(s) && !have.has(s.index)).sort(byCost)[0];
+}
+
+/** "per %4 level(s)": how many times the per-level part counts at `level`; none when the number is 0. */
+function per(level: number, every: number): number {
   return every > 0 ? Math.floor(level / every) : 0;
 }
 
-/** Damage or healing: lowest to highest, plus lowest to highest again for every so many levels. */
+/** Damage or healing: %0 to %1, plus %2 to %3 per %4 levels. */
 export function magnitude(e: SpellEffect, level: number, random: Random): number {
   const [min, max, perMin, perMax, every] = e.params;
   let total = roll(random, Math.min(min, max), Math.max(min, max));
-  for (let i = steps(level, every); i > 0; i--) total += roll(random, Math.min(perMin, perMax), Math.max(perMin, perMax));
+  for (let i = per(level, every); i > 0; i--) total += roll(random, Math.min(perMin, perMax), Math.max(perMin, perMax));
   return total;
 }
 
 /** The range magnitude() rolls in, for showing the player. */
 export function magnitudeRange(e: SpellEffect, level: number): [number, number] {
   const [min, max, perMin, perMax, every] = e.params;
-  const n = steps(level, every);
+  const n = per(level, every);
   return [Math.min(min, max) + n * Math.min(perMin, perMax), Math.max(min, max) + n * Math.max(perMin, perMax)];
 }
 
-/** An effect's base number plus what the caster's levels add: a chance in percent, an amount or a number of rounds. */
+/** "%0, +%1 per %4 levels": a chance in percent, shield points or rounds. */
 export function amount(e: SpellEffect, level: number): number {
-  const [base, per, , , every] = e.params;
-  return base + per * steps(level, every);
+  const [base, step, , , every] = e.params;
+  return base + step * per(level, every);
 }
 
-/** Rounds an effect with a chance lasts (the sixth number), at least one. */
-export function rounds(e: SpellEffect): number {
-  return Math.max(1, e.params[5]);
+/** A chance in percent, from 0 to 100. */
+export function chance(e: SpellEffect, level: number): number {
+  return Math.max(0, Math.min(100, amount(e, level)));
+}
+
+/** Rounds an effect lasts at the caster's level, as SPELLMKR.TXT gives each; 0 for effects that don't last. */
+export function durationRounds(e: SpellEffect, level: number): number {
+  const [, , p2, , p4, p5] = e.params;
+  switch (e.effect) {
+    case CAUSE:
+      // Paralysis: "%5 rnd(s) per %2 level(s)"; poison and the rest: "%5 rnd(s) per level".
+      return e.sub === CAUSE_PARALYSIS ? p5 * per(level, p2) : p5 * level;
+    case NON_TARGET:
+    case SILENCE:
+      return p5 * per(level, p2);
+    case CONTINUOUS_DAMAGE:
+      return p5;
+    case INVISIBILITY:
+      return amount(e, level);
+    case LIGHT:
+      return p5 * level;
+    case REGENERATE:
+      return p4 * level;
+    default:
+      return 0;
+  }
 }
 
 /** Seconds an effect lasts at the caster's level. */
 export function duration(e: SpellEffect, level: number): number {
-  switch (e.effect) {
-    case INVISIBILITY:
-      return Math.max(1, amount(e, level)) * ROUND;
-    case CREATE:
-      return SHIELD_ROUNDS * ROUND;
-    case REGENERATE:
-      return REGENERATE_ROUNDS * ROUND;
-    case LIGHT:
-      return (e.params[5] || 6) * ROUND;
-    default:
-      return rounds(e) * ROUND;
-  }
+  return durationRounds(e, level) * ROUND;
 }
 
-/** Light: how far the dungeon can be seen, as a multiple of the usual. */
+/** Poison: "Damage is %2 pts per %3 rnd(s)". */
+export function poisonDamage(e: SpellEffect): { damage: number; everyRounds: number } {
+  return { damage: e.params[2], everyRounds: Math.max(1, e.params[3]) };
+}
+
+/** Regenerate: "%0 health points every %1 rnd(s)". */
+export function regeneration(e: SpellEffect): { health: number; everyRounds: number } {
+  return { health: e.params[0], everyRounds: Math.max(1, e.params[1]) };
+}
+
+/** Light: how far the dungeon can be seen, as a multiple of the usual, from the light's power (%0). */
 export function lightReach(e: SpellEffect): number {
   return 1 + Math.max(1, e.params[0]) * 0.25;
 }
@@ -178,67 +233,66 @@ export interface Magicka {
   maxMagicka: number;
 }
 
-/** Magicka comes back once the player has not cast for a moment. */
+/** Spell points come back once the player has not cast for a moment. */
 export function recoverMagicka(p: Magicka, dt: number, sinceCast: number, recovery = 1): void {
   if (sinceCast > MAGICKA_PAUSE) p.magicka = Math.min(p.maxMagicka, p.magicka + p.maxMagicka * MAGICKA_REGEN * recovery * dt);
 }
 
 const TARGET_WORDS: Record<SpellTarget, string> = {
-  caster: 'on yourself',
-  touch: 'on touch',
-  target: 'on a target',
-  areaCaster: 'all around you',
-  areaTarget: 'in an area at the target',
-  walls: 'on walls',
+  caster: 'Caster',
+  touch: 'Touch',
+  target: 'Target',
+  areaCaster: 'Area around caster',
+  areaTarget: 'Area at target',
+  walls: 'Walls',
 };
 
-/** A line for each effect of the spell, as the magic menu shows them. */
+const POOLS = ['health', 'fatigue', 'spell points'];
+
+/** A line for each effect of the spell at the caster's level, as the magic menu shows them. */
 export function describe(spell: SpellRecord, level: number): string[] {
   const range = (e: SpellEffect) => {
     const [lo, hi] = magnitudeRange(e, level);
-    return lo === hi ? String(lo) : `${lo}–${hi}`;
+    return lo === hi ? `${lo}` : `${lo}–${hi}`;
   };
-  const secs = (e: SpellEffect) => `${Math.round(duration(e, level))}s`;
+  const rounds = (e: SpellEffect) => `${durationRounds(e, level)} rounds`;
   return spell.effects.map((e) => {
-    const name = EFFECT_NAMES[e.effect] ?? 'Unknown';
     switch (e.effect) {
       case DAMAGE:
-        return e.sub === DAMAGE_HEALTH ? `Damage health ${range(e)}` : `Damage ${e.sub === 2 ? 'magicka' : 'stamina'} ${range(e)}`;
+        return `${range(e)} damage to ${POOLS[e.sub] ?? 'health'}`;
       case CONTINUOUS_DAMAGE:
-        return `Damage health ${range(e)} each ${ROUND}s for ${secs(e)}`;
+        return `${range(e)} damage to ${POOLS[e.sub] ?? 'health'} every ${CONTINUOUS_EVERY} rounds for ${rounds(e)}`;
       case HEAL:
-        return `Restore ${e.sub === HEALTH ? 'health' : 'stamina'} ${range(e)}`;
+        return `Restores ${range(e)} ${e.sub === HEALTH ? 'health' : 'fatigue'}`;
       case TRANSFER:
-        return `Absorb health ${amount(e, level)}`;
+        return `Transfers ${e.params[0]} health from the target to you`;
       case CAUSE:
-        return e.sub === CAUSE_PARALYSIS
-          ? `Paralyze for ${secs(e)}, ${chance(e, level)}% chance`
-          : e.sub === CAUSE_POISON
-            ? `Poison for ${secs(e)}, ${chance(e, level)}% chance`
-            : name;
+        if (e.sub === CAUSE_PARALYSIS) return `${chance(e, level)}% chance to paralyze for ${rounds(e)}`;
+        if (e.sub === CAUSE_POISON) {
+          const p = poisonDamage(e);
+          return `${chance(e, level)}% chance to poison: ${p.damage} damage every ${p.everyRounds} rounds for ${rounds(e)}`;
+        }
+        return EFFECT_NAMES[e.effect];
       case CREATE:
-        return `Shield of ${amount(e, level)} points for ${secs(e)}`;
+        return `${amount(e, level)} hit point shield`;
       case NON_TARGET:
-        return `Blows miss you ${chance(e, level)}% of the time for ${secs(e)}`;
+        return `${chance(e, level)}% chance to be ignored for ${rounds(e)}`;
       case INVISIBILITY:
-        return `Invisible for ${secs(e)}`;
+        return `Invisible for ${rounds(e)}`;
       case LIGHT:
-        return `Light for ${secs(e)}`;
+        return `Light for ${rounds(e)}`;
       case OPEN:
-        return `Open a lock, ${chance(e, level)}% chance`;
-      case REGENERATE:
-        return `Regain ${Math.max(1, amount(e, level))} health each ${ROUND}s for ${secs(e)}`;
+        return `${chance(e, level)}% chance to open a locked door`;
+      case REGENERATE: {
+        const r = regeneration(e);
+        return `Regenerates ${r.health} health every ${r.everyRounds} rounds for ${rounds(e)}`;
+      }
       case SILENCE:
-        return 'Silence';
+        return `${chance(e, level)}% chance to silence for ${rounds(e)}`;
       default:
-        return name;
+        return EFFECT_NAMES[e.effect] ?? 'Unknown';
     }
   });
-}
-
-/** A chance in percent, from 0 to 100. */
-export function chance(e: SpellEffect, level: number): number {
-  return Math.max(0, Math.min(100, amount(e, level)));
 }
 
 /** "Fire", "Cold" ...; undefined for spells of no element. */
@@ -246,7 +300,7 @@ export function elementName(spell: SpellRecord): string | undefined {
   return ELEMENTS[spell.element];
 }
 
-/** Where the spell goes, in words. */
+/** Where the spell goes. */
 export function targetWords(spell: SpellRecord): string {
   return TARGET_WORDS[spell.target];
 }

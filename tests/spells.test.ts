@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { parseSpells, SPELL_SIZE, SpellFormatError, type SpellRecord } from '../src/formats/spells';
 import { DEFAULT_HERO, gainExperience, newPlayerStats } from '../src/game/combat';
-import { castable, describe as describeSpell, knownSpells, magickaCost, magnitude, magnitudeRange, startingMagicka } from '../src/game/magic';
+import {
+  castable,
+  chance,
+  describe as describeSpell,
+  duration,
+  durationRounds,
+  magickaCost,
+  magnitude,
+  magnitudeRange,
+  nextSpell,
+  ROUND,
+  startingMagicka,
+  startingSpells,
+} from '../src/game/magic';
 import { always } from './helpers/level';
 
 /** One made-up 85-byte spell record; none of these numbers come from the game. */
@@ -59,11 +72,12 @@ describe('the spell list', () => {
 });
 
 describe('spell rules', () => {
-  const [bolt, mend, lift] = parseSpells(
+  const [bolt, mend, lift, spark] = parseSpells(
     file(
       record({ name: 'Bolt', params: [[1, 10, 1, 2, 1, 0]], cost: 100 }),
       record({ name: 'Mend', target: 0, effects: [12], subs: [1], cost: 50 }),
       record({ name: 'Lift', target: 0, effects: [16], cost: 20 }),
+      record({ name: 'Spark', params: [[1, 2, 1, 1, 1, 0]], cost: 80 }),
     ),
   );
 
@@ -77,24 +91,40 @@ describe('spell rules', () => {
     expect(magnitude(bolt.effects[0], 3, always(0))).toBe(1 + 3);
     expect(magnitude(bolt.effects[0], 3, always(0.999))).toBe(10 + 6);
     expect(magnitudeRange(bolt.effects[0], 3)).toEqual([4, 16]);
-    expect(describeSpell(bolt, 1)).toEqual(['Damage health 2–12']);
+    expect(describeSpell(bolt, 1)).toEqual(['2–12 damage to health']);
   });
 
-  it('gives magicka to spellcasters only, and teaches the spells they can afford twice', () => {
-    expect(startingMagicka(false, 80)).toBe(0);
-    expect(startingMagicka(true, 50)).toBe(100);
-    expect(magickaCost(bolt)).toBe(20);
-    expect(knownSpells([bolt, mend, lift], 0)).toEqual([]);
-    expect(knownSpells([bolt, mend, lift], 30).map((s: SpellRecord) => s.name)).toEqual(['Mend']);
-    expect(knownSpells([bolt, mend, lift], 40).map((s: SpellRecord) => s.name)).toEqual(['Mend', 'Bolt']);
+  it('reads durations as the spellmaker describes them', () => {
+    // "%0%% chance to paralyze. +%1%% every %4 level(s). Duration is %5 rnd(s) per %2 level(s)."
+    const [gaze] = parseSpells(file(record({ name: 'Gaze', effects: [0], subs: [2], params: [[50, 2, 1, 0, 1, 1]] })));
+    expect(chance(gaze.effects[0], 3)).toBe(56);
+    expect(durationRounds(gaze.effects[0], 3)).toBe(3);
+    expect(duration(gaze.effects[0], 3)).toBe(3 * ROUND);
   });
 
-  it('adds magicka each level for those who have some', () => {
+  it('costs the spell’s cost divided by the caster’s level', () => {
+    expect(magickaCost(bolt, 1)).toBe(100);
+    expect(magickaCost(bolt, 10)).toBe(10);
+    expect(magickaCost(bolt, 3)).toBe(34);
+  });
+
+  it('gives spell points by class, none to classes that can’t cast', () => {
+    expect(startingMagicka({ name: 'Warrior', spellcaster: false }, 80)).toBe(0);
+    expect(startingMagicka({ name: 'Mage', spellcaster: true }, 50)).toBe(100);
+    expect(startingMagicka({ name: 'Sorcerer', spellcaster: true }, 50)).toBe(150);
+    expect(startingMagicka({ name: 'Battlemage', spellcaster: true }, 50)).toBe(87);
+  });
+
+  it('starts a caster with the cheapest healing and offensive spells, and teaches the next cheapest', () => {
+    const all = [bolt, mend, lift, spark];
+    expect(startingSpells(all).map((s: SpellRecord) => s.name)).toEqual(['Mend', 'Spark']);
+    expect(nextSpell(all, startingSpells(all))?.name).toBe('Bolt');
+  });
+
+  it('keeps spell points the same from level to level, refilling them', () => {
     const caster = newPlayerStats({ name: 'Staff', damage: [1, 2], cif: 'STAFF.CIF' }, { ...DEFAULT_HERO, magicka: 100 });
+    caster.magicka = 10;
     gainExperience(caster, DEFAULT_HERO.experience, always(0));
-    expect([caster.maxMagicka, caster.magicka]).toEqual([110, 110]);
-    const fighter = newPlayerStats({ name: 'Staff', damage: [1, 2], cif: 'STAFF.CIF' });
-    gainExperience(fighter, DEFAULT_HERO.experience, always(0));
-    expect(fighter.maxMagicka).toBe(0);
+    expect([caster.maxMagicka, caster.magicka]).toEqual([100, 100]);
   });
 });

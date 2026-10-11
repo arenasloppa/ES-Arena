@@ -43,7 +43,7 @@ export interface PlayerStats {
   maxHealth: number;
   stamina: number;
   maxStamina: number;
-  /** None for characters who can't cast spells. */
+  /** Spell points, shown as Skyrim's magicka; none for characters who can't cast spells. */
   magicka: number;
   maxMagicka: number;
   gold: number;
@@ -81,7 +81,7 @@ export interface Hero {
   fortune: number;
   /** Kilograms that can be carried before the player is too laden to run. */
   carry: number;
-  /** Magicka at level 1; 0 for classes that can't cast spells (see magic.ts). */
+  /** Spell points; 0 for classes that can't cast spells (see magic.ts). */
   magicka: number;
 }
 
@@ -102,9 +102,6 @@ export const DEFAULT_HERO: Hero = {
   carry: 200,
   magicka: 0,
 };
-
-/** Each level adds this much magicka for those who have any; the remake's own, as for stamina. */
-export const MAGICKA_PER_LEVEL = 10;
 
 export const POTION_HEALS = 25;
 const STAMINA_REGEN = 22; // per second, after a short pause
@@ -139,8 +136,9 @@ export function experienceFor(level: number, base = DEFAULT_HERO.experience): nu
 
 /**
  * Adds experience and raises the player's level as often as it allows;
- * returns how many levels were gained. Each level adds health, stamina and
- * any magicka, and refills them.
+ * returns how many levels were gained. Each level adds health and stamina
+ * and refills them, and spell points too (which, as in Arena, don't grow
+ * with level).
  */
 export function gainExperience(p: PlayerStats, amount: number, random: Random, hero: Hero = DEFAULT_HERO): number {
   p.experience += amount;
@@ -150,7 +148,6 @@ export function gainExperience(p: PlayerStats, amount: number, random: Random, h
     gained++;
     p.maxHealth += Math.max(1, roll(random, 1, hero.healthDie) + hero.healthBonus);
     p.maxStamina += 10;
-    if (p.maxMagicka > 0) p.maxMagicka += MAGICKA_PER_LEVEL;
     p.health = p.maxHealth;
     p.stamina = p.maxStamina;
     p.magicka = p.maxMagicka;

@@ -1,6 +1,7 @@
 /**
- * SPELLSG.65: Arena's standard spells, the ones the Mages Guild sells. 128
- * records of 85 bytes; unused records are blank. Layout, from
+ * SPELLSG.65: Arena's standard spells, the ones the Mages Guild sells
+ * (SPELLS.LST is the same list). 128 records of 85 bytes; unused records
+ * are blank. Layout, from
  * OpenTESArena's ArenaTypes::SpellData:
  *
  *    0  u16[6][3]  parameters: six numbers for each of the three effects,
