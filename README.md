@@ -157,7 +157,10 @@ checking against the original game.
 
 ## Support
 
-If you enjoy it, you can buy arenasloppa a coffee on Ko-fi.
+ES Arena is free. If you enjoy it, you can support it on Ko-fi.
+
+Your support helps arenasloppa buy the AI tokens that Claude uses to write the game, which means more time spent
+working on it and more of Arena, sooner. Every little bit helps. Thank you!
 
 [![Support arenasloppa on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
 
