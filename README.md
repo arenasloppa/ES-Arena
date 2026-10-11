@@ -34,15 +34,16 @@ screenshots of earlier versions.
   race's province marked on Arena's map of Tamriel; pick a name (or a random one in your race's style, Arena's own or by
   the race's customs in the lore); answer ten questions or choose from the eighteen classes; and share out bonus points
   among attributes rolled by Arena's rules on a sheet that shows what the original's does. Arena's paper doll shows you
-  as you are so far beside every step, and tries on each class's clothes and gear as you look through them. Your class
-  and attributes count in play: they set
-  your health, fatigue, damage, pace and how much you can carry, which armour and weapons you can use, and whether you
-  can pick locks.
+  as you are so far beside every step, and tries on each class's clothes and gear as you look through them. Your race,
+  class and attributes count in play: they set your health, fatigue, damage, pace and how much you can carry, which
+  armour and weapons you can use, and whether you can pick locks; and each race has its gifts from Arena, such as the
+  Redguard's way with weapons, the Khajiit's climbing, the Argonian's swimming and the High Elf's immunity to
+  paralysis.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
   find the Shift Gate.
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners
   and fight, landing their blows by Arena's rule: the armour where they strike, your Agility against theirs and the
-  levels on both sides decide whether a blow lands.
+  levels on both sides decide whether a blow lands. Lizard Men and Spiders can paralyse you, as in Arena.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
   three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you.
 - Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,

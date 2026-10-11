@@ -271,6 +271,23 @@ function alert(c: Creature, w: CreatureWorld): void {
   c.goal = { x: w.player.x, y: w.player.y };
 }
 
+/** The creatures whose blows can paralyse, by their number in the game's list: Lizard Men and Spiders. */
+const PARALYSING = [3, 9];
+
+/**
+ * Rounds of paralysis a creature's landed blow brings, as Arena works it out
+ * (its program at 0x2AD6D), or 0: a creature that paralyses does so on a
+ * roll out of 100 no more than its chance of special harm, and then only on
+ * a second roll below the player's chance of being paralysed, for 1 to 6
+ * rounds. The other creatures' special harm is disease, which the remake
+ * doesn't have yet.
+ */
+export function paralysisFrom(info: CreatureInfo, chance: number, random: () => number): number {
+  if (!PARALYSING.includes(info.id ?? 0) || info.special <= 0) return 0;
+  if (Math.floor(random() * 100) > info.special || Math.floor(random() * 100) >= chance) return 0;
+  return 1 + Math.floor(random() * 6);
+}
+
 /**
  * Hurts a creature; returns true when the blow kills it. A staggering blow
  * (a power attack) also stops a swing that has not landed yet.

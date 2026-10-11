@@ -19,6 +19,8 @@
  *   -0x0ED u32  experience
  *   -0x08D u8   extra experience per hit point
  *   -0x075 u8   damage, lowest and highest
+ *   -0x019 i8   chance in percent of a landed blow's special harm (paralysis,
+ *               disease), less 1; 0 for none, below that for other powers
  * Each creature's attributes, 8 bytes on Arena's scale of 0 to 255 in the
  * attributes' order, follow the race attribute table, after 9 more rows.
  *
@@ -41,6 +43,8 @@ export { ExeLayoutError };
 export interface CreatureInfo {
   /** e.g. "Goblin". */
   name: string;
+  /** Its number in the game's list, 1 (the rat) to 23; missing for creatures of the remake's own. */
+  id?: number;
   level: number;
   /** Hit points are rolled between these. */
   health: [number, number];
@@ -60,6 +64,12 @@ export interface CreatureInfo {
   flags: number;
   /** Agility on Arena's scale of 0 to 255, when the program's creature attributes can be read: the quicker land more blows. */
   agility?: number;
+  /**
+   * How often, in percent less 1, a blow that lands does the creature's
+   * special harm (see game/creatures.ts's paralysisFrom); 0 for none, and below
+   * 0 for powers of other kinds.
+   */
+  special: number;
   /** The game's scale value, 0 when unset. */
   scale: number;
 }
@@ -243,6 +253,7 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
     if (!anim.endsWith('@.CFA')) throw new ExeLayoutError(`unexpected creature animation name "${anims[i]}"`);
     const c: CreatureInfo = {
       name: names[i],
+      id: i + 1,
       level: u8(0x195, i),
       health: [u16(0x14d, i * 2), u16(0x14d, i * 2 + 1)],
       damage: [u8(0x75, i * 2), u8(0x75, i * 2 + 1)],
@@ -254,6 +265,7 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
       noCorpse: u8(0x1dd, i) === 1,
       flags: u16(0x17d, i),
       scale: u16(0x1c5, i),
+      special: view.getInt8(at(0x19) + i),
     };
     const sane =
       c.level >= 1 &&
@@ -262,7 +274,9 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
       c.health[0] <= c.health[1] &&
       c.health[1] <= 5000 &&
       c.damage[0] >= 1 &&
-      c.damage[0] <= c.damage[1];
+      c.damage[0] <= c.damage[1] &&
+      c.special >= -8 &&
+      c.special <= 100;
     if (!sane) throw new ExeLayoutError(`creature ${i} (${c.name}) has implausible stats`);
     if (attributes) c.agility = attributes[i][AGILITY];
     creatures.push(c);

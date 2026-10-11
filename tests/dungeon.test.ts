@@ -3,13 +3,18 @@ import { describe, expect, it } from 'vitest';
 import type { ExeData } from '../src/formats/exe';
 import {
   bodyPart,
+  COLD,
   DEFAULT_HERO,
+  elementalDamage,
+  FIRE,
   hitChance,
   drinkPotion,
   experienceFor,
   gainExperience,
+  knackDamage,
   maxHealthFor,
   newPlayerStats,
+  POISON,
   recover,
   roll,
   spendStamina,
@@ -19,6 +24,7 @@ import {
   ATTACK_TIME,
   creatureFrame,
   hurtCreature,
+  paralysisFrom,
   spawnCreature,
   staggerCreature,
   updateCreature,
@@ -72,6 +78,30 @@ describe('combat rules', () => {
   it('picks the body part a blow lands on from a roll of 0 to 19', () => {
     const parts = [1, 2, 5, 9, 14, 17, 19];
     expect([0, 0.1, 0.15, 0.3, 0.7, 0.86, 0.999].map((r) => bodyPart(always(r), parts))).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it('adds a race’s knack with weapons as the character rises in level', () => {
+    const melee = { levels: 3, weapons: 'melee' as const };
+    expect([1, 2, 3, 8, 9].map((level) => knackDamage(melee, level, false))).toEqual([0, 0, 1, 2, 3]);
+    expect(knackDamage(melee, 9, true)).toBe(0);
+    expect(knackDamage({ levels: 3, weapons: 'bows' }, 9, false)).toBe(0);
+    expect(knackDamage({ levels: 4, weapons: 'any' }, 9, true)).toBe(2);
+    expect(knackDamage(undefined, 9, false)).toBe(0);
+  });
+
+  it('saves against spells of an element as Arena does, with Nords shrugging off cold and Bretons magic', () => {
+    const saver = { willpower: 52, saves: [0, 0, 40, 0, 60] };
+    // Willpower takes a 26th of itself off (2 here); a roll below the save's chance fails it and takes the lot, else half.
+    expect(elementalDamage(12, FIRE, saver, always(0))).toBe(5);
+    expect(elementalDamage(12, POISON, saver, always(0.39))).toBe(10);
+    expect(elementalDamage(12, POISON, saver, always(0.4))).toBe(5);
+    // The element the race resists does half on a failed save, and nothing on a successful one.
+    const nord = { ...saver, resists: COLD, saves: [0, 70, 0, 0, 0] };
+    expect(elementalDamage(12, COLD, nord, always(0.5))).toBe(5);
+    expect(elementalDamage(12, COLD, nord, always(0.8))).toBe(0);
+    // Spells of no element are only lessened by Willpower, which never heals.
+    expect(elementalDamage(12, 5, saver, always(0))).toBe(10);
+    expect(elementalDamage(1, FIRE, saver, always(0))).toBe(0);
   });
 
   it('picks a swing for each kind of weapon in the game’s list', () => {
@@ -245,6 +275,18 @@ describe('creatures', () => {
     expect(strikes({ protection: [25, 0, 0, 0, 0, 0, 0] }).some((d) => d > 0)).toBe(true);
     expect(strikes({ agility: 190 }).every((d) => d === 0)).toBe(true);
     expect(strikes({ agility: 190 }, fakeCreature({ agility: 160 })).some((d) => d > 0)).toBe(true);
+  });
+
+  it('paralyse now and then when they are Lizard Men or Spiders', () => {
+    const lizard = fakeCreature({ id: 3, special: 9 });
+    // A roll out of 100 of no more than the creature's chance, then one below the player's, for 1 to 6 rounds.
+    expect(paralysisFrom(lizard, 30, sequence(0.09, 0.29, 0.99))).toBe(6);
+    expect(paralysisFrom(lizard, 30, sequence(0.1, 0, 0))).toBe(0);
+    expect(paralysisFrom(lizard, 30, sequence(0, 0.3, 0))).toBe(0);
+    expect(paralysisFrom(fakeCreature({ id: 9, special: 14 }), 30, always(0))).toBe(1);
+    // A rat's harm is disease, not paralysis; and a creature with no chance does none.
+    expect(paralysisFrom(fakeCreature({ id: 1, special: 4 }), 100, always(0))).toBe(0);
+    expect(paralysisFrom(fakeCreature({ id: 3, special: 0 }), 100, always(0))).toBe(0);
   });
 
   it('find their way round corners once hurt', () => {
@@ -698,6 +740,60 @@ describe('the character in the dungeon', () => {
     tick(d, 0.3, click);
     expect(d.events.find((e) => e.type === 'hit')).toMatchObject({ damage: (4 + 1) * 2 });
     expect(notes(d.events)).toContain('Critical strike!');
+  });
+
+  it('adds the race’s knack to blows with the weapons it is for', () => {
+    const blow = (knack: Hero['knack']) => {
+      const d = new Dungeon(arena(), TABLES, always(0), hero({ knack }));
+      d.stats.level = 8;
+      d.creatures[0].health = d.creatures[0].maxHealth = 20;
+      tick(d, 0.3, click);
+      return d.events.find((e) => e.type === 'hit');
+    };
+    expect(blow({ levels: 4, weapons: 'any' })).toMatchObject({ damage: 4 + 2 });
+    expect(blow({ levels: 3, weapons: 'bows' })).toMatchObject({ damage: 4 });
+  });
+
+  it('is paralysed now and then by a Lizard Man’s blow, unless immune, and can do nothing until it wears off', () => {
+    const tables = { ...TABLES, creatures: [fakeCreature({ id: 3, special: 9, health: [3, 3], damage: [1, 1] })] };
+    let roll = 0;
+    const d = new Dungeon(arena(), tables, () => roll, hero({ paralysis: 20 }));
+    tick(d, 2);
+    expect(d.paralysed).toBe(true);
+    expect(notes(d.events)).toContain('You are paralyzed');
+    expect(d.activeEffects()).toContain('Paralyzed');
+    // From now on the blows miss; meanwhile the player can't walk, swing or jump.
+    roll = 0.99;
+    const x = d.player.x;
+    tick(d, 0.5, input({ forward: -1, attack: { held: false, pressed: true, released: true } }));
+    expect(d.player.x).toBe(x);
+    expect(d.swing).toBeUndefined();
+    expect(d.jump()).toBe(false);
+    // A roll of 0 holds them for one round.
+    tick(d, 5);
+    expect(d.paralysed).toBe(false);
+    expect(notes(d.events)).toContain('You can move again');
+    tick(d, 0.5, input({ forward: -1 }));
+    expect(d.player.x).toBeLessThan(x);
+
+    const immune = new Dungeon(arena(), tables, always(0), hero({ paralysis: 0 }));
+    tick(immune, 2);
+    expect(immune.events.some((e) => e.type === 'hurt')).toBe(true);
+    expect(immune.paralysed).toBe(false);
+  });
+
+  it('climbs out of a pit four times as fast as a Khajiit or Acrobat', () => {
+    const pit = textLevel(['######', '#.OO.#', '#.OO.#', '#....#', '######']);
+    const climb = (h: Hero) => {
+      const d = new Dungeon(pit, TABLES, always(0), h);
+      Object.assign(d.player, { x: 3.4, y: 1.5, z: 0, yaw: 0 });
+      tick(d, 1);
+      tick(d, 0.5, input({ forward: 1 }));
+      return d.climb?.seconds;
+    };
+    const plain = climb(hero());
+    expect(plain).toBeGreaterThan(0);
+    expect(climb(hero({ climbPace: 4 }))).toBe(plain! / 4);
   });
 
   it('lets a thief pick a lock, trying again after a moment', () => {

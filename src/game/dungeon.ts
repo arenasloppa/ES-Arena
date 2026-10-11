@@ -11,9 +11,10 @@
  * stamina, and attacking while blocking bashes. Striking a creature that
  * has not noticed the player sneaking does triple damage. Whether a monster's
  * blow lands is Arena's rule: the levels on both sides, the armour on the
- * body part it strikes and both sides' Agility (combat.ts's hitChance). The
- * player's class and attributes (the Hero) change how hard they hit, how
- * fast they move and more. Monster stats, weapon damage, armour and sounds
+ * body part it strikes and both sides' Agility (combat.ts's hitChance); a
+ * Lizard Man's or Spider's may paralyse too (creatures.ts's paralysisFrom).
+ * The player's race, class and attributes (the Hero) change how hard they
+ * hit, how fast they move and climb, and more. Monster stats, weapon damage, armour and sounds
  * come from the player's own game; the loot rules are the remake's own.
  *
  * Magic works as in Skyrim's hands with Arena's spells (see magic.ts): a
@@ -29,6 +30,8 @@ import {
   bashChance,
   DEFAULT_HERO,
   drinkPotion,
+  elementalDamage,
+  knackDamage,
   levelUp,
   maxHealthFor,
   newPlayerStats,
@@ -47,6 +50,7 @@ import {
   isAlive,
   isCalm,
   paralyseCreature,
+  paralysisFrom,
   spawnCreature,
   staggerCreature,
   updateCreature,
@@ -303,7 +307,8 @@ const CLIMB_PUSH_PIT = 0.25;
  * Seconds a climb out takes. In Arena (played in DOSBox) swimming into the
  * edge of water lifts you out onto the floor straight away; the remake takes
  * a moment so the view doesn't jump. A pit is a real climb, and a blow, or
- * attacking, throws you back in (UESP); its time is the remake's own.
+ * attacking, throws you back in (UESP); its time is the remake's own, a
+ * quarter of it for Khajiit and Acrobats (Hero.climbPace).
  */
 const CLIMB_WATER = 0.35;
 const CLIMB_PIT = 4;
@@ -421,6 +426,8 @@ export class Dungeon {
   private invisibleUntil = 0;
   private light = { reach: 1, until: 0 };
   private regen = { health: 0, every: 0, next: 0, until: 0 };
+  /** Seconds of play until a paralysing blow wears off. */
+  private paralysedUntil = 0;
 
   /** What the player's character brings; worked out again when they share out bonus points (see applyAttributes). */
   hero: Hero;
@@ -494,9 +501,16 @@ export class Dungeon {
     const minute = Math.floor(this.clock / 60);
     this.clock += dt * GAME_SECONDS_PER_SECOND;
     if (!this.outcome && Math.floor(this.clock / 60) !== minute) this.checkLevel();
+    if (this.paralysedUntil > 0 && !this.paralysed) {
+      this.paralysedUntil = 0;
+      if (!this.outcome) this.events.push({ type: 'notify', text: 'You can move again' });
+    }
     if (!this.outcome) {
-      this.move(dt, input);
-      this.updateAttack(dt, input);
+      if (this.paralysed) this.holdStill(dt, input);
+      else {
+        this.move(dt, input);
+        this.updateAttack(dt, input);
+      }
       this.updateCell();
       // A raised guard holds stamina from coming back.
       if (this.blocking) this.sinceStamina = 0;
@@ -591,7 +605,7 @@ export class Dungeon {
     if (this.outcome) return undefined;
     const m = this.messages;
     if (this.enemiesNear()) return m.enemiesNearby ?? CAMP_WORDS.enemiesNearby;
-    if (this.swimming || this.climb || airborne(this.level, this.player)) return m.campingNotAllowed ?? CAMP_WORDS.campingNotAllowed;
+    if (this.swimming || this.climb || this.paralysed || airborne(this.level, this.player)) return m.campingNotAllowed ?? CAMP_WORDS.campingNotAllowed;
     if (hours === 'healed' && !needsRest(this.stats, this.rester)) return m.fullyRested ?? CAMP_WORDS.fullyRested;
     this.camping = { hoursLeft: hours === 'healed' ? undefined : Math.max(1, Math.floor(hours)), hoursPassed: 0, tick: REST_STEP_SECONDS };
     this.blocking = false;
@@ -696,8 +710,32 @@ export class Dungeon {
 
   /** Jumps, when on the floor and not in water, a pit or a climb. */
   jump(): boolean {
-    if (this.outcome || this.climb || inChasm(this.level, this.player)) return false;
+    if (this.outcome || this.paralysed || this.climb || inChasm(this.level, this.player)) return false;
     return jump(this.level, this.player);
+  }
+
+  /** Held by a paralysing blow: the player can look about, but not move, fight, cast or use things. */
+  get paralysed(): boolean {
+    return this.time < this.paralysedUntil;
+  }
+
+  /** Paralyses the player for `seconds`; a player already paralysed stays so only as long as before, as in Arena. */
+  private paralyse(seconds: number): void {
+    if (this.outcome || this.paralysed) return;
+    this.paralysedUntil = this.time + seconds;
+    this.events.push({ type: 'notify', text: 'You are paralyzed' });
+  }
+
+  /** Paralysed: no moving, swinging or guarding, though falling, and tiring in water, go on. */
+  private holdStill(dt: number, input: DungeonInput): void {
+    this.swing = undefined;
+    this.armedAt = this.queued = undefined;
+    this.castHeld = input.block;
+    this.blocking = false;
+    this.running = false;
+    this.moving = false;
+    this.pushing = 0;
+    this.updateHeight(dt);
   }
 
   private move(dt: number, input: DungeonInput): void {
@@ -799,7 +837,7 @@ export class Dungeon {
     this.swing = undefined;
     // Out of the water's pull: the view rises with the climb, and swimming no longer tires.
     this.swimming = false;
-    this.climb = { progress: 0, seconds: cell?.chasm === 'dry' ? CLIMB_PIT : CLIMB_WATER, from: p.z ?? 0, start: { x: p.x, y: p.y }, to };
+    this.climb = { progress: 0, seconds: cell?.chasm === 'dry' ? CLIMB_PIT / this.hero.climbPace : CLIMB_WATER, from: p.z ?? 0, start: { x: p.x, y: p.y }, to };
   }
 
   private updateClimb(dt: number): void {
@@ -912,7 +950,9 @@ export class Dungeon {
     strike: (c, damage) => {
       // Sanctuary: a chance the creature ignores the player.
       if (damage > 0 && this.time < this.sanctuary.until && this.random() * 100 < this.sanctuary.chance) return;
-      if (!this.outcome && damage > 0) this.hurtPlayer(damage, c);
+      if (this.outcome || damage <= 0 || !this.hurtPlayer(damage, c)) return;
+      const rounds = paralysisFrom(c.info, this.hero.paralysis, this.random);
+      if (rounds > 0) this.paralyse(rounds * ROUND);
     },
   };
 
@@ -920,12 +960,21 @@ export class Dungeon {
     if (c.info.sound) this.events.push({ type: 'sound', name: c.info.sound, at: { x: c.x, y: c.y } });
   }
 
-  private hurtPlayer(damage: number, from?: Creature): void {
+  /**
+   * A blow, or a spell of an `element` (which the player saves against, see
+   * elementalDamage), reaching the player. Returns whether it struck home:
+   * not taken on the guard, and not all soaked up by a shield spell.
+   */
+  private hurtPlayer(damage: number, from?: Creature, element?: number): boolean {
+    if (element !== undefined) damage = elementalDamage(damage, element, this.hero, this.random);
+    if (damage <= 0) return false;
+    let guarded = false;
     if (this.blocking && from && angleTo(this.player, from.x, from.y) <= BLOCK_ARC && spendStamina(this.stats, BLOCK_STAMINA)) {
       this.sinceStamina = 0;
+      guarded = true;
       damage = Math.round(damage * BLOCK_LEAK);
       this.events.push({ type: 'blocked', damage }, { type: 'sound', name: 'CLANK.VOC', volume: 0.8 });
-      if (damage <= 0) return;
+      if (damage <= 0) return false;
     }
     if (this.shieldPoints > 0) {
       const absorbed = Math.min(damage, this.shieldPoints);
@@ -934,7 +983,7 @@ export class Dungeon {
       if (this.shieldPoints <= 0) this.events.push({ type: 'notify', text: 'Your shield is gone' });
       if (damage <= 0) {
         this.events.push({ type: 'blocked', damage: 0 }, { type: 'sound', name: 'CLANK.VOC', volume: 0.6 });
-        return;
+        return false;
       }
     }
     this.stats.health = Math.max(0, this.stats.health - damage);
@@ -942,6 +991,7 @@ export class Dungeon {
     this.events.push({ type: 'hurt', damage }, { type: 'sound', name: 'UHIT.VOC' });
     this.fallBack();
     if (this.stats.health <= 0) this.die();
+    return !guarded;
   }
 
   // ---- Fighting ----
@@ -1029,7 +1079,8 @@ export class Dungeon {
       return;
     }
     if (target) {
-      let damage = Math.max(1, roll(this.random, ...this.stats.weapon.damage) + this.hero.damageBonus) * (s.power ? 2 : 1);
+      const bonus = this.hero.damageBonus + knackDamage(this.hero.knack, this.stats.level, false);
+      let damage = Math.max(1, roll(this.random, ...this.stats.weapon.damage) + bonus) * (s.power ? 2 : 1);
       if (this.hero.critical > 0 && this.random() < this.hero.critical) {
         damage *= 2;
         this.events.push({ type: 'notify', text: 'Critical strike!' });
@@ -1100,9 +1151,10 @@ export class Dungeon {
     return this.shieldPoints;
   }
 
-  /** The spells working on the player now, for the HUD and the magic menu. */
+  /** The spells working on the player now, and paralysis, for the HUD and the magic menu. */
   activeEffects(): string[] {
     const list: string[] = [];
+    if (this.paralysed) list.push('Paralyzed');
     if (this.shieldPoints > 0) list.push(`Shield (${this.shieldPoints})`);
     if (this.time < this.sanctuary.until) list.push('Sanctuary');
     if (this.invisible) list.push('Invisible');
@@ -1118,7 +1170,7 @@ export class Dungeon {
 
   /** Casts a spell, if there are spell points enough and it has something to work on. */
   cast(spell: SpellRecord): boolean {
-    if (this.outcome || this.swing || this.sinceCast < CAST_TIME) return false;
+    if (this.outcome || this.paralysed || this.swing || this.sinceCast < CAST_TIME) return false;
     const notify = (text: string) => this.events.push({ type: 'notify', text });
     if (!castable(spell)) return false;
     const cost = this.spellCost(spell);
@@ -1398,7 +1450,7 @@ export class Dungeon {
   }
 
   activate(): void {
-    const t = this.target();
+    const t = this.paralysed ? undefined : this.target();
     if (!t) return;
     if (t.kind === 'door') this.useDoor(t.id);
     else if (t.kind === 'exit') {

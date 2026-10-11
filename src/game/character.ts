@@ -14,7 +14,7 @@
 import type { CharacterTables, ClassInfo, CreationTexts, RaceInfo } from '../formats/classes';
 import type { ClassChooser, Question } from '../formats/creation';
 import type { GameMessages } from '../formats/messages';
-import { to256, type Hero, type Random } from './combat';
+import { COLD, MAGIC, POISON, to256, type Hero, type Random, type WeaponKnack } from './combat';
 import { regainsMagicka, startingMagicka } from './magic';
 
 export type Gender = 'male' | 'female';
@@ -30,10 +30,18 @@ export const PERSONALITY = 6;
 export const LUCK = 7;
 export const ATTRIBUTE_COUNT = 8;
 /** The races, in the game's order. */
+export const BRETON = 0;
+export const REDGUARD = 1;
+export const NORD = 2;
+export const DARK_ELF = 3;
+export const HIGH_ELF = 4;
+export const WOOD_ELF = 5;
+export const KHAJIIT = 6;
 export const ARGONIAN = 7;
 /** Classes whose places in the game's list Arena's rules go by. */
 export const ACROBAT = 9;
 export const MONK = 12;
+export const KNIGHT = 17;
 /** No attribute goes above this, bonus points included. */
 export const ATTRIBUTE_MAX = 100;
 /** Faces each race has to choose from. */
@@ -343,10 +351,52 @@ export function maxFatigue(a: number[]): number {
   return a[STRENGTH] + a[ENDURANCE];
 }
 
-/** What the character brings to a fight, worked out from their class and attributes. */
-export function heroFor(character: Character, cls: ClassInfo): Hero {
+/**
+ * Each race's knack with weapons, as the manual gives it: Redguards with
+ * anything but bows, a point of damage every 3 levels; Dark Elves with any
+ * weapon, every 4; Wood Elves with bows, every 3. (Arena's program has the
+ * Redguard's and the Wood Elf's weapons the other way round, and counts
+ * daggers with bows; the remake goes by the manual.)
+ */
+const KNACKS: Record<number, WeaponKnack> = {
+  [REDGUARD]: { levels: 3, weapons: 'melee' },
+  [DARK_ELF]: { levels: 4, weapons: 'any' },
+  [WOOD_ELF]: { levels: 3, weapons: 'bows' },
+};
+
+/**
+ * One of Arena's saves, a chance out of 100 of failing it, from its value on
+ * Arena's scale: the program turns it into a percentage at creation, but
+ * from the first level up keeps it as it is (its program at 0x12DC1 and
+ * 0x1503B). Below nothing counts as nothing here; Arena reads it as a chance
+ * over 100, so a save that strong would always fail.
+ */
+export function saveChance(raw: number, levelled = false): number {
+  return Math.max(0, levelled ? raw : to100(raw));
+}
+
+/**
+ * The saves against fire, cold, poison, shock and magic. Arena's program
+ * leaves fire, cold and shock at nothing, so those are always saved against;
+ * poison's is a quarter of Endurance, and magic's is how far Willpower falls
+ * short of the middle of its scale.
+ */
+export function saves(a: number[], levelled = false): number[] {
+  const poison = saveChance(to256(a[ENDURANCE]) >> 2, levelled);
+  const magic = saveChance(128 - to256(a[WILLPOWER]), levelled);
+  return [0, 0, poison, 0, magic];
+}
+
+/**
+ * What the character brings to a fight, worked out from their race, class
+ * and attributes. `levelled` once they have gone up a level, which changes
+ * how Arena keeps their saves (see saveChance).
+ */
+export function heroFor(character: Character, cls: ClassInfo, { levelled = false } = {}): Hero {
   const a = character.attributes;
   const d = derivedAttributes(a);
+  const race = character.race;
+  const s = saves(a, levelled);
   // The remake's own rules turn the sheet's steps into chances: a step is five points of Agility or Luck.
   // Arena keeps what Luck does hidden; UESP says it nudges nearly everything (fights, locks, bargains), so here
   // it adds a little to picking locks, critical hits and the gold found.
@@ -361,8 +411,14 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     healMod: d.healMod,
     experience: cls.experience,
     damageBonus: d.damage,
+    knack: KNACKS[race],
     agility: to256(a[AGILITY]),
     evasive: cls.id === MONK || cls.id === ACROBAT,
+    willpower: to256(a[WILLPOWER]),
+    saves: s,
+    resists: race === NORD ? COLD : race === BRETON ? MAGIC : undefined,
+    // High Elves and Knights can't be paralysed.
+    paralysis: race === HIGH_ELF || cls.id === KNIGHT ? 0 : s[POISON],
     // Arena's base speed: 20 plus up to 20 more for Speed (OpenTESArena's getBaseSpeed), against the remake's walk at 40.
     pace: (20 + Math.trunc((Math.trunc((a[SPEED] * 256) / 100) * 20) / 256)) / 30,
     recovery: 0.8 + a[WILLPOWER] * 0.004,
@@ -373,8 +429,10 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     magicka: startingMagicka(cls, a[INTELLIGENCE]),
     regainsMagicka: regainsMagicka(cls),
     // OpenTESArena's values for the original: everyone swims at half speed and 30 times their usual tiring, Argonians at full speed and 12 times.
-    swimPace: character.race === ARGONIAN ? 1 : 0.5,
-    swimTiring: character.race === ARGONIAN ? 12 / 30 : 1,
+    swimPace: race === ARGONIAN ? 1 : 0.5,
+    swimTiring: race === ARGONIAN ? 12 / 30 : 1,
+    // Arena's program lets Khajiit and Acrobats climb a pit's walls four times as fast.
+    climbPace: race === KHAJIIT || cls.id === ACROBAT ? 4 : 1,
     gold: character.gold,
   };
 }

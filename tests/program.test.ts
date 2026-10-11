@@ -73,7 +73,7 @@ describe('PKLITE', () => {
 /** Made-up tables: none of these numbers come from the game. */
 const CREATURES: FakeCreature[] = [
   { name: 'Rat', anim: 'rat', level: 6, health: [2, 5], damage: [1, 3], sound: 1, lift: 5 },
-  { name: 'Goblin', anim: 'goblin', level: 8, health: [3, 9], damage: [2, 4], sound: 0, lift: 12, noCorpse: true },
+  { name: 'Goblin', anim: 'goblin', level: 8, health: [3, 9], damage: [2, 4], sound: 0, lift: 12, noCorpse: true, special: 7 },
   ...Array.from({ length: 21 }, (_, i): FakeCreature => ({ name: `Beast ${i}`, anim: `beast${i}`, level: 3 + i, health: [10, 20], damage: [1, 9], sound: 2 })),
 ];
 const SOUNDS = ['firedaem.voc', 'squeak.voc', 'beast.voc'];
@@ -88,7 +88,8 @@ describe('program tables', () => {
     const creatures = readCreatures(makeExeImage(CREATURES, SOUNDS, WEAPONS));
     expect(creatures).toHaveLength(23);
     expect(creatures[0]).toMatchObject({ name: 'Rat', animation: 'RAT', level: 6, health: [2, 5], damage: [1, 3], sound: 'SQUEAK.VOC', lift: 5, noCorpse: false });
-    expect(creatures[1]).toMatchObject({ name: 'Goblin', animation: 'GOBLIN', sound: 'FIREDAEM.VOC', lift: 12, noCorpse: true, experience: 10, experiencePerHealth: 2 });
+    expect(creatures[1]).toMatchObject({ name: 'Goblin', id: 2, animation: 'GOBLIN', sound: 'FIREDAEM.VOC', lift: 12, noCorpse: true, experience: 10, experiencePerHealth: 2, special: 7 });
+    expect(creatures[0]).toMatchObject({ id: 1, special: 0 });
     expect(creatures[22].name).toBe('Beast 20');
   });
 

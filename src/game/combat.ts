@@ -6,8 +6,9 @@
  * formats/exe.ts). Whether a creature's blow lands is Arena's own rule: the
  * levels on both sides, the armour on the body part it strikes and both
  * sides' Agility (see hitChance). The player's swings always connect, as in
- * Skyrim. What the character's class and attributes add is worked out in
- * character.ts.
+ * Skyrim. Spells of an element are saved against as in Arena (see
+ * elementalDamage). What the character's race, class and attributes add is
+ * worked out in character.ts.
  */
 import type { ClassInfo } from '../formats/classes';
 
@@ -24,7 +25,7 @@ export function to256(value: number): number {
   return value < 0 ? -q : q;
 }
 
-/** Agility of 50 out of 100 on Arena's scale: a creature's when the program's can't be read, and a player's with no character. */
+/** 50 out of 100 on Arena's scale: a creature's Agility when the program's can't be read, and a player's Agility and Willpower with no character. */
 export const MIDDLING_AGILITY = 128;
 /**
  * Where blows land when the program's table can't be read, the remake's own:
@@ -72,6 +73,53 @@ export function bodyPart(random: Random, parts: number[] = BODY_PARTS): number {
 export function blowLands(attacker: { level: number; agility: number }, d: Defender, random: Random, parts?: number[]): boolean {
   const part = bodyPart(random, parts);
   return Math.floor(random() * 256) < hitChance(attacker, d, part);
+}
+
+/** A race's knack with weapons: a point of damage for every `levels` of the character's levels, with `weapons`. */
+export interface WeaponKnack {
+  levels: number;
+  weapons: 'any' | 'melee' | 'bows';
+}
+
+/** What a race's knack adds to a blow: nothing until the character reaches the levels it takes. */
+export function knackDamage(knack: WeaponKnack | undefined, level: number, bow: boolean): number {
+  if (!knack || (knack.weapons === 'melee' && bow) || (knack.weapons === 'bows' && !bow)) return 0;
+  return Math.floor(level / knack.levels);
+}
+
+/** The elements of spells, numbered as in the spells file (formats/spells.ts); 5 and up are spells of none. */
+export const FIRE = 0;
+export const COLD = 1;
+export const POISON = 2;
+export const SHOCK = 3;
+export const MAGIC = 4;
+
+/** What stands between a spell and the player's health. */
+export interface SpellDefence {
+  /** Willpower, 0 to 255. */
+  willpower: number;
+  /** Chance out of 100 of failing the save against each element. */
+  saves: number[];
+  /** The element the race takes half of, and none of on a save. */
+  resists?: number;
+}
+
+/**
+ * Damage from a spell of an element, as Arena works it out for one that
+ * strikes the player (its program at 0x2A825): Willpower takes a 26th of
+ * itself off, then the player saves against the element. A failed save takes
+ * the whole damage and a successful one half, but the element the race
+ * resists does half on a failed save and none on a successful one (Nords
+ * and cold, Bretons and magic). Spells of no element are only lessened by
+ * Willpower.
+ */
+export function elementalDamage(damage: number, element: number, t: SpellDefence, random: Random): number {
+  damage = Math.max(0, damage - Math.floor(t.willpower / 26));
+  if (damage <= 0 || element > MAGIC) return damage;
+  const failed = Math.floor(random() * 100) < (t.saves[element] ?? 0);
+  const resisted = element === t.resists;
+  if (failed) return resisted ? Math.floor(damage / 2) : damage;
+  return resisted ? 0 : Math.floor(damage / 2);
 }
 
 export interface Weapon {
@@ -128,10 +176,18 @@ export interface Hero {
   experience: number;
   /** Added to every blow. */
   damageBonus: number;
+  /** The race's knack with weapons, adding to blows as the character rises in level. */
+  knack?: WeaponKnack;
   /** Agility on Arena's scale of 0 to 255: the quicker the character, the fewer blows land (see hitChance). */
   agility: number;
   /** A Monk or Acrobat, hard to hit and harder with each level (see hitChance). */
   evasive: boolean;
+  /** Willpower on Arena's scale, the save against each element and the element the race resists (see elementalDamage). */
+  willpower: number;
+  saves: number[];
+  resists?: number;
+  /** Chance out of 100 that a blow which can paralyse does: Arena's poison save, and none for those immune to paralysis. */
+  paralysis: number;
   /** Multiplies walking and running speed. */
   pace: number;
   /** Multiplies how fast stamina comes back. */
@@ -151,6 +207,8 @@ export interface Hero {
   /** Swimming speed as a share of walking, and how fast swimming tires: Argonians swim at full speed and tire less than half as fast. */
   swimPace: number;
   swimTiring: number;
+  /** How many times faster than others the character climbs out of a pit: Khajiit and Acrobats four times. */
+  climbPace: number;
   /** Endurance's heal mod, for healing while camping (camping.ts). */
   healMod?: number;
   /** Gold rolled at creation, when the character has some. */
@@ -167,6 +225,9 @@ export const DEFAULT_HERO: Hero = {
   damageBonus: 0,
   agility: MIDDLING_AGILITY,
   evasive: false,
+  willpower: MIDDLING_AGILITY,
+  saves: [0, 0, 0, 0, 0],
+  paralysis: 0,
   pace: 1,
   recovery: 1,
   critical: 0,
@@ -177,6 +238,7 @@ export const DEFAULT_HERO: Hero = {
   regainsMagicka: true,
   swimPace: 0.5,
   swimTiring: 1,
+  climbPace: 1,
 };
 
 export const POTION_HEALS = 25;

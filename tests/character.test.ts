@@ -4,9 +4,19 @@ import {
   classFromAnswers,
   creationData,
   derivedAttributes,
+  ACROBAT,
   AGILITY,
+  BRETON,
+  DARK_ELF,
   ENDURANCE,
+  HIGH_ELF,
+  KHAJIIT,
+  KNIGHT,
+  NORD,
   PERSONALITY,
+  REDGUARD,
+  saves,
+  WOOD_ELF,
   STRENGTH,
   FALLBACK_CLASSES,
   fillText,
@@ -25,6 +35,7 @@ import {
   type Character,
 } from '../src/game/character';
 import { arenaName, loreName, randomName } from '../src/game/names';
+import { COLD, MAGIC } from '../src/game/combat';
 import { always } from './helpers/level';
 
 /** Returns the numbers given in turn, then the last one over and over. */
@@ -154,6 +165,33 @@ describe('character creation', () => {
     expect(sage.recovery).toBeCloseTo(1.16);
     // A character from before health was rolled gets the die's highest.
     expect(heroFor(CHARACTER, TINKER).health).toBe(25 + 9);
+  });
+
+  it('gives each race its knack with weapons, its resistance and its immunities', () => {
+    const as = (race: number, cls = TINKER) => heroFor({ ...CHARACTER, race }, cls);
+    // Redguards with anything but bows, Dark Elves with anything, Wood Elves with bows.
+    expect(as(REDGUARD).knack).toEqual({ levels: 3, weapons: 'melee' });
+    expect(as(DARK_ELF).knack).toEqual({ levels: 4, weapons: 'any' });
+    expect(as(WOOD_ELF).knack).toEqual({ levels: 3, weapons: 'bows' });
+    expect(as(NORD).knack).toBeUndefined();
+    expect([as(NORD).resists, as(BRETON).resists, as(KHAJIIT).resists]).toEqual([COLD, MAGIC, undefined]);
+    // Endurance 62 is 159 on Arena's scale: a quarter of it, 39, is 15 in a hundred at creation, and stays 39 after a level.
+    expect(as(REDGUARD).paralysis).toBe(15);
+    expect(heroFor(CHARACTER, TINKER, { levelled: true }).paralysis).toBe(39);
+    // High Elves and Knights can't be paralysed.
+    expect(as(HIGH_ELF).paralysis).toBe(0);
+    expect(heroFor(CHARACTER, { ...TINKER, id: KNIGHT }).paralysis).toBe(0);
+    // Khajiit and Acrobats climb four times as fast.
+    expect([as(KHAJIIT).climbPace, as(NORD).climbPace, heroFor(CHARACTER, { ...TINKER, id: ACROBAT }).climbPace]).toEqual([4, 1, 4]);
+  });
+
+  it('works out the saves against each element as Arena keeps them', () => {
+    // Willpower 55 is past the middle, so magic is always saved against; 40 (102) falls 26 short, 10 in a hundred at creation.
+    expect(saves(CHARACTER.attributes)).toEqual([0, 0, 15, 0, 0]);
+    const weak = CHARACTER.attributes.map((v, i) => (i === WILLPOWER ? 40 : v));
+    expect(saves(weak)).toEqual([0, 0, 15, 0, 10]);
+    expect(saves(weak, true)).toEqual([0, 0, 39, 0, 26]);
+    expect(heroFor({ ...CHARACTER, attributes: weak }, TINKER).willpower).toBe(102);
   });
 
   it('picks the class the answers lead to, by the game’s table or else by the path most taken', () => {

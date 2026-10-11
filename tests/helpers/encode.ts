@@ -227,6 +227,8 @@ export interface FakeCreature {
   sound: number;
   lift?: number;
   noCorpse?: boolean;
+  /** Chance of special harm, in percent less 1. */
+  special?: number;
 }
 
 export interface FakeWeapon {
@@ -259,6 +261,7 @@ export function makeExeImage(creatures: FakeCreature[], sounds: string[], weapon
   put(0xed, all.flatMap(() => [10, 0, 0, 0]));
   put(0x8d, all.map(() => 2));
   put(0x75, all.flatMap((c) => c.damage));
+  put(0x19, all.map((c) => (c.special ?? 0) & 0xff));
   return new Uint8Array([
     ...ascii('padding'),
     0,

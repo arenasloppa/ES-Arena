@@ -585,7 +585,7 @@ function levelUp(gained: { level: number; health: number; points: number }) {
   const before = { health: d.stats.maxHealth - gained.health, stamina: d.stats.maxStamina, magicka: d.stats.maxMagicka };
   const apply = (character: Character, heal = false) => {
     runCharacter = character;
-    d.applyAttributes(heroFor(character, cls), heal);
+    d.applyAttributes(heroFor(character, cls, { levelled: true }), heal);
     const s = d.stats;
     const more = (name: string, n: number) => (n > 0 ? [`${name} +${n}`] : []);
     const gains = [...more('Health', s.maxHealth - before.health), ...more('Stamina', s.maxStamina - before.stamina), ...more('Spell points', s.maxMagicka - before.magicka)];

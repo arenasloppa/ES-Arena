@@ -62,6 +62,7 @@ export function fakeCreature(overrides: Partial<CreatureInfo> = {}): CreatureInf
     noCorpse: false,
     flags: 0,
     scale: 0,
+    special: 0,
     ...overrides,
   };
 }
