@@ -44,6 +44,9 @@ screenshots of earlier versions.
   classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Ready a
   spell in the magic menu and cast it with the block button, as with a spell in Skyrim's left hand; bolts fly, area
   spells burst, and paralysis, poison, shields and light last as many rounds as the game says.
+- Camp as in Arena, from a wait menu like Skyrim's: rest some hours or until healed, by Arena's healing sums and in its
+  words, though not with monsters near, and monsters may come upon you while you sleep. The first rest after reaching
+  level 2 brings Ria Silmane's dream of the Staff of Chaos and of Fang Lair, in her own voice.
 - Health, stamina, healing potions and levels. Search bodies and chests for gold, potions, weapons and armour, and open
   locked doors with their key, pick their locks or break them down.
 - Skyrim's menus: a menu of menus for your character, items, magic and the map; an item menu with the game's picture of
@@ -125,7 +128,8 @@ controller, with the PlayStation button in brackets.
 | Use the favourite on a number key | <kbd>1</kbd> to <kbd>8</kbd> (the healing potion starts on <kbd>1</kbd>) | Left or right on the D-pad, for 1 and 2 |
 | Character, items, magic and map | <kbd>Tab</kbd> | B (○) |
 | Items, magic | <kbd>I</kbd>, <kbd>P</kbd> | |
-| Map | <kbd>M</kbd> | View (Share) |
+| Map | <kbd>M</kbd> | Down from the menu of menus (B) |
+| Wait: camp for some hours or until healed (again to wake) | <kbd>T</kbd> | View (Share) |
 | Pause menu | <kbd>Esc</kbd> | Start (Options) |
 
 In the magic menu (<kbd>P</kbd>, or left from the menu of menus), ready a spell with <kbd>E</kbd> or A, make it a

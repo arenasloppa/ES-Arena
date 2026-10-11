@@ -55,6 +55,7 @@
       <div id="corner">
         <div id="notes" role="status" aria-live="polite"></div>
       </div>
+      <div id="resting" hidden><p role="status" aria-live="polite"></p></div>
       <p id="message" role="status" aria-live="polite"></p>
       <div id="hand" aria-hidden="true"></div>
       <div id="spell-readied" hidden><span id="spell-name"></span><span id="spell-cost"></span></div>
@@ -189,6 +190,25 @@
           </button>
           <button id="change-folder" class="option">Change ARENA folder</button>
           <button class="option" data-back>Back</button>
+        </nav>
+      </section>
+
+      <section id="screen-wait" class="screen" aria-label="Wait" hidden>
+        <h2>Wait</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <p class="notes" id="wait-question">How many hours will you rest?</p>
+        <nav class="options settings">
+          <button class="option option-row" data-setting="waitHours">
+            <span class="row-label">Hours</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button id="wait-hours" class="option">Rest</button>
+          <button id="wait-healed" class="option">Until healed</button>
         </nav>
       </section>
 

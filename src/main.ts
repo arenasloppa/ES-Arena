@@ -27,7 +27,7 @@ import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
 import { creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
-import { Dungeon } from './game/dungeon';
+import { Dungeon, type Vision } from './game/dungeon';
 import { buildLevel } from './game/level';
 import { Engine, type GameMenu } from './game/engine';
 import { GamepadInput } from './input/gamepad';
@@ -41,10 +41,10 @@ import { SpellView } from './render/spellView';
 import { backdropLevel } from './render/backdrop';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { CharacterCreation } from './ui/creation';
-import { Cutscenes, deathVision, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
+import { Cutscenes, deathVision, dreamVisions, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
 import { GameMenus } from './ui/gameMenus';
 import { Hud } from './ui/hud';
-import { MenuNav } from './ui/menu';
+import { MenuNav, type StepEvent } from './ui/menu';
 import { Minimap } from './ui/minimap';
 import { bindSettingRows, loadSettings } from './ui/settings';
 
@@ -99,12 +99,13 @@ const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'create' | 'controls' | 'dead' | 'escaped';
+type Screen = 'folder' | 'play' | 'create' | 'controls' | 'wait' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
   create: $('screen-create'),
   controls: $('screen-controls'),
+  wait: $('screen-wait'),
   dead: $('screen-dead'),
   escaped: $('screen-escaped'),
 };
@@ -154,8 +155,8 @@ function showScreen(next: Screen) {
 /** The button hints along the bottom: Back steps back through character creation, closes the Controls screen, or returns to the game. */
 function updateHints() {
   $('hint-back').hidden = screen !== 'controls' && screen !== 'create' && !playing();
-  $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : 'Resume';
-  $('hint-change').hidden = screen !== 'controls' && screen !== 'create';
+  $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
+  $('hint-change').hidden = screen !== 'controls' && screen !== 'create' && screen !== 'wait';
 }
 
 /**
@@ -369,6 +370,8 @@ async function startMap(name: string, character: Character) {
     next.onPause = pause;
     next.onMenu = openGameMenu;
     next.onDeath = died;
+    next.onWait = openWait;
+    next.onDream = (visions) => void dream(visions);
     next.onEscape = escaped;
     next.onMap = (open) => {
       mapScreen.hidden = !open;
@@ -458,6 +461,60 @@ function showMenu(next: Screen) {
 
 function pause() {
   showMenu('play');
+}
+
+// ---- Waiting, as Skyrim's wait menu, with Arena's camping ----
+
+const HOURS_MAX = 24;
+let waitHours = 8;
+const waitRow = screens.wait.querySelector<HTMLElement>('[data-setting="waitHours"]')!;
+
+function showWaitHours() {
+  waitRow.querySelector('.value')!.textContent = String(waitHours);
+  waitRow.style.setProperty('--fill', String(waitHours / HOURS_MAX));
+  waitRow.setAttribute('aria-valuetext', `${waitHours} hours`);
+}
+waitRow.addEventListener('step', (e) => {
+  const { delta, wrap } = (e as StepEvent).detail;
+  waitHours = wrap && waitHours + delta > HOURS_MAX ? 1 : Math.min(HOURS_MAX, Math.max(1, waitHours + delta));
+  showWaitHours();
+});
+waitRow.addEventListener('click', () => {
+  waitHours = waitHours >= HOURS_MAX ? 1 : waitHours + 1;
+  showWaitHours();
+});
+
+/** T or View: Skyrim's wait menu, in Arena's words when the game's can be read. */
+function openWait() {
+  if (!engine || !playing()) return;
+  const m = tables?.messages ?? {};
+  $('wait-question').textContent = m.hoursToRest ?? 'How many hours will you rest?';
+  $('wait-hours').textContent = m.restForHours ?? 'Rest';
+  $('wait-healed').textContent = m.restUntilHealed ?? 'Until healed';
+  showWaitHours();
+  showMenu('wait');
+}
+
+/** Starts camping, or says why not, back in the game. */
+function camp(hours: number | 'healed') {
+  if (!engine || !playing()) return;
+  const refusal = engine.dungeon.camp(hours);
+  resume();
+  if (refusal) hud.message(refusal);
+}
+$('wait-hours').addEventListener('click', () => camp(waitHours));
+$('wait-healed').addEventListener('click', () => camp('healed'));
+
+/** Ria comes to the sleeping player: her visions play, then the rest goes on. */
+async function dream(visions: Vision[]) {
+  if (!engine || !runCharacter) return;
+  engine.pause();
+  if (document.pointerLockElement) document.exitPointerLock();
+  hudEl.hidden = true;
+  await showCutscene(dreamVisions(visions, firstName(runCharacter)), SONGS.vision);
+  music?.play(SONGS.dungeons);
+  menu.hidden = true;
+  resume();
 }
 
 /** The game's words for how the player died (drowning and the like) show first, then Ria Silmane's farewell, as in Arena. */

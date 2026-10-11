@@ -30,6 +30,14 @@ The Imperial Dungeons as Arena builds them.
 - Lava burns. Doors raise, swing, slide or split as the map says, and fences, see-through walls and solid decorations block the way as they should.
 - The main menu is like Skyrim's: Continue, New, Settings and Quit, with no map list; the folder is chosen in Settings.
 
+Camping and Ria's dreams.
+
+- Wait as in Skyrim (T, or View on a controller) and camp as in Arena: "How many hours do you wish to rest?", then "Camp for a while..." or "Until fully healed". Time passes 600 times as fast, "3 hours remaining..." counts down, and health, fatigue and spell points come back six times a second by Arena's own sums (OpenTESArena's reading): more with a good heal mod, more for a Healer, and no spell points for a Sorcerer. You can't move or look about while camping; T or View again wakes you.
+- Arena's refusals, in its words: "You can't camp. Enemies are nearby!!!" with a monster within eight cells, "You can't camp here." in water, climbing or in the air, and "You don't need to rest." when nothing needs healing.
+- Each hour of rest, monsters may come upon you: 20 percent an hour in the Imperial Dungeons, from the game's own encounter tables, by Arena's rules for which monsters and how many, appearing on open floor around you. If they're close, "There are enemies nearby..." and the rest is over. Encounters of people rather than creatures bring nobody yet, as the remake has no human foes so far.
+- The first rest after reaching level 2 brings Ria Silmane to your dreams, as UESP describes: the Staff of Chaos (STAFF.FLC, the game's text #1500 in her voice), then where its first piece lies, Fang Lair (#1294). As in the original, a player who reaches level 3 before resting only hears of Fang Lair.
+- The map moves to the menu of menus on a controller, as in Skyrim, where View is the wait button.
+
 Character creation by Arena's rules.
 
 - Attributes start from your race and gender's own values in the game, plus 4d5 each, with 5d5 bonus points to share out, all rolled as Arena rolls them. Health is 25 plus a roll of your class's hit die, and you start with 50 to 199 gold.

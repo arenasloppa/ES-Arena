@@ -88,6 +88,7 @@ export class Hud implements EngineHud {
   private readonly bannerEl: HTMLElement;
   private readonly eye: HTMLElement;
   private readonly fader: HTMLElement | null;
+  private readonly restingEl: HTMLElement;
   private enemyUntil = 0;
   private enemyKey = '';
   private readonly banners: Array<[string, string | undefined, string | undefined]> = [];
@@ -121,6 +122,7 @@ export class Hud implements EngineHud {
     this.bannerEl = $('banner');
     this.eye = $('sneak-eye');
     this.fader = document.getElementById('fade');
+    this.restingEl = $('resting');
     // Hiding the HUD (for the map or the menu) and showing it again would play a finished animation over.
     this.hurtEl.addEventListener('animationend', () => this.hurtEl.classList.remove('flash'));
     // Marks for three turns, so the strip never runs out whichever way the player faces.
@@ -132,6 +134,13 @@ export class Hud implements EngineHud {
       mark.style.setProperty('--at', String(deg + 360));
       this.strip.append(mark);
     }
+  }
+
+  /** While camping: the hours left or passed, in the game's words, over the darkened view; undefined when done. */
+  resting(text: string | undefined): void {
+    this.restingEl.hidden = text === undefined;
+    const line = this.restingEl.firstElementChild!;
+    if (text !== undefined && line.textContent !== text) line.textContent = text;
   }
 
   message(text: string): void {

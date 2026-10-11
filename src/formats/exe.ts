@@ -93,6 +93,8 @@ export interface ExeData {
    * program is laid out differently from the two versions known.
    */
   raceAttributes?: number[][];
+  /** What turns up when monsters come upon the player (resting, for one); missing as above. */
+  encounters?: EncounterTables;
   /** Classes, races and the words of character creation; missing when they could not be read. */
   character?: CharacterTables;
 }
@@ -103,7 +105,7 @@ const TABLE_ENTRIES = 24;
 const WEAPONS = 18;
 
 export function readExeData(image: Uint8Array): ExeData {
-  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image), raceAttributes: readRaceAttributes(image) };
+  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image), raceAttributes: readRaceAttributes(image), encounters: readEncounters(image) };
   try {
     data.character = readCharacterTables(image);
   } catch (err) {
@@ -116,12 +118,40 @@ export function readExeData(image: Uint8Array): ExeData {
 
 /** Where each version keeps the platform tables, found by a string that sits at a known place in it. */
 const VERSIONS = [
-  { name: 'CD', anchor: 0x3f508, platforms: 0x48594, raceAttributes: 0x361c3 },
-  { name: 'floppy', anchor: 0x3f1cc, platforms: 0x48206, raceAttributes: 0x35fc3 },
+  { name: 'CD', anchor: 0x3f508, platforms: 0x48594, raceAttributes: 0x361c3, chances: 0x42210, table: 0x36cbe, indices: 0x36818 },
+  { name: 'floppy', anchor: 0x3f1cc, platforms: 0x48206, raceAttributes: 0x35fc3, chances: 0x41e6e, table: 0x36abe, indices: 0x36618 },
 ];
 
 function version(image: Uint8Array) {
   return VERSIONS.find((v) => cString(image, v.anchor) === 'exp_ab.cfa');
+}
+
+/**
+ * Arena's random encounters, as OpenTESArena lists them ([Entities]
+ * EnemyEncounterChances, EnemyEncounterTable, EnemyEncounterTableIndices).
+ */
+export interface EncounterTables {
+  /** Percent chance an hour (or a minute, in towns) of an encounter, by place: 0 city, 1 wilderness, 2 main quest dungeon, 3 other dungeon, 4 building; +5 while resting. */
+  chances: number[];
+  /** Each encounter: how many, which (1 to 23 a creature in the game's order, 24 on a human of class n - 24) and the humans' level. */
+  table: Array<{ count: number; id: number; level: number }>;
+  /** For each of 14 kinds of place, the encounter level of each entry in `table` there (0 for none). */
+  levels: number[][];
+}
+
+const ENCOUNTERS = 85;
+
+export function readEncounters(image: Uint8Array): EncounterTables | undefined {
+  const v = version(image);
+  if (!v || v.indices + 14 * ENCOUNTERS > image.length || v.chances + 13 > image.length) return undefined;
+  const chances = Array.from(image.subarray(v.chances, v.chances + 13));
+  const table = Array.from({ length: ENCOUNTERS }, (_, i) => {
+    const at = v.table + i * 3;
+    return { count: image[at], id: image[at + 1], level: image[at + 2] };
+  });
+  const levels = Array.from({ length: 14 }, (_, r) => Array.from(image.subarray(v.indices + r * ENCOUNTERS, v.indices + (r + 1) * ENCOUNTERS)));
+  const plausible = chances.every((c) => c <= 100) && table.every((e) => e.count >= 1 && e.count <= 4 && e.id >= 1 && e.id < 64) && levels.every((row) => row.every((l) => l <= 30));
+  return plausible ? { chances, table, levels } : undefined;
 }
 
 /**

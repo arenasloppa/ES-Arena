@@ -91,6 +91,19 @@ import { cellIndex, lineOfSight } from './grid';
 import { isBlocking, type Level, type LevelItem } from './level';
 import { airborne, groundUnder, inChasm, jump, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
 import type { GameMessages } from '../formats/messages';
+import type { CreatureInfo, EncounterTables } from '../formats/exe';
+import {
+  CAMPING_TIME_SCALE,
+  chooseEncounter,
+  GAME_SECONDS_PER_SECOND,
+  needsRest,
+  RECOVERY_TICK,
+  restEncounterChance,
+  restHealing,
+  SAFE_SLEEP_DISTANCE,
+  spawnSpot,
+  type Rester,
+} from './camping';
 
 export interface DoorState {
   /** 0 closed to 1 open. */
@@ -173,9 +186,37 @@ export type DungeonEvent =
   | { type: 'objective'; text: string; done: boolean }
   /** Every creature in the dungeon is dead. */
   | { type: 'cleared' }
+  /** Camping began; the game shows the hours as they pass (see campingText). */
+  | { type: 'camping' }
+  /** Camping ended, with the game's words for why when there are some. */
+  | { type: 'camped'; text?: string }
+  /** A monster came upon the player; the engine draws it from now on. */
+  | { type: 'spawned'; creature: Creature }
+  /** Ria Silmane comes to the sleeping player (see Dungeon.camp). */
+  | { type: 'dream'; visions: Vision[] }
   /** The player died; `cause` is the game's words for how, when it has some (drowning). */
   | { type: 'died'; cause?: string }
   | { type: 'escaped' };
+
+/**
+ * Ria's visions in the player's dreams: the Staff of Chaos (TEMPLATE.DAT
+ * #1500) and where its first piece lies, Fang Lair (#1294).
+ */
+export type Vision = 'staffIntro' | 'fangLair';
+
+/** What camping says when the game's own words can't be read. */
+const CAMP_WORDS = {
+  enemiesNearby: 'Monsters are too close to rest.',
+  campingNotAllowed: 'You cannot rest here.',
+  fullyRested: 'You are already rested.',
+  doneWakeUp: 'You wake.',
+  doneHealed: 'You are rested.',
+  enemiesWhileResting: 'Monsters are upon you!',
+  hourPassed: '%u hour passed',
+  hoursPassed: '%u hours passed',
+  hourRemaining: '%u hour left',
+  hoursRemaining: '%u hours left',
+};
 
 export interface DungeonInput {
   /** -1..1 each; sneaking and sprinting are applied here. */
@@ -330,6 +371,12 @@ export class Dungeon {
   readied?: SpellRecord;
   /** Spells in flight. */
   readonly bolts: Bolt[] = [];
+  /** Game seconds since the game began; time passes 13 times as fast as play, and 600 times faster again while camping. */
+  clock = 0;
+  /** Resting: hours left (or, until healed, hours so far) and the time to the next bit of healing. */
+  camping?: { hoursLeft?: number; hoursPassed: number; tick: number };
+  /** Ria has shown the player the Staff in a dream. */
+  dreamt = false;
 
   private readonly weaponTable: WeaponInfo[];
   private readonly unlocked = new Set<number>();
@@ -343,6 +390,8 @@ export class Dungeon {
   private sinceStamina = Infinity;
   private pushing = 0;
   private readonly messages: GameMessages;
+  private readonly encounters?: EncounterTables;
+  private readonly creatureInfo: CreatureInfo[];
   private sinceHurt = Infinity;
   private lookTimer = 0;
   private nextStep = STRIDE;
@@ -379,6 +428,8 @@ export class Dungeon {
   ) {
     this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0, z: 0, vz: 0 };
     this.messages = tables?.messages ?? {};
+    this.encounters = tables?.encounters;
+    this.creatureInfo = tables?.creatures ?? [];
     this.weaponTable = tables?.weapons ?? [];
     this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
@@ -422,6 +473,11 @@ export class Dungeon {
     this.time += dt;
     this.updateDoors(dt);
     this.sneaking = input.sneaking && !this.outcome;
+    if (this.camping && !this.outcome) {
+      this.updateCamping(dt);
+      return;
+    }
+    this.clock += dt * GAME_SECONDS_PER_SECOND;
     if (!this.outcome) {
       this.move(dt, input);
       this.updateAttack(dt, input);
@@ -465,6 +521,110 @@ export class Dungeon {
   /** The current objective's place, for the compass's quest marker. */
   get objective(): Objective | undefined {
     return this.quest?.current;
+  }
+
+  // ---- Camping ----
+
+  /**
+   * Begins camping for a number of hours or until healed, as Arena's camp
+   * button does; returns the game's words for why not when it can't. Arena
+   * won't let the player rest with monsters near or anywhere but on the
+   * floor, nor rest until healed when there is nothing to heal. The first
+   * rest at level 2 or above brings Ria to the player's dreams: the Staff of
+   * Chaos and then where its first piece lies, or, as in the original, only
+   * the second when the player has already reached level 3 (UESP).
+   */
+  camp(hours: number | 'healed'): string | undefined {
+    if (this.outcome) return undefined;
+    const m = this.messages;
+    if (this.enemiesNear()) return m.enemiesNearby ?? CAMP_WORDS.enemiesNearby;
+    if (this.swimming || this.climb || airborne(this.level, this.player)) return m.campingNotAllowed ?? CAMP_WORDS.campingNotAllowed;
+    if (hours === 'healed' && !needsRest(this.stats, this.rester)) return m.fullyRested ?? CAMP_WORDS.fullyRested;
+    this.camping = { hoursLeft: hours === 'healed' ? undefined : Math.max(1, Math.floor(hours)), hoursPassed: 0, tick: RECOVERY_TICK };
+    this.blocking = false;
+    this.running = false;
+    this.swing = undefined;
+    this.events.push({ type: 'camping' });
+    if (!this.dreamt && this.stats.level >= 2) {
+      this.dreamt = true;
+      this.events.push({ type: 'dream', visions: this.stats.level >= 3 ? ['fangLair'] : ['staffIntro', 'fangLair'] });
+    }
+    return undefined;
+  }
+
+  /** Stops camping early, as pressing Arena's camp button again does. */
+  stopCamping(text?: string): void {
+    if (!this.camping) return;
+    this.camping = undefined;
+    this.events.push({ type: 'camped', text });
+  }
+
+  /** "3 hours remaining..." or, resting until healed, "2 hours passed....", in the game's words. */
+  get campingText(): string | undefined {
+    const c = this.camping;
+    if (!c) return undefined;
+    const m = this.messages;
+    const [n, text] =
+      c.hoursLeft !== undefined
+        ? [c.hoursLeft, c.hoursLeft === 1 ? (m.hourRemaining ?? CAMP_WORDS.hourRemaining) : (m.hoursRemaining ?? CAMP_WORDS.hoursRemaining)]
+        : [c.hoursPassed, c.hoursPassed === 1 ? (m.hourPassed ?? CAMP_WORDS.hourPassed) : (m.hoursPassed ?? CAMP_WORDS.hoursPassed)];
+    return text.replace('%u', String(n));
+  }
+
+  private get rester(): Rester {
+    return { className: this.hero.cls?.name, healMod: this.hero.healMod ?? 0, regainsMagicka: this.hero.regainsMagicka };
+  }
+
+  /** A living monster within Arena's safe sleeping distance. */
+  private enemiesNear(): boolean {
+    const p = this.player;
+    return this.creatures.some((c) => isAlive(c) && Math.hypot(c.x - p.x, c.y - p.y) <= SAFE_SLEEP_DISTANCE);
+  }
+
+  private updateCamping(dt: number): void {
+    const c = this.camping!;
+    const m = this.messages;
+    for (c.tick -= dt; c.tick <= 0 && this.camping; c.tick += RECOVERY_TICK) {
+      restHealing(this.stats, this.rester);
+      if (c.hoursLeft === undefined && !needsRest(this.stats, this.rester)) this.stopCamping(m.doneHealed ?? CAMP_WORDS.doneHealed);
+    }
+    const before = Math.floor(this.clock / 3600);
+    this.clock += dt * GAME_SECONDS_PER_SECOND * CAMPING_TIME_SCALE;
+    for (let hour = before; hour < Math.floor(this.clock / 3600) && this.camping; hour++) {
+      if (c.hoursLeft !== undefined) {
+        c.hoursLeft--;
+        if (c.hoursLeft <= 0) this.stopCamping(m.doneWakeUp ?? CAMP_WORDS.doneWakeUp);
+      } else c.hoursPassed++;
+      this.encounter();
+    }
+    // The monsters go about their business meanwhile.
+    this.updateCreatures(dt, false);
+  }
+
+  /**
+   * Each hour of rest, monsters may come upon the player (OpenTESArena's
+   * tickGameClock): not up on a platform, nor with monsters already near,
+   * and at the chance Arena gives resting in a main quest dungeon. They
+   * appear on open floor around the player, and if any are near enough,
+   * the rest is over. Encounters of people rather than creatures (24 and
+   * up) bring nobody yet: the remake has no human foes so far.
+   */
+  private encounter(): void {
+    const tables = this.encounters;
+    const cell = this.level.cells[cellIndex(this.level, this.player.x, this.player.y)];
+    if (!tables || cell?.kind === 'raised' || this.enemiesNear()) return;
+    if (restEncounterChance(tables) <= Math.floor(this.random() * 100)) return;
+    const found = chooseEncounter(tables, this.stats.level, this.random);
+    const info = found && found.id <= this.creatureInfo.length ? this.creatureInfo[found.id - 1] : undefined;
+    if (!found || !info) return;
+    for (let i = 0; i < found.count; i++) {
+      const at = spawnSpot(this.level, this.player.x, this.player.y, this.random, this.creatures);
+      if (!at) break;
+      const creature = spawnCreature(this.creatures.length, info, at.x, at.y, this.random);
+      this.creatures.push(creature);
+      this.events.push({ type: 'spawned', creature });
+    }
+    if (this.camping && this.enemiesNear()) this.stopCamping(this.messages.enemiesWhileResting ?? CAMP_WORDS.enemiesWhileResting);
   }
 
   // ---- Moving ----
@@ -596,6 +756,7 @@ export class Dungeon {
   private burn(damage: number): void {
     this.stats.health = Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
+    if (this.camping) this.stopCamping();
     if (this.stats.health <= 0) this.die();
   }
 

@@ -14,6 +14,7 @@ import { parseFlc, type Flc } from '../formats/flc';
 import { parseImg } from '../formats/img';
 import { indicesToRgba, parseCol } from '../formats/palette';
 import { fillTemplate, pages, parseTemplates, type Templates } from '../formats/template';
+import type { Vision } from '../game/dungeon';
 import type { GamepadInput } from '../input/gamepad';
 
 export type Shot =
@@ -258,6 +259,19 @@ export function firstVision(firstName: string): Shot[] {
 }
 
 /** Ria Silmane's farewell when the player dies. */
+/**
+ * Ria in the player's dreams (Dungeon.camp): showing the Staff of Chaos
+ * (STAFF.FLC, TEMPLATE.DAT #1500) and telling of Fang Lair, where its first
+ * piece lies (#1294), each in her own voice.
+ */
+export function dreamVisions(visions: Vision[], firstName: string): Shot[] {
+  return visions.map((v): Shot =>
+    v === 'staffIntro'
+      ? { kind: 'vision', file: 'STAFF.FLC', text: '1500', name: firstName, colour: RIA }
+      : { kind: 'vision', file: 'VISION.FLC', text: '1294', name: firstName, colour: RIA },
+  );
+}
+
 export function deathVision(firstName: string): Shot[] {
   return [{ kind: 'vision', file: 'VISION.FLC', text: '1402', name: firstName, colour: RIA }];
 }

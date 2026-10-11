@@ -331,6 +331,7 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     stamina: maxFatigue(a),
     healthDie: cls.healthDie,
     healthBonus: d.health,
+    healMod: d.healMod,
     experience: cls.experience,
     damageBonus: d.damage,
     dodge: d.toDefend * 0.02 + step(LUCK) * 0.005,

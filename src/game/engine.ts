@@ -8,7 +8,7 @@ import { spellColour, type SpellView } from '../render/spellView';
 import type { WeaponView } from '../render/weaponView';
 import type { Minimap } from '../ui/minimap';
 import { isAlive } from './creatures';
-import type { Dungeon } from './dungeon';
+import type { Dungeon, Vision } from './dungeon';
 import { lineOfSight } from './grid';
 import { ARENA_HEIGHT } from './level';
 
@@ -74,6 +74,7 @@ export interface CompassMarker {
 /** What the engine tells the on-screen HUD. */
 export interface EngineHud {
   message(text: string): void;
+  resting(text: string | undefined): void;
   target(target: HudTarget | undefined): void;
   heading(yaw: number, markers?: CompassMarker[]): void;
   vitals(v: Vitals): void;
@@ -183,6 +184,10 @@ export class Engine {
   onMenu?: (which: GameMenu) => void;
   /** The player died; `cause` is the game's words for how, when there are some. */
   onDeath?: (cause?: string) => void;
+  /** T or the View button: the wait menu, as in Skyrim. */
+  onWait?: () => void;
+  /** Ria comes to the sleeping player; the game plays her visions and carries on. */
+  onDream?: (visions: Vision[]) => void;
   onEscape?: () => void;
   /** The map screen opened (true) or closed. */
   onMap?: (open: boolean) => void;
@@ -331,9 +336,12 @@ export class Engine {
         this.onPause?.();
         return;
       }
-      if (alive) {
+      if (alive && d.camping) {
+        // The wait button again, or B, wakes the player, as Arena's camp button does.
+        if (pad.take('Back') || pad.take('B')) d.stopCamping();
+      } else if (alive) {
         if (pad.take('Back')) {
-          this.openMap();
+          this.onWait?.();
           return;
         }
         const menu = pad.take('B') ? 'tween' : pad.take('Up') || pad.take('Down') ? 'favourites' : undefined;
@@ -407,6 +415,7 @@ export class Engine {
         hud.effects(effects);
       }
       hud.detection(d.sneaking ? d.detection() : undefined);
+      if (d.camping) hud.resting(d.campingText);
       this.showTarget();
     }
     if (this.diedAt !== undefined && !this.deathFaded && d.time - this.diedAt > DEATH_SCREEN - DEATH_FADE) {
@@ -480,6 +489,19 @@ export class Engine {
           break;
         case 'cleared':
           hud?.banner(d.level.name, undefined, 'Cleared');
+          break;
+        case 'camping':
+          hud?.resting(d.campingText);
+          break;
+        case 'camped':
+          hud?.resting(undefined);
+          if (e.text) hud?.message(e.text);
+          break;
+        case 'spawned':
+          void this.options.creatures?.add(e.creature);
+          break;
+        case 'dream':
+          this.onDream?.(e.visions);
           break;
         case 'died':
           this.diedAt = d.time;
@@ -648,6 +670,10 @@ export class Engine {
     else if (e.code === 'Space') this.startJump();
     else if (e.code === 'KeyC') this.sneaking = !this.sneaking;
     else if (e.code === 'KeyM') this.openMap();
+    else if (e.code === 'KeyT') {
+      if (this.dungeon.camping) this.dungeon.stopCamping();
+      else this.onWait?.();
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
@@ -696,6 +722,8 @@ export class Engine {
   }
 
   private look(dx: number, dy: number): void {
+    // Arena doesn't let the player move or turn while camping.
+    if (this.dungeon.camping) return;
     const speed = MOUSE_SENSITIVITY * this.controls.lookSpeed;
     this.dungeon.player.yaw += dx * speed;
     this.tilt(-dy * speed);

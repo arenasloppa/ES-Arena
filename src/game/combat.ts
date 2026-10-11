@@ -88,6 +88,8 @@ export interface Hero {
   /** Swimming speed as a share of walking, and how fast swimming tires: Argonians swim at full speed and tire less than half as fast. */
   swimPace: number;
   swimTiring: number;
+  /** Endurance's heal mod, for healing while camping (camping.ts). */
+  healMod?: number;
   /** Gold rolled at creation, when the character has some. */
   gold?: number;
 }

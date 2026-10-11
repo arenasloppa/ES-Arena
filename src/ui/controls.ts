@@ -40,6 +40,7 @@ export type Action =
   | 'items'
   | 'magic'
   | 'map'
+  | 'wait'
   | 'menu'
   | 'select'
   | 'back'
@@ -74,7 +75,8 @@ export const BINDINGS: Record<Action, Binding> = {
   tween: { label: 'Character, items, magic and map', keys: ['Tab'], pad: ['B'] },
   items: { label: 'Items', keys: ['I'], pad: [] },
   magic: { label: 'Magic', keys: ['P'], pad: [] },
-  map: { label: 'Map', keys: ['M'], pad: ['View'] },
+  map: { label: 'Map', keys: ['M'], pad: [] },
+  wait: { label: 'Wait: camp a while or until healed; again to wake', keys: ['T'], pad: ['View'] },
   menu: { label: 'Pause menu', keys: ['Esc'], pad: ['Start'] },
   select: { label: 'Select', keys: ['Enter'], pad: ['A'] },
   back: { label: 'Back', keys: ['Esc'], pad: ['B'] },
@@ -107,6 +109,7 @@ export const GAME_ACTIONS: Action[] = [
   'items',
   'magic',
   'map',
+  'wait',
   'menu',
 ];
 

@@ -37,6 +37,11 @@ export interface GameMessages {
   fullyRested?: string;
   /** "You can't camp here." */
   campingNotAllowed?: string;
+  /** "%u hour passed....", "%u hours passed...", "%u hour remaining...", "%u hours remaining...": camping's count. */
+  hourPassed?: string;
+  hoursPassed?: string;
+  hourRemaining?: string;
+  hoursRemaining?: string;
   /** Character creation: "Know ye this also:", before the race's description. */
   knowYe?: string;
   /** "Which dost thou choose?", "Save stats" and "Reroll stats": what to do with the attributes rolled. */
@@ -62,6 +67,10 @@ const KEYS: Record<keyof GameMessages, string> = {
   enemiesWhileResting: 'There are enemies nearby',
   fullyRested: "You don't need to rest",
   campingNotAllowed: "You can't camp here",
+  hourPassed: '%u hour passed',
+  hoursPassed: '%u hours passed',
+  hourRemaining: '%u hour remaining',
+  hoursRemaining: '%u hours remaining',
   knowYe: 'Know ye this also:',
   chooseStats: 'Which dost thou choose',
   saveStats: 'ave stats',
@@ -86,10 +95,12 @@ export function readMessages(image: Uint8Array): GameMessages {
   return out;
 }
 
-/** Turns Arena's \r line breaks into spaces and drops its colour codes (a tab, a byte, ... a tab, a byte). */
+/** Turns Arena's \r line breaks into spaces and drops its colour codes (a tab, a byte, ... a tab, a byte) and any stray byte in front. */
 export function clean(text: string): string {
   return text
     .replace(/\t./g, '')
+    // Some start with a byte that isn't text (0xFF before "%u hour passed").
+    .replace(/^[^\x20-\x7e]+/, '')
     .replace(/\s*[\r\n]+\s*/g, ' ')
     .replace(/ {2,}/g, ' ')
     .trim();
