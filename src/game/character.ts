@@ -321,6 +321,8 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
   const a = character.attributes;
   const d = derivedAttributes(a);
   // The remake's own rules turn the sheet's steps into chances: a step is five points of Agility or Luck.
+  // Arena keeps what Luck does hidden; UESP says it nudges nearly everything (fights, locks, bargains), so here
+  // it adds a little to dodging, picking locks, critical hits and the gold found.
   const step = (i: number) => Math.trunc((a[i] - 50) / 5);
   return {
     cls,
@@ -331,12 +333,12 @@ export function heroFor(character: Character, cls: ClassInfo): Hero {
     healthBonus: d.health,
     experience: cls.experience,
     damageBonus: d.damage,
-    dodge: d.toDefend * 0.02,
+    dodge: d.toDefend * 0.02 + step(LUCK) * 0.005,
     // Arena's base speed: 20 plus up to 20 more for Speed (OpenTESArena's getBaseSpeed), against the remake's walk at 40.
     pace: (20 + Math.trunc((Math.trunc((a[SPEED] * 256) / 100) * 20) / 256)) / 30,
     recovery: 0.8 + a[WILLPOWER] * 0.004,
     critical: cls.critical ? Math.max(0.02, 0.08 + 0.01 * step(LUCK)) : 0,
-    lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * d.toHit) : 0,
+    lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * d.toHit + 0.02 * step(LUCK)) : 0,
     fortune: Math.max(0.5, 1 + 0.05 * step(LUCK)),
     carry: d.maxKilos,
     magicka: startingMagicka(cls, a[INTELLIGENCE]),
