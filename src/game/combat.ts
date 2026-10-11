@@ -88,6 +88,8 @@ export interface Hero {
   /** Swimming speed as a share of walking, and how fast swimming tires: Argonians swim at full speed and tire less than half as fast. */
   swimPace: number;
   swimTiring: number;
+  /** Gold rolled at creation, when the character has some. */
+  gold?: number;
 }
 
 /** The player without a character of their own: no class, and nothing added or taken away. */

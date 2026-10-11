@@ -21,6 +21,7 @@ import { SoundBank } from './audio/sound';
 import { parseClassAnswers, parseNameChunks, parseQuestions, type ClassChooser, type Question } from './formats/creation';
 import { readExeData, type ExeData } from './formats/exe';
 import { parseSpells, type SpellRecord } from './formats/spells';
+import { parseTemplates } from './formats/template';
 import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
@@ -219,8 +220,11 @@ function setStatus(text: string) {
   status.textContent = text;
 }
 
-/** QUESTION.TXT, CLASSES.DAT and NAMECHNK.DAT; any that are missing or unreadable are left out. */
-async function readCreationFiles(game: GameData): Promise<{ questions?: Question[]; chooser?: ClassChooser; names?: string[][] }> {
+/** Where each race's description is in TEMPLATE.DAT, in the races' order (as OpenTESArena has them). */
+const RACE_LORE = [1409, 1410, 1411, 1412, 1413, 1414, 1415, 1416];
+
+/** QUESTION.TXT, CLASSES.DAT, NAMECHNK.DAT and the races' descriptions in TEMPLATE.DAT; any that are missing or unreadable are left out. */
+async function readCreationFiles(game: GameData): Promise<{ questions?: Question[]; chooser?: ClassChooser; names?: string[][]; raceLore?: string[] }> {
   const read = async <T>(name: string, parse: (bytes: Uint8Array) => T): Promise<T | undefined> => {
     if (!game.has(name)) return undefined;
     try {
@@ -234,6 +238,11 @@ async function readCreationFiles(game: GameData): Promise<{ questions?: Question
     questions: await read('QUESTION.TXT', (bytes) => parseQuestions(new TextDecoder('latin1').decode(bytes))),
     chooser: await read('CLASSES.DAT', parseClassAnswers),
     names: await read('NAMECHNK.DAT', parseNameChunks),
+    raceLore: await read('TEMPLATE.DAT', (bytes) => {
+      const templates = parseTemplates(new TextDecoder('latin1').decode(bytes));
+      const lore = RACE_LORE.map((n) => templates.get(String(n)));
+      return lore.every((t) => t) ? (lore as string[]) : undefined;
+    }),
   };
 }
 
@@ -243,7 +252,7 @@ async function creationFor(): Promise<CreationData | undefined> {
   if (!game) return undefined;
   creation ??= (async () => {
     if (tables === undefined) tables = await loadTables(game);
-    return creationData(tables?.character, await readCreationFiles(game));
+    return creationData(tables?.character, await readCreationFiles(game), { raceAttributes: tables?.raceAttributes, messages: tables?.messages });
   })();
   const loaded = await creation;
   if (data !== game) return undefined; // another folder was chosen meanwhile

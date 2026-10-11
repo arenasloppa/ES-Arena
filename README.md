@@ -29,11 +29,12 @@ screenshots of earlier versions.
 
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
 - Make your character as in Arena, in the game's own words: answer ten questions or choose from the eighteen classes,
-  pick a name, choose your race on the map of Tamriel, share out bonus points among your attributes and pick a face.
-  Your class and attributes count in play: they set your health, damage, pace and how much you can carry, which
-  armour and weapons you can use, and whether you can pick locks.
+  pick a name, choose your race on the map of Tamriel, share out bonus points among attributes rolled by Arena's rules
+  on a sheet that shows what the original's does, and pick a face. Your class and attributes count in play: they set
+  your health, fatigue, damage, pace and how much you can carry, which armour and weapons you can use, and whether you
+  can pick locks.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
-  find the Shift Gate. Or try any of the game's other maps from the menu.
+  find the Shift Gate.
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners
   and fight.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for

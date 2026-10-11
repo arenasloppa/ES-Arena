@@ -37,6 +37,14 @@ export interface GameMessages {
   fullyRested?: string;
   /** "You can't camp here." */
   campingNotAllowed?: string;
+  /** Character creation: "Know ye this also:", before the race's description. */
+  knowYe?: string;
+  /** "Which dost thou choose?", "Save stats" and "Reroll stats": what to do with the attributes rolled. */
+  chooseStats?: string;
+  saveStats?: string;
+  rerollStats?: string;
+  /** "You must distribute all your bonus points." */
+  distributeAll?: string;
 }
 
 /** A piece of each message's text to find it by. */
@@ -54,6 +62,11 @@ const KEYS: Record<keyof GameMessages, string> = {
   enemiesWhileResting: 'There are enemies nearby',
   fullyRested: "You don't need to rest",
   campingNotAllowed: "You can't camp here",
+  knowYe: 'Know ye this also:',
+  chooseStats: 'Which dost thou choose',
+  saveStats: 'ave stats',
+  rerollStats: 'eroll stats',
+  distributeAll: 'You must distribute all your bonus',
 };
 
 export function readMessages(image: Uint8Array): GameMessages {
@@ -61,6 +74,11 @@ export function readMessages(image: Uint8Array): GameMessages {
   for (const [key, piece] of Object.entries(KEYS) as Array<[keyof GameMessages, string]>) {
     const at = indexOf(image, piece);
     if (at < 0) continue;
+    // This one runs straight into the next text with no end marker: it is all of its piece.
+    if (key === 'knowYe') {
+      out[key] = piece;
+      continue;
+    }
     let start = at;
     while (start > 0 && image[start - 1] !== 0 && at - start < 200) start--;
     out[key] = clean(cString(image, start));

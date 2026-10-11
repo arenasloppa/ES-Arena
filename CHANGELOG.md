@@ -22,6 +22,21 @@ Music and cutscenes.
 - After making your character, Ria Silmane's vision in your cell, and her farewell when you die, in her own voice from the CD version, with her words beneath and your name in them.
 - In a cutscene, Enter, Space, a click or A goes on to the next picture or line, and Esc, B or Start skips the rest.
 
+The Imperial Dungeons as Arena builds them.
+
+- Heights from the game's own data: the ceiling, the room height and the thickness of raised platforms come from each level's INF file and the program's platform tables, so ledges, slabs and overhangs stand at Arena's heights. The ceiling has its own texture instead of the floor's.
+- Step up anything up to Arena's step height and jump onto what is higher; walk under platforms high enough to clear.
+- Water is swum in: you drop in, swim at half speed (Argonians at full speed), tire thirty times as fast (Argonians twelve), and drown when your fatigue runs out. Pits are a full room deep. Climb out of either by walking into the edge, as in Arena.
+- Lava burns. Doors raise, swing, slide or split as the map says, and fences, see-through walls and solid decorations block the way as they should.
+- The main menu is like Skyrim's: Continue, New, Settings and Quit, with no map list; the folder is chosen in Settings.
+
+Character creation by Arena's rules.
+
+- Attributes start from your race and gender's own values in the game, plus 4d5 each, with 5d5 bonus points to share out, all rolled as Arena rolls them. Health is 25 plus a roll of your class's hit die, and you start with 50 to 199 gold.
+- The steps come in Arena's order, in its words: after your race is confirmed, "Know ye this also:" and your race's description from the game, what your class needs, and "Go ye now in peace" before the attributes.
+- The attribute sheet shows what Arena's does: Damage and Max Kilos beside Strength, Spell Pts beside Intelligence, Magic Def beside Willpower, To Hit and To Defend beside Agility, Health and Heal Mod beside Endurance, Charisma beside Personality, and your health, fatigue, gold, experience and level, worked out with Arena's formulas. Done asks Arena's "Which dost thou choose?": Save stats or Reroll stats, and won't go on until all bonus points are shared out.
+- In play, fatigue (stamina) is Strength plus Endurance, Strength's damage bonus and Max Kilos are Arena's, and Speed sets your pace by Arena's formula.
+
 ## 0.4.1 (2026-10-11)
 
 Skyrim's plus-shaped menu, and a steady map in character creation.

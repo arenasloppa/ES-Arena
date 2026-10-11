@@ -478,7 +478,6 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 @keyframes marker { 50% { opacity: 0.55; } }
 /* A fixed size beside the map, so the map stays put while the words under the list change. */
 .create-race-list { display: grid; gap: 12px; justify-items: center; width: 280px; }
-.create-gifts { width: 100%; height: 2.8em; margin: 0; color: var(--dim); font-size: 17px; line-height: 1.4; }
 .create-sheet { align-items: center; }
 .create-attributes { display: grid; gap: 8px; justify-items: center; width: min(460px, 100%); }
 .create-attributes .settings, .create-face { width: min(460px, 100%); }
@@ -486,7 +485,16 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 .create-sheet .option { padding-top: 4px; padding-bottom: 4px; }
 .create-bonus { margin: 0; font-size: 16px; letter-spacing: 0.16em; text-transform: uppercase; color: #ecc86a; }
 .create-bonus.done { color: var(--dim); }
-.create-preview { margin: 0; color: var(--dim); font-size: 16px; letter-spacing: 0.04em; }
+.create-bonus.warn { color: #e07a5f; letter-spacing: 0.04em; text-transform: none; font-size: 18px; }
+/* What each attribute gives, under its name, as Arena's sheet has it beside each. */
+.create-sheet .row-label { display: grid; text-align: left; }
+.create-sheet .row-label .create-sub { font-size: 14px; letter-spacing: 0.04em; color: var(--dim); text-transform: none; }
+.create-sheet-side { display: grid; gap: 14px; justify-items: center; }
+.create-status { display: grid; grid-template-columns: auto auto; gap: 2px 18px; margin: 0; font-size: 17px; }
+.create-status dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.12em; font-size: 14px; align-self: center; }
+.create-status dd { margin: 0; text-align: right; }
+.create-choice { display: grid; gap: 6px; justify-items: center; }
+.create-choice .create-text { margin: 0; }
 .value.raised { color: #ecc86a; }
 .create-doll-frame {
   height: min(440px, calc(100vh - 330px)); min-height: 240px; aspect-ratio: var(--doll-aspect, 148 / 240);

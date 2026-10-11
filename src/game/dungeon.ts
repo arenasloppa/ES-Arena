@@ -238,7 +238,7 @@ const PICK_TIME = 1.2;
  * then the dungeon has no monsters either). Its numbers are the remake's own.
  */
 const DEFAULT_WEAPON: Weapon = { name: 'Shortsword', damage: [2, 6], cif: 'SWORD.CIF' };
-/** A character of their own starts with these, as well as their gear. */
+/** A character of their own starts with these, as well as their gear (and gold, unless rolled at creation). */
 const START_POTIONS = 1;
 const START_GOLD = 25;
 /**
@@ -386,7 +386,7 @@ export class Dungeon {
     this.stats = newPlayerStats(held ? weaponOf(held) : DEFAULT_WEAPON, hero);
     if (hero.cls) {
       this.stats.potions = START_POTIONS;
-      this.stats.gold = START_GOLD;
+      this.stats.gold = hero.gold ?? START_GOLD;
     }
     this.allSpells = spells;
     if (hero.magicka > 0) {

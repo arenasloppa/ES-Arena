@@ -1,8 +1,9 @@
 /**
  * Character creation, as in Arena: a class chosen from the list or by
  * answering ten questions, a gender and a name, a race chosen by its
- * province on the map of Tamriel, then bonus points shared out among the
- * rolled attributes, and a face. Each step shows the game's own words, read
+ * province on the map of Tamriel, the game's words on the race and on what
+ * the class needs, then bonus points shared out among the rolled attributes
+ * on a sheet like Arena's, and a face. Each step shows the game's own words, read
  * from the player's copy, and is worked like the rest of the menu with the
  * keyboard, the mouse or a controller.
  */
@@ -14,11 +15,12 @@ import {
   ATTRIBUTE_COUNT,
   ATTRIBUTE_MAX,
   classFromAnswers,
+  INTELLIGENCE,
+  derivedAttributes,
   FACES,
   fillText,
-  heroFor,
+  maxFatigue,
   pickQuestions,
-  raceGifts,
   randomName,
   rollAttributes,
   type Character,
@@ -26,6 +28,7 @@ import {
   type Gender,
 } from '../game/character';
 import { Inventory, SHIELDS, startingGear } from '../game/items';
+import { startingMagicka } from '../game/magic';
 import { DOLL_HEIGHT, DOLL_WIDTH, PIXEL_ASPECT, type Portraits } from '../render/portrait';
 import type { StepEvent } from './menu';
 
@@ -49,7 +52,7 @@ const MAP_WIDTH = 320;
 const MAP_HEIGHT = 200;
 const ARMOUR_ALLOWED = ['Any', 'Chain, leather', 'Leather', 'None'];
 
-type Step = 'method' | 'question' | 'result' | 'classes' | 'gender' | 'name' | 'race' | 'home' | 'knownAs' | 'attributes' | 'face' | 'farewell';
+type Step = 'method' | 'question' | 'result' | 'classes' | 'gender' | 'name' | 'race' | 'home' | 'knownAs' | 'lore' | 'needs' | 'farewell' | 'attributes' | 'face';
 
 export interface CreationHost {
   data: CreationData;
@@ -74,7 +77,11 @@ interface Draft {
   rolled?: number[];
   added: number[];
   bonus: number;
-  rolledFor?: number;
+  /** Health and gold, rolled with the attributes. */
+  health: number;
+  gold: number;
+  /** The race, gender and class the attributes were rolled for. */
+  rolledFor?: string;
   face: number;
   questions: Question[];
   /** The path each answer so far counts toward. */
@@ -282,14 +289,31 @@ export class CharacterCreation {
       }
       case 'knownAs': {
         this.frame(`${race?.name ?? ''} ${clsName}`, d.name, fillText(t.knownAs, [clsName, d.name, race?.province ?? '', race?.plural ?? ''], d.gender));
+        this.options([['Continue', () => this.go(this.data.raceLore ? 'lore' : this.cls?.needs ? 'needs' : 'farewell')]], 'create-choices');
+        break;
+      }
+      case 'lore': {
+        // Arena's "Know ye this also:" and the race's description from TEMPLATE.DAT.
+        const lore = this.data.raceLore?.[d.race ?? 0] ?? '';
+        this.frame(d.name, race?.plural ?? '', this.data.sheet.knowYe);
+        this.root.append(el('p', 'create-text', lore.replace(/\s*\n\s*/g, ' ').trim()));
+        this.options([['Continue', () => this.go(this.cls?.needs ? 'needs' : 'farewell')]], 'create-choices');
+        break;
+      }
+      case 'needs': {
+        this.frame(d.name, clsName, fillText(t.needs, [this.cls?.needs ?? '', clsName], d.gender));
+        this.options([['Continue', () => this.go('farewell')]], 'create-choices');
+        break;
+      }
+      case 'farewell': {
+        this.frame(`${race?.name ?? ''} ${clsName}`, d.name, t.farewell);
         this.options([['Continue', () => this.go('attributes')]], 'create-choices');
         break;
       }
       case 'attributes': {
-        if (d.rolled === undefined || d.rolledFor !== d.race) this.reroll();
-        const needs = this.cls?.needs ? fillText(t.needs, [this.cls.needs, clsName], d.gender) : '';
+        const key = `${d.race}:${d.gender}:${d.cls}`;
+        if (d.rolled === undefined || d.rolledFor !== key) this.reroll();
         this.frame(d.name, 'Attributes', t.distribute);
-        if (needs) this.root.append(el('p', 'create-text create-needs', needs));
         focus = this.renderAttributes();
         break;
       }
@@ -300,17 +324,12 @@ export class CharacterCreation {
         const row = settingRow('Face', `${d.face + 1} of ${FACES}`);
         row.addEventListener('step', (e) => this.changeFace((e as StepEvent).detail.delta));
         row.addEventListener('click', () => this.changeFace(1));
-        const done = el('button', 'option', 'Done');
-        done.addEventListener('click', () => this.go('farewell'));
+        const done = el('button', 'option', this.host!.finish);
+        done.addEventListener('click', () => this.finish());
         nav.append(row, done);
         body.append(nav, this.dollFrame());
         this.root.append(body);
         focus = row;
-        break;
-      }
-      case 'farewell': {
-        this.frame(`${race?.name ?? ''} ${clsName}`, d.name, t.farewell);
-        this.options([[this.host!.finish, () => this.finish()]], 'create-choices');
         break;
       }
     }
@@ -402,7 +421,6 @@ export class CharacterCreation {
     mapBox.style.visibility = 'hidden';
     const side = el('div', 'create-race-list');
     const list = el('nav', 'options create-list');
-    const gifts = el('p', 'create-gifts');
     const buttons = this.data.races.map((r, i) => {
       const b = el('button', 'option');
       b.append(el('span', '', r.province), el('span', 'create-sub', r.plural));
@@ -411,13 +429,11 @@ export class CharacterCreation {
         const at = PROVINCE_AT[i];
         marker.hidden = !at;
         if (at) marker.style.cssText = `left:${(at[0] / MAP_WIDTH) * 100}%;top:${(at[1] / MAP_HEIGHT) * 100}%`;
-        const gifted = raceGifts(i).map((a) => this.data.attributes[a]);
-        gifts.textContent = gifted.length ? `${r.plural} start with more ${gifted.join(' and ')}.` : '';
       });
       list.append(b);
       return b;
     });
-    side.append(list, gifts);
+    side.append(list);
     const near = (e: MouseEvent): number | 'exit' | undefined => {
       const rect = canvas.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * MAP_WIDTH;
@@ -468,59 +484,127 @@ export class CharacterCreation {
 
   // ---- Attributes and face ----
 
+  /** Rolls the attributes, bonus points, health and gold again, as Arena's "Reroll stats" does. */
   private reroll(): void {
     const d = this.draft;
-    const roll = rollAttributes(d.race ?? 0, () => this.random());
+    const roll = rollAttributes(d.race ?? 0, d.gender ?? 'male', this.cls!, () => this.random(), this.data.raceAttributes);
     d.rolled = roll.attributes;
     d.added = new Array(ATTRIBUTE_COUNT).fill(0);
     d.bonus = roll.bonus;
-    d.rolledFor = d.race;
+    d.health = roll.health;
+    d.gold = roll.gold;
+    d.rolledFor = `${d.race}:${d.gender}:${d.cls}`;
   }
 
   private get bonusLeft(): number {
     return this.draft.bonus - this.draft.added.reduce((a, b) => a + b, 0);
   }
 
-  /** The attribute rows, bonus points and the doll; returns the first row. */
+  /**
+   * The sheet, laid out like Arena's (CHARSTAT.IMG): each attribute with what
+   * it gives beside it, then health, fatigue, gold, experience and level, and
+   * the bonus points left. "Done" asks, as Arena does, whether to keep the
+   * attributes or roll them again, and won't go on with points left over.
+   * Returns the first row.
+   */
   private renderAttributes(): HTMLElement {
     const d = this.draft;
+    const sheet = this.data.sheet;
     const body = el('div', 'create-columns create-sheet');
     const column = el('div', 'create-attributes');
     const nav = el('nav', 'options settings');
     const left = el('p', 'create-bonus');
-    const preview = el('p', 'create-preview');
-    const next = el('button', 'option', 'Continue');
+    const status = el('dl', 'create-status');
+    const done = el('button', 'option', 'Done');
+    const choice = el('div', 'create-choice');
+    const choiceNav = el('nav', 'options create-choices');
+    const save = el('button', 'option', sheet.save);
+    const again = el('button', 'option', sheet.reroll);
+    choiceNav.append(save, again);
+    choice.append(el('p', 'create-text', sheet.choose), choiceNav);
+    choice.hidden = true;
+    const subs: HTMLElement[] = [];
     const rows = this.data.attributes.slice(0, ATTRIBUTE_COUNT).map((name, i) => {
       const row = settingRow(name, '');
+      const sub = el('span', 'create-sub');
+      row.querySelector('.row-label')!.append(sub);
+      subs.push(sub);
       row.addEventListener('step', (e) => this.addPoint(i, (e as StepEvent).detail.delta, show));
       row.addEventListener('click', () => this.addPoint(i, 1, show));
       nav.append(row);
       return row;
     });
-    const reroll = el('button', 'option', 'Reroll');
-    reroll.addEventListener('click', () => {
+    const choosing = (on: boolean) => {
+      choice.hidden = !on;
+      done.hidden = on;
+      rows.forEach((r) => (r.disabled = on));
+      (on ? save : done).focus();
+    };
+    done.addEventListener('click', () => {
+      if (this.bonusLeft > 0) {
+        left.textContent = sheet.distributeAll;
+        left.classList.add('warn');
+        return;
+      }
+      choosing(true);
+    });
+    save.addEventListener('click', () => this.go('face'));
+    again.addEventListener('click', () => {
       this.reroll();
       show();
+      choosing(false);
+      rows[0].focus();
     });
-    next.addEventListener('click', () => this.bonusLeft === 0 && this.go('face'));
-    nav.append(reroll, next);
+    nav.append(done);
+    const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
     const show = () => {
+      const a = this.character().attributes;
       rows.forEach((row, i) => {
         const value = row.querySelector('.value')!;
-        value.textContent = String(d.rolled![i] + d.added[i]);
+        value.textContent = String(a[i]);
         value.classList.toggle('raised', d.added[i] > 0);
       });
+      const v = derivedAttributes(a);
+      const spellPoints = startingMagicka(this.cls!, a[INTELLIGENCE]);
+      const beside: Array<Array<[string, string]>> = [
+        [
+          ['Damage', signed(v.damage)],
+          ['Max Kilos', String(v.maxKilos)],
+        ],
+        [['Spell Pts', String(spellPoints)]],
+        [['Magic Def', signed(v.magicDefence)]],
+        [
+          ['To Hit', signed(v.toHit)],
+          ['To Defend', signed(v.toDefend)],
+        ],
+        [],
+        [
+          ['Health', signed(v.health)],
+          ['Heal Mod', signed(v.healMod)],
+        ],
+        [['Charisma', signed(v.charisma)]],
+        [],
+      ];
+      subs.forEach((sub, i) => (sub.textContent = beside[i].map(([k, x]) => `${k} ${x}`).join('  ·  ')));
+      const fatigue = maxFatigue(a);
+      const lines: Array<[string, string]> = [
+        ['Health', `${d.health}/${d.health}`],
+        ['Fatigue', `${fatigue}/${fatigue}`],
+        ['Gold', String(d.gold)],
+        ['Experience', '0'],
+        ['Level', '1'],
+      ];
+      status.replaceChildren(...lines.flatMap(([k, x]) => [el('dt', '', k), el('dd', '', x)]));
       const n = this.bonusLeft;
-      left.textContent = n ? `${n} bonus ${n === 1 ? 'point' : 'points'} to share out` : 'All bonus points shared out';
+      left.textContent = `Bonus points: ${n}`;
       left.classList.toggle('done', n === 0);
-      next.disabled = n > 0;
-      const hero = heroFor(this.character(), this.cls!);
-      const damage = hero.damageBonus ? `, damage ${hero.damageBonus > 0 ? '+' : '−'}${Math.abs(hero.damageBonus)}` : '';
-      preview.textContent = `Health ${hero.health}, stamina ${hero.stamina}${damage}, can carry ${hero.carry} kg`;
+      left.classList.remove('warn');
     };
     show();
-    column.append(left, nav, preview);
-    body.append(column, this.dollFrame());
+    column.append(left, nav, choice);
+    const side = el('div', 'create-sheet-side');
+    side.append(this.dollFrame(), status);
+    body.append(column, side);
     this.root.append(body);
     return rows[0];
   }
@@ -573,6 +657,8 @@ export class CharacterCreation {
       cls: d.cls ?? 0,
       attributes: (d.rolled ?? new Array(ATTRIBUTE_COUNT).fill(50)).map((v, i) => v + (d.added[i] ?? 0)),
       face: d.face,
+      health: d.health || undefined,
+      gold: d.rolled ? d.gold : undefined,
     };
   }
 
@@ -582,7 +668,7 @@ export class CharacterCreation {
 }
 
 function newDraft(): Draft {
-  return { name: '', added: new Array(ATTRIBUTE_COUNT).fill(0), bonus: 0, face: 0, questions: [], answers: [] };
+  return { name: '', added: new Array(ATTRIBUTE_COUNT).fill(0), bonus: 0, health: 0, gold: 0, face: 0, questions: [], answers: [] };
 }
 
 /** Marks a list that scrolls with whether there is more of it above and below, for its fades. */
