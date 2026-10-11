@@ -3,7 +3,7 @@
 How ES Arena has looked from one release to the next, newest first. The screenshots are taken with
 `npm run screenshots`, which keeps the ones it replaces here.
 
-## 0.4.0 (latest)
+## 0.4.2 (latest)
 
 | | |
 |---|---|
@@ -11,7 +11,17 @@ How ES Arena has looked from one release to the next, newest first. The screensh
 | ![Sharing out bonus points, beside the paper doll](screenshots/attributes.png)<br>Sharing out bonus points, beside the paper doll | ![Arriving in the cell where Arena begins](screenshots/cell.png)<br>Arriving in the cell where Arena begins |
 | ![A goblin raises its axe](screenshots/goblin.png)<br>A goblin raises its axe | ![Sneaking up on a rat](screenshots/sneak.png)<br>Sneaking up on a rat |
 | ![The item menu](screenshots/items.png)<br>The item menu | ![The character sheet](screenshots/character.png)<br>The character sheet |
-| ![The map fills in as you explore](screenshots/map.png)<br>The map fills in as you explore |  |
+| ![The map fills in as you explore](screenshots/map.png)<br>The map fills in as you explore | ![Waiting, with the date and time in Arena](screenshots/wait.png)<br>Waiting, with the date and time in Arena |
+
+## 0.4.0
+
+| | |
+|---|---|
+| ![The main menu](screenshots/0.4.0/menu.png)<br>The main menu | ![Choosing a race on the map of Tamriel](screenshots/0.4.0/race.png)<br>Choosing a race on the map of Tamriel |
+| ![Sharing out bonus points, beside the paper doll](screenshots/0.4.0/attributes.png)<br>Sharing out bonus points, beside the paper doll | ![Arriving in the cell where Arena begins](screenshots/0.4.0/cell.png)<br>Arriving in the cell where Arena begins |
+| ![A goblin raises its axe](screenshots/0.4.0/goblin.png)<br>A goblin raises its axe | ![Sneaking up on a rat](screenshots/0.4.0/sneak.png)<br>Sneaking up on a rat |
+| ![The item menu](screenshots/0.4.0/items.png)<br>The item menu | ![The character sheet](screenshots/0.4.0/character.png)<br>The character sheet |
+| ![The map fills in as you explore](screenshots/0.4.0/map.png)<br>The map fills in as you explore |  |
 
 ## 0.3.0
 
