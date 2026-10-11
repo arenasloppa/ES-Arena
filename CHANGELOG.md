@@ -7,6 +7,7 @@ Every release of ES Arena, newest first. Each one is on the
 
 - The item menu's pictures turn, as Skyrim's items do. Drag the picked piece with the mouse, or push the right stick, to turn it round, and roll the mouse wheel or press the right stick to bring it closer. Each one is Arena's own picture given depth, thin at its edges and swelling towards the middle, so a blade stays thin while a cuirass or a shield bulges, and the light falls from your side as it turns.
 - Where a wall comes down into water or a pit, the stone of the chasm's sides now shows below the floor's level, as in Arena.
+- Behind the main menu, a film of the first dungeon now plays: the camera glides down its halls, skims low over the water, closes in on the rats and goblins as they go about, and now and then one runs at it. Shots dissolve into one another and sometimes dip to black, as a film's do, and the creatures are never hurt. Without your game files the menu keeps its plain hall.
 
 ## 0.4.3 (2026-10-11)
 

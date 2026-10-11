@@ -40,6 +40,8 @@ import { Portraits } from './render/portrait';
 import { WeaponView } from './render/weaponView';
 import { SpellView } from './render/spellView';
 import { backdropLevel } from './render/backdrop';
+import { FilmView } from './render/film';
+import { Director, Film } from './game/flythrough';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { CharacterCreation } from './ui/creation';
 import { Cutscenes, deathVision, dreamVisions, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
@@ -204,8 +206,13 @@ function fillBindings() {
 
 // ---- Game ----
 
+/** Counts every change of engine, so a backdrop that took a while to build knows when it's no longer wanted. */
+let engineChanges = 0;
+
 /** Stops the running engine (map or backdrop) and makes `next` the current one. */
 function setEngine(next?: Engine, map?: string) {
+  engineChanges++;
+  menu.classList.remove('film');
   engine?.dispose();
   if (engine !== next) {
     textures?.dispose();
@@ -215,13 +222,58 @@ function setEngine(next?: Engine, map?: string) {
   engineMap = map;
 }
 
-/** Shows the generated hall behind the menu until a real map is loaded. */
+/**
+ * Shows the backdrop behind the menu: once the game is open, a film of the
+ * first dungeon with its creatures; before that, or if the film can't be
+ * made, the generated hall.
+ */
 async function showBackdrop() {
+  const asked = engineChanges;
+  if (data && (await showFilm(data, asked))) return;
+  if (engineChanges !== asked) return; // something else was shown meanwhile
   const { level, textures: provider } = backdropLevel();
   const scene = await buildLevelScene(level, provider);
   if (engine) return; // a map started while the backdrop was building
   setEngine(new Engine(renderer, new Dungeon(level, undefined), scene, { autopilot: true }));
   engine!.start();
+}
+
+/**
+ * The film behind the main menu: a flight through Arena's first dungeon
+ * past its rats and goblins, in shots that dissolve into one another
+ * (game/flythrough.ts). Resolves false when it could not be made.
+ */
+async function showFilm(game: GameData, asked: number): Promise<boolean> {
+  if (!game.has(DEFAULT_MAP)) return false;
+  let cache: TextureCache | undefined;
+  try {
+    const mif = parseMif(await game.read(DEFAULT_MAP));
+    const levelIndex = Math.min(mif.startingLevelIndex, mif.levels.length - 1);
+    const inf = parseInf(await game.read(mif.levels[levelIndex].info));
+    if (tables === undefined) tables = await loadTables(game);
+    const level = buildLevel(mif, levelIndex, inf, tables?.platforms);
+    cache = new TextureCache(game, parseCol(await game.read('PAL.COL')));
+    const dungeon = new Dungeon(level, tables ?? undefined);
+    const scene = await buildLevelScene(level, cache);
+    const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache!.creature(stem), level);
+    // A map started, another folder was opened or the backdrop was asked for again meanwhile.
+    if (engineChanges !== asked || data !== game) {
+      creatures.dispose();
+      cache.dispose();
+      return true;
+    }
+    const film = new FilmView(new Film(new Director(level, dungeon.creatures), level, dungeon.creatures));
+    setEngine(new Engine(renderer, dungeon, scene, { autopilot: true, creatures, film }));
+    textures = cache;
+    menu.classList.add('film');
+    if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = engine;
+    engine!.start();
+    return true;
+  } catch (err) {
+    console.warn(`Could not film ${DEFAULT_MAP} for the menu:`, err);
+    cache?.dispose();
+    return false;
+  }
 }
 
 function setStatus(text: string) {
@@ -683,6 +735,8 @@ async function useSource(source: FileSource): Promise<boolean> {
   updatePlayOptions();
   showScreen('play');
   setStatus('');
+  // Behind the menu, the first dungeon now that there is one to show.
+  void showBackdrop();
   // Read the classes now, to say who plays and to have character creation ready.
   void creationFor().then(updatePlayOptions);
   music.play(SONGS.menu);
@@ -780,11 +834,11 @@ folderInput.addEventListener('change', async () => {
 $('change-folder').addEventListener('click', () => {
   music?.play(undefined);
   setEngine(undefined);
-  void showBackdrop();
   data = undefined;
   portraits = undefined;
   creation = undefined;
   creationLoaded = undefined;
+  void showBackdrop();
   updatePlayOptions();
   showScreen('folder');
   setStatus('');

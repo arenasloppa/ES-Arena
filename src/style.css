@@ -51,6 +51,10 @@ body[data-input='gamepad'], body[data-input='gamepad'] * { cursor: none !importa
 #menu::before {
   background: radial-gradient(ellipse 75% 70% at 50% 42%, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.84) 72%, rgba(0, 0, 0, 0.95));
 }
+/* Over the film of the first dungeon, lighter round the edges so it shows, and as dark as ever behind the words. */
+#menu.film[data-screen='play']::before {
+  background: radial-gradient(ellipse 60% 55% at 50% 42%, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.42) 60%, rgba(0, 0, 0, 0.78));
+}
 #menu::after {
   inset: -20%;
   background:

@@ -56,13 +56,15 @@ export class CreatureView {
     }
   }
 
-  /** Poses every creature for a camera at `eye`; call once per frame before rendering. */
-  update(eye: THREE.Vector3): void {
+  /**
+   * Poses every creature for a camera at `eye`; call once per frame before
+   * rendering. Creatures nearer the camera than `nearest` aren't drawn: the
+   * menu's film can pass where one stands.
+   */
+  update(eye: THREE.Vector3, nearest = 0): void {
     for (const { creature: c, sprite, mesh, material } of this.actors) {
-      if (c.state === 'dead' && c.info.noCorpse) {
-        mesh.visible = false;
-        continue;
-      }
+      mesh.visible = !(c.state === 'dead' && c.info.noCorpse) && Math.hypot(c.x - eye.x, c.y - eye.z) >= nearest;
+      if (!mesh.visible) continue;
       const angle = viewAngle(c.x, c.y, c.facing, eye.x, eye.z);
       const view = sprite.views[angle.file];
       const pose = creatureFrame(c, view.frames.length - ATTACK_START);

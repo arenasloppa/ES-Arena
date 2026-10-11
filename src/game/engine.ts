@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { SoundBank } from '../audio/sound';
 import type { GamepadInput } from '../input/gamepad';
 import type { CreatureView } from '../render/creatureView';
+import type { FilmView } from '../render/film';
 import { poseDoor, type LevelScene } from '../render/levelScene';
 import type { MapView } from '../render/mapView';
 import { spellColour, type SpellView } from '../render/spellView';
@@ -43,6 +44,8 @@ const COMPASS_RANGE = 16;
 /** The fog: where it begins and where it hides everything, in voxels, before a Light spell lengthens both. */
 const FOG_NEAR = 1.5;
 const FOG_FAR = 9;
+/** The menu's film leaves out creatures this close to its camera, which can pass where one stands. */
+const FILM_NEAREST = 0.45;
 
 /** Something in front of the player that they can use, as the HUD shows it. */
 export interface HudTarget {
@@ -127,6 +130,8 @@ export interface ControlSettings {
 export interface EngineOptions {
   /** Slowly turns the camera with no input; used for the backdrop behind the menu. */
   autopilot?: boolean;
+  /** With autopilot: plays this film of the dungeon instead of turning. */
+  film?: FilmView;
   pad?: GamepadInput;
   hud?: EngineHud;
   controls?: ControlSettings;
@@ -279,6 +284,7 @@ export class Engine {
     window.removeEventListener('mouseup', this.onMouseUp);
     this.options.map?.dispose();
     this.options.spells?.dispose();
+    this.options.film?.dispose();
     const textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -338,7 +344,8 @@ export class Engine {
   private update(dt: number): void {
     const d = this.dungeon;
     if (this.autopilot) {
-      d.player.yaw += 0.12 * dt;
+      if (this.options.film) this.options.film.update(dt);
+      else d.player.yaw += 0.12 * dt;
       return;
     }
     if (this.mapOpen) {
@@ -567,6 +574,10 @@ export class Engine {
       this.options.map.render(this.renderer, dt);
       return;
     }
+    if (this.options.film) {
+      this.options.film.render(this.renderer, this.scene, (camera) => this.face(camera, FILM_NEAREST));
+      return;
+    }
     const d = this.dungeon;
     const p = d.player;
     const h = d.level.height;
@@ -581,10 +592,7 @@ export class Engine {
     this.camera.position.set(p.x, eye, p.y);
     const cp = Math.cos(p.pitch);
     this.camera.lookAt(p.x + Math.cos(p.yaw) * cp, eye + Math.sin(p.pitch), p.y + Math.sin(p.yaw) * cp);
-    for (const b of this.levelScene.billboards) {
-      b.rotation.y = Math.atan2(this.camera.position.x - b.position.x, this.camera.position.z - b.position.z);
-    }
-    this.options.creatures?.update(this.camera.position);
+    this.face(this.camera);
     this.options.spells?.update(d.bolts, eye * 0.85, dt);
     // A Light spell lets the player see further into the dark.
     const fog = this.scene.fog as THREE.Fog;
@@ -596,6 +604,14 @@ export class Engine {
     this.options.minimap?.draw();
     this.options.hud?.heading(p.yaw, this.compassMarkers());
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Turns the flat sprites and the creatures towards `camera`, leaving out creatures nearer it than `nearest`. */
+  private face(camera: THREE.Camera, nearest = 0): void {
+    for (const b of this.levelScene.billboards) {
+      b.rotation.y = Math.atan2(camera.position.x - b.position.x, camera.position.z - b.position.z);
+    }
+    this.options.creatures?.update(camera.position, nearest);
   }
 
   /** Creatures hunting the player, and the current objective, for the compass. */
