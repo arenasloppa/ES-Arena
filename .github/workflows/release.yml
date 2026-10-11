@@ -39,6 +39,8 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json ($version)"
             exit 1
           fi
+      - name: Check the update log has this version
+        run: node scripts/release-notes.mjs "$(node -p "require('./package.json').version")" > /dev/null
       - run: npm ci
       - run: npm test
       - run: npm run build
@@ -74,7 +76,7 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           tag="v$version"
           ls -l zips
-          sed "s/{version}/$version/g" .github/release-notes.md > notes.md
+          node scripts/release-notes.mjs "$version" > notes.md
           if gh release view "$tag" > /dev/null 2>&1; then
             gh release upload "$tag" zips/*.zip --clobber
           else

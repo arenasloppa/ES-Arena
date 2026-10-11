@@ -101,8 +101,9 @@ npx tsx scripts/icon.ts   # redraw the app icon, build/icon.png
 npx tsx scripts/inspect.ts <ARENA folder> <out dir> WALLA.SET TITLE.IMG   # save images as PNGs to check the decoders
 ```
 
-Releases are built on GitHub by `.github/workflows/release.yml`: raise the version in `package.json`, then run the
-Release workflow from the Actions tab (or push a tag such as `v0.2.0`). It builds the Mac and Windows zips and
+Every release is logged in [CHANGELOG.md](CHANGELOG.md). Releases are built on GitHub by
+`.github/workflows/release.yml`: add the version's entry to the update log, raise the version in `package.json`, then
+run the Release workflow from the Actions tab (or push a tag such as `v0.2.0`). The release notes come from the log. It builds the Mac and Windows zips and
 publishes them on the Releases page. The Mac app is ad-hoc signed rather than signed with a paid Apple certificate,
 which is why macOS asks before opening it the first time.
 
