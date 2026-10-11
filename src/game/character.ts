@@ -6,12 +6,16 @@
  *
  * The classes, races and words come from the player's own game when they can
  * be read (formats/classes.ts, formats/creation.ts). Otherwise the remake
- * uses three classes and plain words of its own. How the attributes are
- * rolled and what they do in play (heroFor) are the remake's own rules.
+ * uses three classes and plain words of its own. Attributes, health, gold
+ * and what the character sheet shows are rolled and worked out as in Arena
+ * (OpenTESArena's reading of it); turning them into chances in a fight
+ * (heroFor) is partly the remake's own.
  */
 import type { CharacterTables, ClassInfo, CreationTexts, RaceInfo } from '../formats/classes';
 import type { ClassChooser, Question } from '../formats/creation';
-import { roll, type Hero, type Random } from './combat';
+import type { GameMessages } from '../formats/messages';
+import type { Hero, Random } from './combat';
+import { regainsMagicka, startingMagicka } from './magic';
 
 export type Gender = 'male' | 'female';
 
@@ -25,6 +29,8 @@ export const ENDURANCE = 5;
 export const PERSONALITY = 6;
 export const LUCK = 7;
 export const ATTRIBUTE_COUNT = 8;
+/** The races, in the game's order. */
+export const ARGONIAN = 7;
 /** No attribute goes above this, bonus points included. */
 export const ATTRIBUTE_MAX = 100;
 /** Faces each race has to choose from. */
@@ -41,6 +47,9 @@ export interface Character {
   attributes: number[];
   /** Which of the race's faces, 0 to 9. */
   face: number;
+  /** Health and gold rolled at creation; missing for characters made before they were. */
+  health?: number;
+  gold?: number;
 }
 
 /** Everything character creation needs, from the game or the remake's own fallbacks. */
@@ -57,13 +66,40 @@ export interface CreationData {
   chooser?: ClassChooser;
   /** Groups of name pieces (NAMECHNK.DAT). */
   names?: string[][];
+  /** Each race's description (TEMPLATE.DAT #1409 to #1416), in the races' order. */
+  raceLore?: string[];
+  /** Each race's starting attributes by gender, from the program (see raceAttributes). */
+  raceAttributes?: number[][];
+  /** The words around the attributes, the game's or the remake's. */
+  sheet: SheetTexts;
 }
+
+/** What the game says around rolling the attributes. */
+export interface SheetTexts {
+  /** Before the race's description. */
+  knowYe: string;
+  /** Asks what to do with the attributes once the points are shared out. */
+  choose: string;
+  save: string;
+  reroll: string;
+  /** Said when the points are not all shared out. */
+  distributeAll: string;
+}
+
+const FALLBACK_SHEET: SheetTexts = {
+  knowYe: 'Know this too:',
+  choose: 'Keep these attributes?',
+  save: 'Keep',
+  reroll: 'Roll again',
+  distributeAll: 'Share out all your bonus points first.',
+};
 
 /** The remake's own classes, for when the game's can't be read. */
 export const FALLBACK_CLASSES: ClassInfo[] = [
-  { name: 'Warrior', healthDie: 15, experience: 1100, spellcaster: false, critical: true, thief: false, armour: 0, shields: [0, 1, 2, 3], needs: 'mighty and tough' },
+  { name: 'Warrior', id: 16, healthDie: 15, experience: 1100, spellcaster: false, critical: true, thief: false, armour: 0, shields: [0, 1, 2, 3], needs: 'mighty and tough' },
   {
     name: 'Mage',
+    id: 0,
     healthDie: 7,
     experience: 1100,
     spellcaster: true,
@@ -76,6 +112,7 @@ export const FALLBACK_CLASSES: ClassInfo[] = [
   },
   {
     name: 'Thief',
+    id: 10,
     healthDie: 11,
     experience: 1100,
     spellcaster: false,
@@ -122,8 +159,10 @@ const FALLBACK_CANNOT_EQUIP = 'A %s cannot use that.';
 /** Gathers the game's character tables and creation files, filling gaps with the remake's own. */
 export function creationData(
   tables: CharacterTables | undefined,
-  files: { questions?: Question[]; chooser?: ClassChooser; names?: string[][] } = {},
+  files: { questions?: Question[]; chooser?: ClassChooser; names?: string[][]; raceLore?: string[] } = {},
+  program: { raceAttributes?: number[][]; messages?: GameMessages } = {},
 ): CreationData {
+  const m = program.messages ?? {};
   return {
     classes: tables?.classes ?? FALLBACK_CLASSES,
     races: tables?.races ?? FALLBACK_RACES,
@@ -134,6 +173,15 @@ export function creationData(
     questions: tables ? (files.questions ?? []) : [],
     chooser: tables ? files.chooser : undefined,
     names: files.names,
+    raceLore: tables ? files.raceLore : undefined,
+    raceAttributes: tables ? program.raceAttributes : undefined,
+    sheet: {
+      knowYe: m.knowYe ?? FALLBACK_SHEET.knowYe,
+      choose: m.chooseStats ?? FALLBACK_SHEET.choose,
+      save: m.saveStats ?? FALLBACK_SHEET.save,
+      reroll: m.rerollStats ?? FALLBACK_SHEET.reroll,
+      distributeAll: m.distributeAll ?? FALLBACK_SHEET.distributeAll,
+    },
   };
 }
 
@@ -149,64 +197,175 @@ export function fillText(text: string, slots: string[], gender: Gender = 'male')
 }
 
 // ---- Attributes ----
+//
+// Checked against the original running in DOSBox (88 rolled sheets) and its
+// program: Arena keeps attributes on a scale of 0 to 255 and shows them out of
+// 100; each starts at the race's value for the gender plus a dice roll, and
+// the sheet's other numbers are worked out from them as below.
 
-/** Each race's two gifts: attributes that start higher. */
-const RACE_GIFTS: number[][] = [
-  [INTELLIGENCE, PERSONALITY],
-  [STRENGTH, AGILITY],
-  [STRENGTH, ENDURANCE],
-  [INTELLIGENCE, SPEED],
-  [INTELLIGENCE, WILLPOWER],
-  [AGILITY, SPEED],
-  [AGILITY, LUCK],
-  [ENDURANCE, SPEED],
-];
-const GIFT = 12;
+/** Starting attributes, 0 to 255, when the game's own table can't be read: the remake's own, 40 out of 100 across the board. */
+const FALLBACK_RACE_ATTRIBUTES = Array.from({ length: ATTRIBUTE_COUNT }, () => 102);
 
-export function raceGifts(race: number): number[] {
-  return RACE_GIFTS[race] ?? [];
+/** The race's starting attributes for the gender, 0 to 255, from the game's table when there is one. */
+export function raceAttributes(race: number, gender: Gender, table?: number[][]): number[] {
+  const row = table?.[race * 2 + (gender === 'female' ? 1 : 0)];
+  return row?.length === ATTRIBUTE_COUNT ? [...row] : [...FALLBACK_RACE_ATTRIBUTES];
 }
 
+/** A whole number from 0 to 65535, the size of what Arena's own random numbers give. */
+function next(random: Random): number {
+  return Math.floor(random() * 0x10000) & 0xffff;
+}
+
+/** 0 to n - 1. */
+function below(n: number, random: Random): number {
+  return next(random) % n;
+}
+
+/**
+ * Arena's dice (its program at 0x161D2): up to 8, a plain roll from 0 to
+ * n - 1; above that, n is split into dice of six or five (going up from n
+ * until one divides it), each counting 0 to its size, rolled again whenever
+ * the total comes to more than n. 20 is four dice of 0 to 5; 25 is five.
+ */
+export function arenaRoll(n: number, random: Random): number {
+  if (n <= 0) return 0;
+  for (;;) {
+    let total: number;
+    if (n <= 8) total = below(n, random);
+    else {
+      let m = n;
+      while (m % 6 !== 0 && m % 5 !== 0) m++;
+      const sides = m % 6 === 0 ? 6 : 5;
+      total = 0;
+      for (let i = 0; i < m / sides; i++) total += below(sides + 1, random);
+    }
+    if (total <= n) return total;
+  }
+}
+
+/** Out of 100 to Arena's 0 to 255 (its program at 0x17474): times 2.56, rounded half away from zero. */
+export function to256(value: number): number {
+  const q = Math.floor((Math.abs(value) * 256 + 50) / 100);
+  return value < 0 ? -q : q;
+}
+
+/** Arena's 0 to 255 to the 100 the sheet shows, rounded. */
+export function to100(raw: number): number {
+  return Math.floor((raw * 100 + 128) / 256);
+}
+
+const ATTRIBUTE_ROLL = 20;
+const BONUS_ROLL = 25;
+
 export interface AttributeRoll {
+  /** Out of 100, as the sheet shows them. */
   attributes: number[];
   /** Points to share out on top. */
   bonus: number;
+  /** Health and gold to start with, rolled with the attributes. */
+  health: number;
+  gold: number;
 }
 
-/** Rolls 25 plus three ten-sided dice for each attribute, plus the race's gifts, and 15 plus two dice of bonus points. */
-export function rollAttributes(race: number, random: Random): AttributeRoll {
-  const gifts = raceGifts(race);
-  const attributes = Array.from({ length: ATTRIBUTE_COUNT }, (_, i) => {
-    const rolled = 25 + roll(random, 1, 10) + roll(random, 1, 10) + roll(random, 1, 10);
-    return Math.min(ATTRIBUTE_MAX, rolled + (gifts.includes(i) ? GIFT : 0));
-  });
-  return { attributes, bonus: 15 + roll(random, 1, 10) + roll(random, 1, 10) };
+/**
+ * Rolls a character as Arena does: each attribute is the race's plus a roll
+ * of 20 and one more, on Arena's scale; 25 is rolled for the bonus points;
+ * health is 25 plus a roll of the class's hit die plus Endurance's bonus (at
+ * least 1 for the roll and bonus); and gold is 50 to 199.
+ */
+export function rollAttributes(race: number, gender: Gender, cls: ClassInfo, random: Random, table?: number[][]): AttributeRoll {
+  const attributes = raceAttributes(race, gender, table).map((raw) => to100(Math.min(255, raw + to256(arenaRoll(ATTRIBUTE_ROLL, random) + 1))));
+  return {
+    attributes,
+    bonus: arenaRoll(BONUS_ROLL, random),
+    health: startingHealth(cls, derivedAttributes(attributes).health, random),
+    gold: 50 + below(150, random),
+  };
 }
 
-/** What an attribute adds or takes away: every full ten points above or below 50 counts one. */
-export function attributeBonus(value: number): number {
-  return Math.trunc((value - 50) / 10) || 0;
+/** 25 plus a roll of the class's hit die plus Endurance's health bonus, those two counting at least 1. */
+export function startingHealth(cls: ClassInfo, healthBonus: number, random: Random): number {
+  return 25 + Math.max(1, arenaRoll(cls.healthDie, random) + healthBonus);
+}
+
+/** The values the character sheet shows beside the attributes. */
+export interface DerivedAttributes {
+  /** From Strength. */
+  damage: number;
+  maxKilos: number;
+  /** From Willpower. */
+  magicDefence: number;
+  /** From Agility. */
+  toHit: number;
+  toDefend: number;
+  /** From Endurance: health each level adds on top of the hit die, and how quickly wounds heal. */
+  health: number;
+  healMod: number;
+  /** From Personality. */
+  charisma: number;
+}
+
+/**
+ * The sheet's numbers, as the original shows them for every roll seen:
+ * Strength's damage on Arena's own scale ((Strength - 122) / 13); the others
+ * a step for every five points from 50 (Endurance: every ten from 45), each
+ * cut toward zero. OpenTESArena's versions hold some of these at 0 or -1
+ * below a point; the original doesn't.
+ */
+export function derivedAttributes(a: number[]): DerivedAttributes {
+  // Adding 0 turns -0 into 0.
+  const step = (v: number, from: number, every: number) => Math.trunc((v - from) / every) + 0;
+  const health = step(a[ENDURANCE], 45, 10);
+  return {
+    damage: step(to256(a[STRENGTH]), 122, 13),
+    maxKilos: a[STRENGTH] * 2,
+    magicDefence: step(a[WILLPOWER], 50, 5),
+    toHit: step(a[AGILITY], 50, 5),
+    toDefend: step(a[AGILITY], 50, 5),
+    health,
+    healMod: health,
+    charisma: step(a[PERSONALITY], 50, 5),
+  };
+}
+
+/** Fatigue (the remake's stamina): Strength plus Endurance. */
+export function maxFatigue(a: number[]): number {
+  return a[STRENGTH] + a[ENDURANCE];
 }
 
 /** What the character brings to a fight, worked out from their class and attributes. */
 export function heroFor(character: Character, cls: ClassInfo): Hero {
   const a = character.attributes;
-  const bonus = (i: number) => attributeBonus(a[i]);
+  const d = derivedAttributes(a);
+  // The remake's own rules turn the sheet's steps into chances: a step is five points of Agility or Luck.
+  // Arena keeps what Luck does hidden; UESP says it nudges nearly everything (fights, locks, bargains), so here
+  // it adds a little to dodging, picking locks, critical hits and the gold found.
+  const step = (i: number) => Math.trunc((a[i] - 50) / 5);
   return {
     cls,
-    health: 20 + cls.healthDie + 2 * bonus(ENDURANCE),
-    stamina: 70 + Math.round((a[ENDURANCE] + a[WILLPOWER]) * 0.3),
+    // A character from before health was rolled at creation gets the die's highest.
+    health: character.health ?? 25 + cls.healthDie,
+    stamina: maxFatigue(a),
     healthDie: cls.healthDie,
-    healthBonus: bonus(ENDURANCE),
+    healthBonus: d.health,
+    healMod: d.healMod,
     experience: cls.experience,
-    damageBonus: bonus(STRENGTH),
-    dodge: (a[AGILITY] - 50) * 0.004,
-    pace: 0.88 + a[SPEED] * 0.0024,
+    damageBonus: d.damage,
+    dodge: d.toDefend * 0.02 + step(LUCK) * 0.005,
+    // Arena's base speed: 20 plus up to 20 more for Speed (OpenTESArena's getBaseSpeed), against the remake's walk at 40.
+    pace: (20 + Math.trunc((Math.trunc((a[SPEED] * 256) / 100) * 20) / 256)) / 30,
     recovery: 0.8 + a[WILLPOWER] * 0.004,
-    critical: cls.critical ? Math.max(0.02, 0.08 + 0.01 * bonus(LUCK)) : 0,
-    lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * bonus(AGILITY)) : 0,
-    fortune: Math.max(0.5, 1 + 0.1 * bonus(LUCK)),
-    carry: 100 + 2 * a[STRENGTH],
+    critical: cls.critical ? Math.max(0.02, 0.08 + 0.01 * step(LUCK)) : 0,
+    lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * d.toHit + 0.02 * step(LUCK)) : 0,
+    fortune: Math.max(0.5, 1 + 0.05 * step(LUCK)),
+    carry: d.maxKilos,
+    magicka: startingMagicka(cls, a[INTELLIGENCE]),
+    regainsMagicka: regainsMagicka(cls),
+    // OpenTESArena's values for the original: everyone swims at half speed and 30 times their usual tiring, Argonians at full speed and 12 times.
+    swimPace: character.race === ARGONIAN ? 1 : 0.5,
+    swimTiring: character.race === ARGONIAN ? 12 / 30 : 1,
+    gold: character.gold,
   };
 }
 
@@ -310,7 +469,10 @@ export function loadCharacter(data: CreationData, store = storage()): Character 
   ) {
     return undefined;
   }
-  return { name: saved.name.trim().slice(0, 32), gender: saved.gender, race: saved.race!, cls: cls!, attributes: [...attributes], face: saved.face! };
+  const character: Character = { name: saved.name.trim().slice(0, 32), gender: saved.gender, race: saved.race!, cls: cls!, attributes: [...attributes], face: saved.face! };
+  if (whole(saved.health, 1000) && saved.health! > 0) character.health = saved.health;
+  if (whole(saved.gold, 100000)) character.gold = saved.gold;
+  return character;
 }
 
 export function forgetCharacter(store = storage()): void {

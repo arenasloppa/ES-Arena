@@ -2,24 +2,24 @@ import * as THREE from 'three';
 import type { SoundBank } from '../audio/sound';
 import type { GamepadInput } from '../input/gamepad';
 import type { CreatureView } from '../render/creatureView';
-import type { LevelScene } from '../render/levelScene';
+import { poseDoor, type LevelScene } from '../render/levelScene';
 import type { MapView } from '../render/mapView';
+import { spellColour, type SpellView } from '../render/spellView';
 import type { WeaponView } from '../render/weaponView';
 import type { Minimap } from '../ui/minimap';
 import { isAlive } from './creatures';
-import type { Dungeon } from './dungeon';
+import type { Dungeon, Vision } from './dungeon';
 import { lineOfSight } from './grid';
-import { cellIndex, startJump, stepJump, type Jump } from './player';
+import { ARENA_HEIGHT } from './level';
 
-const EYE = 0.55; // eye height as a fraction of room height
-const SNEAK_EYE = 0.36;
-const DEAD_EYE = 0.1;
+/** Eye height above the feet: Arena's 60 units (OpenTESArena); lower when sneaking, as Skyrim crouches, and on the floor when dead. */
+const EYE = 60 * ARENA_HEIGHT;
+const SNEAK_EYE = 40 * ARENA_HEIGHT;
+const DEAD_EYE = 10 * ARENA_HEIGHT;
 const MOUSE_SENSITIVITY = 0.0022;
 const TURN_SPEED = 2.4; // radians per second for arrow keys
 const STICK_TURN = 3.2; // radians per second at full right-stick tilt
 const STICK_PITCH = 2;
-const JUMP_APEX = 0.22; // fraction of room height
-const JUMP_TIME = 0.55; // seconds from take-off to landing
 const FOV = 70;
 /** Sprinting widens the view by this many degrees. */
 const SPRINT_FOV = 7;
@@ -30,6 +30,9 @@ const DEATH_FADE = 1.3;
 const ESCAPE_SCREEN = 1.1;
 /** Creatures hunting the player show on the compass this far away. */
 const COMPASS_RANGE = 16;
+/** The fog: where it begins and where it hides everything, in voxels, before a Light spell lengthens both. */
+const FOG_NEAR = 1.5;
+const FOG_FAR = 9;
 
 /** Something in front of the player that they can use, as the HUD shows it. */
 export interface HudTarget {
@@ -44,6 +47,16 @@ export interface Vitals {
   maxHealth: number;
   stamina: number;
   maxStamina: number;
+  /** Spell points; a max of 0 hides the bar. */
+  magicka: number;
+  maxMagicka: number;
+}
+
+/** The spell in hand, as the HUD shows it. */
+export interface ReadiedSpell {
+  name: string;
+  cost: number;
+  colour: string;
 }
 
 /** The menus over the game: Skyrim's menu of menus, the item and magic menus, the character sheet and the favourites. */
@@ -61,6 +74,7 @@ export interface CompassMarker {
 /** What the engine tells the on-screen HUD. */
 export interface EngineHud {
   message(text: string): void;
+  resting(text: string | undefined): void;
   target(target: HudTarget | undefined): void;
   heading(yaw: number, markers?: CompassMarker[]): void;
   vitals(v: Vitals): void;
@@ -75,6 +89,14 @@ export interface EngineHud {
   detection(level: number | undefined): void;
   /** Darkens the screen to `opacity` over `seconds`. */
   fade(opacity: number, seconds: number): void;
+  /** The spell in hand, or none. */
+  readied(spell: ReadiedSpell | undefined): void;
+  /** A spell cast: the hand glows. */
+  cast(colour: string): void;
+  /** Too few spell points: the magicka bar flashes. */
+  noMagicka(): void;
+  /** The spells working on the player, such as "Shield (12)". */
+  effects(names: string[]): void;
 }
 
 /** The player's settings; shared with the menu, which changes them while the game runs. */
@@ -86,6 +108,10 @@ export interface ControlSettings {
   vibration: boolean;
   /** Sound volume, 0 to 1. */
   volume: number;
+  /** Music volume, 0 to 1. */
+  music: number;
+  /** Plays Arena's opening cutscenes when the game folder is opened. */
+  intro: boolean;
 }
 
 export interface EngineOptions {
@@ -99,6 +125,7 @@ export interface EngineOptions {
   sounds?: SoundBank;
   map?: MapView;
   minimap?: Minimap;
+  spells?: SpellView;
 }
 
 /**
@@ -118,7 +145,6 @@ export class Engine {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.02, 100);
   private readonly keys = new Set<string>();
-  private readonly jump: Jump = { height: 0, speed: 0 };
   private running = false;
   private frameRequest = 0;
   private last = 0;
@@ -150,10 +176,18 @@ export class Engine {
   private deathShown = false;
   private deathFaded = false;
   private escapedAt: number | undefined;
+  private deathCause: string | undefined;
+  private readiedKey = '';
+  private effectsKey = '';
   onPause?: () => void;
   /** The player asked for one of the menus over the game. */
   onMenu?: (which: GameMenu) => void;
-  onDeath?: () => void;
+  /** The player died; `cause` is the game's words for how, when there are some. */
+  onDeath?: (cause?: string) => void;
+  /** T or the View button: the wait menu, as in Skyrim. */
+  onWait?: () => void;
+  /** Ria comes to the sleeping player; the game plays her visions and carries on. */
+  onDream?: (visions: Vision[]) => void;
   onEscape?: () => void;
   /** The map screen opened (true) or closed. */
   onMap?: (open: boolean) => void;
@@ -171,13 +205,14 @@ export class Engine {
   ) {
     this.canvas = renderer.domElement;
     this.autopilot = options.autopilot ?? false;
-    this.controls = options.controls ?? { lookSpeed: 1, invertLook: false, vibration: true, volume: 1 };
+    this.controls = options.controls ?? { lookSpeed: 1, invertLook: false, vibration: true, volume: 1, music: 1, intro: true };
     const canvas = this.canvas;
     this.scene.background = new THREE.Color(0x000000);
     // Arena's dungeons fade to black a few voxels away.
-    this.scene.fog = new THREE.Fog(0x000000, 1.5, 9);
+    this.scene.fog = new THREE.Fog(0x000000, FOG_NEAR, FOG_FAR);
     this.scene.add(levelScene.group);
     if (options.creatures) this.scene.add(options.creatures.group);
+    if (options.spells) this.scene.add(options.spells.group);
     this.resize();
 
     window.addEventListener('resize', this.resize);
@@ -228,6 +263,7 @@ export class Engine {
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('mouseup', this.onMouseUp);
     this.options.map?.dispose();
+    this.options.spells?.dispose();
     const textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -273,7 +309,8 @@ export class Engine {
 
   private frame = (now: number) => {
     if (!this.running) return;
-    const dt = Math.min((now - this.last) / 1000, 0.1);
+    // The first frame can be stamped a little before the engine started: never a step back in time.
+    const dt = Math.max(0, Math.min((now - this.last) / 1000, 0.1));
     this.last = now;
     this.options.pad?.poll(now);
     this.update(dt);
@@ -300,9 +337,12 @@ export class Engine {
         this.onPause?.();
         return;
       }
-      if (alive) {
+      if (alive && d.camping) {
+        // The wait button again, or B, wakes the player, as Arena's camp button does.
+        if (pad.take('Back') || pad.take('B')) d.stopCamping();
+      } else if (alive) {
         if (pad.take('Back')) {
-          this.openMap();
+          this.onWait?.();
           return;
         }
         const menu = pad.take('B') ? 'tween' : pad.take('Up') || pad.take('Down') ? 'favourites' : undefined;
@@ -348,13 +388,12 @@ export class Engine {
     }
     d.update(dt, { forward, strafe, sprint, sneaking: this.sneaking, block, attack });
     this.playEvents();
-    stepJump(this.jump, JUMP_APEX * d.level.height, JUMP_TIME, dt);
     const eye = d.outcome === 'dead' ? DEAD_EYE : this.sneaking ? SNEAK_EYE : EYE;
     this.eye += (eye - this.eye) * Math.min(1, dt * (d.outcome ? 3 : 10));
 
     for (const [index, door] of d.doors) {
-      const mesh = this.levelScene.doors.get(index)?.mesh;
-      if (mesh) mesh.position.y = door.open * d.level.height * 0.95;
+      const mesh = this.levelScene.doors.get(index);
+      if (mesh) poseDoor(mesh, door.open, d.level.height);
     }
     for (const item of d.items) {
       const sprite = this.levelScene.items[item.id];
@@ -364,8 +403,20 @@ export class Engine {
     const hud = this.options.hud;
     if (hud) {
       const s = d.stats;
-      hud.vitals({ health: s.health, maxHealth: s.maxHealth, stamina: s.stamina, maxStamina: s.maxStamina });
+      hud.vitals({ health: s.health, maxHealth: s.maxHealth, stamina: s.stamina, maxStamina: s.maxStamina, magicka: s.magicka, maxMagicka: s.maxMagicka });
+      const spell = d.readied;
+      const readiedKey = spell ? `${spell.index}:${d.spellCost(spell)}` : '';
+      if (readiedKey !== this.readiedKey) {
+        this.readiedKey = readiedKey;
+        hud.readied(spell && { name: spell.name, cost: d.spellCost(spell), colour: spellColour(spell) });
+      }
+      const effects = d.activeEffects();
+      if (effects.join('|') !== this.effectsKey) {
+        this.effectsKey = effects.join('|');
+        hud.effects(effects);
+      }
       hud.detection(d.sneaking ? d.detection() : undefined);
+      if (d.camping) hud.resting(d.campingText);
       this.showTarget();
     }
     if (this.diedAt !== undefined && !this.deathFaded && d.time - this.diedAt > DEATH_SCREEN - DEATH_FADE) {
@@ -374,7 +425,7 @@ export class Engine {
     }
     if (d.outcome === 'dead' && !this.deathShown && this.diedAt !== undefined && d.time - this.diedAt > DEATH_SCREEN) {
       this.deathShown = true;
-      this.onDeath?.();
+      this.onDeath?.(this.deathCause);
     }
     if (this.escapedAt !== undefined && d.time - this.escapedAt > ESCAPE_SCREEN) {
       this.escapedAt = undefined;
@@ -418,6 +469,16 @@ export class Engine {
           hud?.enemy(e.creature.info.name, e.creature.health, e.creature.maxHealth);
           this.rumble(110, 0.4, 0.2);
           break;
+        case 'cast':
+          hud?.cast(spellColour(e.spell));
+          this.rumble(70, 0.15, 0.35);
+          break;
+        case 'burst':
+          this.options.spells?.burst(e.spell, e.at.x, e.at.y, (d.player.z ?? 0) + this.eye * 0.85, e.radius);
+          break;
+        case 'noMagicka':
+          hud?.noMagicka();
+          break;
         case 'levelUp':
           hud?.banner(`Level ${e.level}`, 'Level up', `Health +${e.health} · Stamina +${e.stamina}`);
           break;
@@ -430,8 +491,22 @@ export class Engine {
         case 'cleared':
           hud?.banner(d.level.name, undefined, 'Cleared');
           break;
+        case 'camping':
+          hud?.resting(d.campingText);
+          break;
+        case 'camped':
+          hud?.resting(undefined);
+          if (e.text) hud?.message(e.text);
+          break;
+        case 'spawned':
+          void this.options.creatures?.add(e.creature);
+          break;
+        case 'dream':
+          this.onDream?.(e.visions);
+          break;
         case 'died':
           this.diedAt = d.time;
+          this.deathCause = e.cause;
           this.sneaking = false;
           break;
         case 'escaped':
@@ -474,10 +549,8 @@ export class Engine {
     const d = this.dungeon;
     const p = d.player;
     const h = d.level.height;
-    const cell = d.level.cells[cellIndex(d.level, p.x, p.y)];
-    let eye = this.eye * h + this.jump.height;
-    if (cell?.chasm === 'wet' || cell?.chasm === 'lava') eye -= 0.15 * h; // wading
-    eye = Math.max(0.05, Math.min(eye, h - 0.05));
+    // The eye rides on the feet: up on platforms and in jumps, down in water and pits.
+    const eye = Math.min((p.z ?? 0) + this.eye, h - 0.03);
     // Sprinting widens the view a little, as in Skyrim.
     const fov = FOV + (d.running ? SPRINT_FOV : 0);
     if (Math.abs(this.camera.fov - fov) > 0.01) {
@@ -491,6 +564,12 @@ export class Engine {
       b.rotation.y = Math.atan2(this.camera.position.x - b.position.x, this.camera.position.z - b.position.z);
     }
     this.options.creatures?.update(this.camera.position);
+    this.options.spells?.update(d.bolts, eye * 0.85, dt);
+    // A Light spell lets the player see further into the dark.
+    const fog = this.scene.fog as THREE.Fog;
+    const reach = d.lightReach;
+    fog.near += (FOG_NEAR * reach - fog.near) * Math.min(1, dt * 2);
+    fog.far += (FOG_FAR * reach - fog.far) * Math.min(1, dt * 2);
     const lowered = this.diedAt === undefined ? 0 : Math.min(1, (d.time - this.diedAt) / 0.8);
     this.options.weapon?.draw(d.stats.weapon.cif, { swing: d.swing, walked: d.walked, lowered, guard: d.blocking, dt });
     this.options.minimap?.draw();
@@ -541,7 +620,7 @@ export class Engine {
   }
 
   private startJump(): void {
-    if (startJump(this.jump, JUMP_APEX * this.dungeon.level.height, JUMP_TIME)) this.sneaking = false;
+    if (this.dungeon.jump()) this.sneaking = false;
   }
 
   private tilt(amount: number): void {
@@ -592,6 +671,10 @@ export class Engine {
     else if (e.code === 'Space') this.startJump();
     else if (e.code === 'KeyC') this.sneaking = !this.sneaking;
     else if (e.code === 'KeyM') this.openMap();
+    else if (e.code === 'KeyT') {
+      if (this.dungeon.camping) this.dungeon.stopCamping();
+      else this.onWait?.();
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
@@ -640,6 +723,8 @@ export class Engine {
   }
 
   private look(dx: number, dy: number): void {
+    // Arena doesn't let the player move or turn while camping.
+    if (this.dungeon.camping) return;
     const speed = MOUSE_SENSITIVITY * this.controls.lookSpeed;
     this.dungeon.player.yaw += dx * speed;
     this.tilt(-dy * speed);

@@ -43,7 +43,7 @@
         <p class="tip"><span data-glyph="move"></span><span>Move</span></p>
         <p class="tip"><span data-glyph="look"></span><span>Look</span></p>
         <p class="tip"><span data-glyph="attack"></span><span>Attack, hold to power attack</span></p>
-        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash</span></p>
+        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash, or cast the readied spell</span></p>
         <p class="tip"><span data-glyph="activate"></span><span>Use, take, open</span></p>
         <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
         <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
@@ -55,8 +55,13 @@
       <div id="corner">
         <div id="notes" role="status" aria-live="polite"></div>
       </div>
+      <div id="resting" hidden><p role="status" aria-live="polite"></p></div>
       <p id="message" role="status" aria-live="polite"></p>
+      <div id="hand" aria-hidden="true"></div>
+      <div id="spell-readied" hidden><span id="spell-name"></span><span id="spell-cost"></span></div>
+      <ul id="effects" aria-label="Spells on you" hidden></ul>
       <div id="vitals" aria-hidden="true">
+        <div class="bar" id="magicka" hidden><div class="bar-fill"></div></div>
         <div class="bar" id="health"><div class="bar-fill"></div></div>
         <div class="bar" id="stamina"><div class="bar-fill"></div></div>
       </div>
@@ -85,7 +90,6 @@
         <p class="logo-kicker">The Elder Scrolls</p>
         <h1>Arena</h1>
         <div class="rule" aria-hidden="true"></div>
-        <p class="logo-sub">An unofficial remake, played with your own copy of the game</p>
       </header>
 
       <section id="screen-folder" class="screen" aria-label="Choose your game folder">
@@ -96,7 +100,7 @@
             Choose ARENA folder…
             <input id="folder-input" type="file" webkitdirectory multiple hidden />
           </label>
-          <button class="option" data-screen="controls">Controls</button>
+          <button class="option" data-screen="controls">Settings</button>
           <button class="option quit" hidden>Quit</button>
         </nav>
         <div class="notes">
@@ -111,30 +115,20 @@
       </section>
 
       <section id="screen-play" class="screen" aria-label="Main menu" hidden>
-        <p id="who" class="who" hidden></p>
         <nav class="options">
           <button id="resume" class="option" hidden>Resume</button>
-          <button id="open-map" class="option" hidden>Map</button>
-          <button id="play" class="option">Enter the dungeon</button>
-          <button id="new-character" class="option" hidden>New character</button>
-          <div class="option-row">
-            <span class="row-label" id="map-label">Location</span>
-            <span class="row-value">
-              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
-              <select id="map-select" class="option" aria-labelledby="map-label"></select>
-              <span class="arrow" data-step="1" aria-hidden="true">›</span>
-            </span>
-          </div>
-          <button class="option" data-screen="controls">Controls</button>
-          <button id="change-folder" class="option">Change folder</button>
+          <button id="play" class="option" hidden>Continue</button>
+          <button id="new-character" class="option">New</button>
+          <button class="option" data-screen="controls">Settings</button>
+          <button id="to-main-menu" class="option" hidden>Main Menu</button>
           <button class="option quit" hidden>Quit</button>
         </nav>
       </section>
 
       <section id="screen-create" class="screen create" aria-label="Make your character" hidden></section>
 
-      <section id="screen-controls" class="screen" aria-label="Controls" hidden>
-        <h2>Controls</h2>
+      <section id="screen-controls" class="screen" aria-label="Settings" hidden>
+        <h2>Settings</h2>
         <div class="rule" aria-hidden="true"></div>
         <table class="bindings">
           <thead>
@@ -169,6 +163,23 @@
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
           </button>
+          <button class="option option-row" data-setting="music">
+            <span class="row-label">Music volume</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option option-row" data-setting="intro">
+            <span class="row-label">Opening cutscenes</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
           <button class="option option-row" data-setting="vibration">
             <span class="row-label">Vibration</span>
             <span class="row-value">
@@ -177,7 +188,28 @@
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
           </button>
+          <button id="change-folder" class="option">Change ARENA folder</button>
           <button class="option" data-back>Back</button>
+        </nav>
+      </section>
+
+      <section id="screen-wait" class="screen" aria-label="Wait" hidden>
+        <p class="wait-time" id="wait-time"></p>
+        <h2 id="wait-date">Wait</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <p class="notes" id="wait-question">How many hours will you rest?</p>
+        <nav class="options settings">
+          <button class="option option-row" data-setting="waitHours">
+            <span class="row-label">Hours</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button id="wait-hours" class="option">Rest</button>
+          <button id="wait-healed" class="option">Until healed</button>
         </nav>
       </section>
 
@@ -220,6 +252,15 @@
         <span class="hint" id="hint-back"><span data-glyph="back"></span><span id="hint-back-label">Back</span></span>
       </footer>
     </main>
+
+    <div id="cutscene" role="dialog" aria-label="Cutscene" hidden>
+      <canvas aria-hidden="true"></canvas>
+      <p class="cutscene-text" aria-live="polite"></p>
+      <footer class="hints cutscene-hints" aria-hidden="true">
+        <span class="hint"><span data-glyph="select"></span>Next</span>
+        <span class="hint"><span data-glyph="back"></span>Skip</span>
+      </footer>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

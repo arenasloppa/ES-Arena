@@ -1,3 +1,4 @@
+import { parseDfa } from '../formats/dfa';
 import * as THREE from 'three';
 import type { GameData } from '../data/files';
 import { parseCfa } from '../formats/cfa';
@@ -46,6 +47,19 @@ export class TextureCache {
   /** A sprite with transparency (palette index 0). */
   sprite(file: string): Promise<THREE.DataTexture | undefined> {
     return this.load(file, async () => toTexture(parseImg(await this.data.read(file)), this.palette, true, true));
+  }
+
+  /** Every frame of an animated decoration (DFA), with transparency; empty when it can't be read. */
+  spriteFrames(file: string): Promise<THREE.DataTexture[]> {
+    let p = this.animCache.get(file);
+    if (!p) {
+      p = (async () => parseDfa(await this.data.read(file)).map((img) => toTexture(img, this.palette, true, true)))().catch((err) => {
+        console.warn(`Could not load ${file}:`, err);
+        return [];
+      });
+      this.animCache.set(file, p);
+    }
+    return p;
   }
 
   /**

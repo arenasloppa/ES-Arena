@@ -1,29 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import type { CharacterTables, ClassInfo } from '../src/formats/classes';
 import {
-  AGILITY,
-  attributeBonus,
   classFromAnswers,
   creationData,
+  derivedAttributes,
+  AGILITY,
   ENDURANCE,
+  PERSONALITY,
+  STRENGTH,
   FALLBACK_CLASSES,
   fillText,
   forgetCharacter,
   heroFor,
-  INTELLIGENCE,
   loadCharacter,
-  LUCK,
-  PERSONALITY,
   pickQuestions,
   randomName,
   rollAttributes,
+  arenaRoll,
+  startingHealth,
+  to100,
+  to256,
   saveCharacter,
-  SPEED,
-  STRENGTH,
   WILLPOWER,
   type Character,
 } from '../src/game/character';
 import { always } from './helpers/level';
+
+/** Returns the numbers given in turn, then the last one over and over. */
+const sequence = (...values: number[]) => {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)];
+};
 
 /** Made-up classes and races: none of these values come from the game. */
 const TINKER: ClassInfo = { name: 'Tinker', healthDie: 9, experience: 800, spellcaster: false, critical: true, thief: true, armour: 1, shields: [0] };
@@ -70,40 +77,73 @@ describe('character creation', () => {
     expect(fillText('This is history', [], 'female')).toBe('This is history');
   });
 
-  it('rolls each attribute from 28 to 55, plus the race’s two gifts, and 17 to 35 bonus points', () => {
-    const low = rollAttributes(0, always(0));
-    expect(low.attributes).toEqual([28, 40, 28, 28, 28, 28, 40, 28]);
-    expect(low.bonus).toBe(17);
-    const high = rollAttributes(1, always(0.999));
-    expect(high.attributes[STRENGTH]).toBe(67);
-    expect(high.attributes[AGILITY]).toBe(67);
-    expect(high.attributes[INTELLIGENCE]).toBe(55);
-    expect(high.bonus).toBe(35);
-    expect(rollAttributes(0, always(0)).attributes[PERSONALITY]).toBe(40);
+  /** A random number that Arena's dice turn into the given whole number. */
+  const raw = (n: number) => (n + 0.5) / 0x10000;
+
+  it('rolls Arena’s dice: dice of six or five counting from 0, rolled again over the most', () => {
+    // 20 is four dice of 0 to 5; 25 five; 12 two of 0 to 6; up to 8 a plain 0 to n - 1.
+    expect(arenaRoll(20, always(0))).toBe(0);
+    expect(arenaRoll(20, always(raw(5)))).toBe(20);
+    expect(arenaRoll(25, always(raw(5)))).toBe(25);
+    expect(arenaRoll(12, always(raw(6)))).toBe(12);
+    expect(arenaRoll(6, always(raw(11)))).toBe(5);
+    // 14 is rounded up to 15, three dice of 0 to 5; over 14 rolls again.
+    const rolls = [raw(5), raw(5), raw(5), raw(1), raw(2), raw(3)];
+    expect(arenaRoll(14, () => rolls.shift() ?? 0)).toBe(6);
   });
 
-  it('counts a point of bonus for every full ten above or below 50', () => {
-    expect([50, 59, 60, 81, 41, 40, 25].map(attributeBonus)).toEqual([0, 0, 1, 3, 0, -1, -2]);
+  it('turns between the sheet’s hundred and Arena’s 256 as the game does', () => {
+    expect([0, 1, 4, 20, 21, 50].map(to256)).toEqual([0, 3, 10, 51, 54, 128]);
+    expect([77, 89, 102, 128, 182, 255].map(to100)).toEqual([30, 35, 40, 50, 71, 100]);
   });
 
-  it('works out what the character brings to a fight from the class and attributes', () => {
-    const hero = heroFor(CHARACTER, TINKER);
-    expect(hero).toMatchObject({ cls: TINKER, healthDie: 9, healthBonus: 1, experience: 800, damageBonus: 2, carry: 240 });
-    expect(hero.health).toBe(20 + 9 + 2);
-    expect(hero.stamina).toBe(70 + Math.round((62 + 55) * 0.3));
-    expect(hero.dodge).toBeCloseTo(0.06);
-    expect(hero.pace).toBeCloseTo(0.88 + 30 * 0.0024);
-    expect(hero.critical).toBeCloseTo(0.11);
-    expect(hero.lockpicking).toBeCloseTo(0.4);
-    expect(hero.fortune).toBeCloseTo(1.3);
-    const sage = heroFor({ ...CHARACTER, attributes: CHARACTER.attributes.map((v, i) => (i === WILLPOWER ? 90 : i === SPEED ? 50 : v)) }, SAGE);
-    expect(sage).toMatchObject({ critical: 0, lockpicking: 0 });
-    expect(sage.pace).toBeCloseTo(1);
+  it('starts from the race’s attributes for the gender, adding a roll of 20 and one more on Arena’s scale', () => {
+    // Made-up rows on Arena's scale: row 3 is race 1's women.
+    const table = Array.from({ length: 16 }, (_, r) => Array.from({ length: 8 }, (_, i) => 77 + r + i));
+    const low = rollAttributes(1, 'female', TINKER, always(0), table);
+    expect(low.attributes).toEqual(table[3].map((a) => to100(a + 3)));
+    expect(low).toMatchObject({ bonus: 0, gold: 50 });
+    // Every die at its most for the attributes (8 x 4) and bonus points (5), then the health roll at nothing.
+    const high = rollAttributes(0, 'male', TINKER, sequence(...new Array(37).fill(raw(5)), 0), table);
+    expect(high.attributes).toEqual(table[0].map((a) => to100(a + 54)));
+    expect(high.bonus).toBe(25);
+    // Without the game's table, the remake's own: 40 across the board, plus the roll.
+    expect(rollAttributes(0, 'male', TINKER, always(0)).attributes).toEqual(new Array(8).fill(41));
+  });
+
+  it('starts with 25 health plus the hit die and Endurance’s bonus, those at least 1', () => {
+    // Tinker's die of 9 is two dice of 0 to 5, rolled again over 9.
+    expect(startingHealth(TINKER, 0, sequence(raw(4), raw(4)))).toBe(25 + 8);
+    expect(startingHealth(TINKER, -2, always(0))).toBe(26);
+  });
+
+  it('works out the sheet’s numbers as the original shows them', () => {
+    // Pairs seen on the original's sheet: Strength 36 to 68 against damage, and so on.
+    const sheet = (a: Partial<Record<number, number>>) => derivedAttributes(Array.from({ length: 8 }, (_, i) => a[i] ?? 50));
+    expect([36, 38, 42, 43, 48, 54, 57, 58, 63, 68].map((v) => sheet({ [STRENGTH]: v }).damage)).toEqual([-2, -1, -1, 0, 0, 1, 1, 2, 3, 4]);
+    expect([35, 36, 40, 41, 45, 46, 55].map((v) => sheet({ [AGILITY]: v }).toHit)).toEqual([-3, -2, -2, -1, -1, 0, 1]);
+    expect([35, 41, 46].map((v) => sheet({ [WILLPOWER]: v }).magicDefence)).toEqual([-3, -1, 0]);
+    expect([37, 54, 55, 64, 65].map((v) => sheet({ [ENDURANCE]: v }).health)).toEqual([0, 0, 1, 1, 2]);
+    expect([45, 54, 55].map((v) => sheet({ [PERSONALITY]: v }).charisma)).toEqual([-1, 0, 1]);
+    expect(sheet({ [STRENGTH]: 71 }).maxKilos).toBe(142);
+  });
+
+  it('works out what the character brings to a fight from the class, attributes and what was rolled', () => {
+    const hero = heroFor({ ...CHARACTER, health: 31, gold: 120 }, TINKER);
+    expect(hero).toMatchObject({ cls: TINKER, health: 31, gold: 120, healthDie: 9, experience: 800, damageBonus: 4, carry: 140 });
+    // Fatigue is Strength plus Endurance.
+    expect(hero.stamina).toBe(70 + 62);
+    expect(hero.healthBonus).toBe(derivedAttributes(CHARACTER.attributes).health);
+    // Agility 65 is three steps, and Luck 81 six more of a smaller share.
+    expect(hero.dodge).toBeCloseTo(3 * 0.02 + 6 * 0.005);
+    // Arena's base speed for Speed 30: 20 + 76 * 20 / 256, against the remake's 30.
+    expect(hero.pace).toBeCloseTo(25 / 30);
+    expect(hero.critical).toBeCloseTo(0.14);
+    const sage = heroFor({ ...CHARACTER, attributes: CHARACTER.attributes.map((v, i) => (i === WILLPOWER ? 90 : v)) }, SAGE);
+    expect(sage).toMatchObject({ critical: 0, lockpicking: 0, gold: undefined });
     expect(sage.recovery).toBeCloseTo(1.16);
-    expect(heroFor({ ...CHARACTER, attributes: CHARACTER.attributes.map((v, i) => (i === ENDURANCE ? 20 : i === LUCK ? 10 : v)) }, TINKER)).toMatchObject({
-      health: 20 + 9 - 6,
-      healthBonus: -3,
-    });
+    // A character from before health was rolled gets the die's highest.
+    expect(heroFor(CHARACTER, TINKER).health).toBe(25 + 9);
   });
 
   it('picks the class the answers lead to, by the game’s table or else by the path most taken', () => {

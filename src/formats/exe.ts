@@ -27,8 +27,10 @@
  *
  * The character tables (classes, races, creation texts) are in classes.ts.
  */
+import { readCalendar, type Calendar } from './calendar';
 import { readCharacterTables, type CharacterTables } from './classes';
 import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
+import { readMessages, type GameMessages } from './messages';
 
 export { ExeLayoutError };
 
@@ -66,10 +68,37 @@ export interface WeaponInfo {
   price?: number;
 }
 
+/**
+ * The raised platforms of dungeons (interiors), in Arena units: the eight
+ * heights a platform's bottom can sit at, and the sixteen thicknesses it
+ * can have. A MAP1 platform's high byte picks one of each (bits 0-2 and
+ * 3-6). Read from the fixed places OpenTESArena found them at in each
+ * version of the program ([RaisedPlatforms] in its exe offset lists).
+ */
+export interface RaisedPlatforms {
+  heights: number[];
+  thicknesses: number[];
+}
+
 export interface ExeData {
   /** Indexed like the levels' creature items: *ITEM 32 is creatures[0]. */
   creatures: CreatureInfo[];
   weapons: WeaponInfo[];
+  /** Missing when the program is laid out differently from the two versions known. */
+  platforms?: RaisedPlatforms;
+  /** The game's own messages (drowning, camping and the like). */
+  messages?: GameMessages;
+  /**
+   * Each race's starting attributes on Arena's scale of 0 to 255, for men
+   * (row race * 2) and women (race * 2 + 1), in the attributes' order.
+   * Missing when the program is laid out differently from the two versions
+   * known.
+   */
+  raceAttributes?: number[][];
+  /** The months, weekdays and words for dates and times; missing when they can't be found. */
+  calendar?: Calendar;
+  /** What turns up when monsters come upon the player (resting, for one); missing as above. */
+  encounters?: EncounterTables;
   /** Classes, races and the words of character creation; missing when they could not be read. */
   character?: CharacterTables;
 }
@@ -80,7 +109,7 @@ const TABLE_ENTRIES = 24;
 const WEAPONS = 18;
 
 export function readExeData(image: Uint8Array): ExeData {
-  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image) };
+  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image), raceAttributes: readRaceAttributes(image), encounters: readEncounters(image), calendar: readCalendar(image) };
   try {
     data.character = readCharacterTables(image);
   } catch (err) {
@@ -89,6 +118,68 @@ export function readExeData(image: Uint8Array): ExeData {
     console.warn('Could not read the class tables:', err.message);
   }
   return data;
+}
+
+/** Where each version keeps the platform tables, found by a string that sits at a known place in it. */
+const VERSIONS = [
+  { name: 'CD', anchor: 0x3f508, platforms: 0x48594, raceAttributes: 0x361c3, chances: 0x42210, table: 0x36cbe, indices: 0x36818 },
+  { name: 'floppy', anchor: 0x3f1cc, platforms: 0x48206, raceAttributes: 0x35fc3, chances: 0x41e6e, table: 0x36abe, indices: 0x36618 },
+];
+
+function version(image: Uint8Array) {
+  return VERSIONS.find((v) => cString(image, v.anchor) === 'exp_ab.cfa');
+}
+
+/**
+ * Arena's random encounters, as OpenTESArena lists them ([Entities]
+ * EnemyEncounterChances, EnemyEncounterTable, EnemyEncounterTableIndices).
+ */
+export interface EncounterTables {
+  /** Percent chance an hour (or a minute, in towns) of an encounter, by place: 0 city, 1 wilderness, 2 main quest dungeon, 3 other dungeon, 4 building; +5 while resting. */
+  chances: number[];
+  /** Each encounter: how many, which (1 to 23 a creature in the game's order, 24 on a human of class n - 24) and the humans' level. */
+  table: Array<{ count: number; id: number; level: number }>;
+  /** For each of 14 kinds of place, the encounter level of each entry in `table` there (0 for none). */
+  levels: number[][];
+}
+
+const ENCOUNTERS = 85;
+
+export function readEncounters(image: Uint8Array): EncounterTables | undefined {
+  const v = version(image);
+  if (!v || v.indices + 14 * ENCOUNTERS > image.length || v.chances + 13 > image.length) return undefined;
+  const chances = Array.from(image.subarray(v.chances, v.chances + 13));
+  const table = Array.from({ length: ENCOUNTERS }, (_, i) => {
+    const at = v.table + i * 3;
+    return { count: image[at], id: image[at + 1], level: image[at + 2] };
+  });
+  const levels = Array.from({ length: 14 }, (_, r) => Array.from(image.subarray(v.indices + r * ENCOUNTERS, v.indices + (r + 1) * ENCOUNTERS)));
+  const plausible = chances.every((c) => c <= 100) && table.every((e) => e.count >= 1 && e.count <= 4 && e.id >= 1 && e.id < 64) && levels.every((row) => row.every((l) => l <= 30));
+  return plausible ? { chances, table, levels } : undefined;
+}
+
+/**
+ * The race attribute table ([Entities] RaceAttributes in OpenTESArena's
+ * lists): 16 rows of 8 bytes on Arena's scale of 0 to 255.
+ */
+export function readRaceAttributes(image: Uint8Array): number[][] | undefined {
+  const v = version(image);
+  if (!v || v.raceAttributes + 128 > image.length) return undefined;
+  const rows = Array.from({ length: 16 }, (_, r) => Array.from(image.subarray(v.raceAttributes + r * 8, v.raceAttributes + r * 8 + 8)));
+  return rows.every((row) => row.every((a) => a >= 25 && a <= 230)) ? rows : undefined;
+}
+
+export function readRaisedPlatforms(image: Uint8Array): RaisedPlatforms | undefined {
+  const v = version(image);
+  if (!v || v.platforms + 56 * 2 > image.length) return undefined;
+  const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
+  const u16 = (i: number) => view.getUint16(v.platforms + i * 2, true);
+  const heights = Array.from({ length: 8 }, (_, i) => u16(i));
+  const thicknesses = Array.from({ length: 16 }, (_, i) => u16(24 + i));
+  // Both rise from the floor; anything else means the table isn't where it was expected.
+  const rising = (a: number[]) => a.every((v, i) => i === 0 || v > a[i - 1]);
+  if (heights[0] !== 0 || !rising(heights) || !rising(thicknesses) || thicknesses[15] > 1000) return undefined;
+  return { heights, thicknesses };
 }
 
 export function readCreatures(image: Uint8Array): CreatureInfo[] {

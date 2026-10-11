@@ -16,15 +16,19 @@ import {
   type FileSource,
 } from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
+import { MusicPlayer, SONGS } from './audio/music';
 import { SoundBank } from './audio/sound';
 import { parseClassAnswers, parseNameChunks, parseQuestions, type ClassChooser, type Question } from './formats/creation';
 import { readExeData, type ExeData } from './formats/exe';
+import { parseSpells, type SpellRecord } from './formats/spells';
+import { parseTemplates } from './formats/template';
+import { FALLBACK_CALENDAR, formatDate, formatTime as formatClock } from './formats/calendar';
 import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
 import { creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
-import { Dungeon } from './game/dungeon';
+import { Dungeon, type Vision } from './game/dungeon';
 import { buildLevel } from './game/level';
 import { Engine, type GameMenu } from './game/engine';
 import { GamepadInput } from './input/gamepad';
@@ -34,12 +38,14 @@ import { buildLevelScene } from './render/levelScene';
 import { MapView } from './render/mapView';
 import { Portraits } from './render/portrait';
 import { WeaponView } from './render/weaponView';
+import { SpellView } from './render/spellView';
 import { backdropLevel } from './render/backdrop';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { CharacterCreation } from './ui/creation';
+import { Cutscenes, deathVision, dreamVisions, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
 import { GameMenus } from './ui/gameMenus';
 import { Hud } from './ui/hud';
-import { MenuNav } from './ui/menu';
+import { MenuNav, type StepEvent } from './ui/menu';
 import { Minimap } from './ui/minimap';
 import { bindSettingRows, loadSettings } from './ui/settings';
 
@@ -49,16 +55,16 @@ const hudEl = $('hud');
 const status = $('status');
 const checks = $<HTMLUListElement>('checks');
 const folderError = $('folder-error');
-const mapSelect = $<HTMLSelectElement>('map-select');
 const playButton = $<HTMLButtonElement>('play');
 const newCharacterButton = $<HTMLButtonElement>('new-character');
-const who = $('who');
 const resumeButton = $<HTMLButtonElement>('resume');
-const mapButton = $<HTMLButtonElement>('open-map');
+const mainMenuButton = $<HTMLButtonElement>('to-main-menu');
 const mapScreen = $('map-screen');
 const canvas = $<HTMLCanvasElement>('view');
 
+/** Arena begins in the Imperial Dungeons. Development builds can start elsewhere with ?map=NAME.MIF. */
 const DEFAULT_MAP = 'START.MIF';
+const startMapName = () => (import.meta.env.DEV && new URLSearchParams(location.search).get('map')?.toUpperCase()) || DEFAULT_MAP;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const pad = new GamepadInput();
@@ -68,7 +74,13 @@ const settings = loadSettings();
 let data: GameData | undefined;
 /** Creature and weapon tables from the game's program, once read; null when they could not be. */
 let tables: ExeData | null | undefined;
+/** The game's spells; undefined until first needed. */
+let spells: SpellRecord[] | undefined;
 let sounds: SoundBank | undefined;
+/** Arena's music, played on an emulated AdLib with the game's own instruments. */
+let music: MusicPlayer | undefined;
+/** The opening plays once a visit, when the folder is first opened. */
+let openingShown = false;
 /** The paper doll and item pictures, read from the game folder. */
 let portraits: Portraits | undefined;
 /** Classes, races, questions and words for making a character, once read from the game folder. */
@@ -88,18 +100,36 @@ const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'create' | 'controls' | 'dead' | 'escaped';
+type Screen = 'folder' | 'play' | 'create' | 'controls' | 'wait' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
   create: $('screen-create'),
   controls: $('screen-controls'),
+  wait: $('screen-wait'),
   dead: $('screen-dead'),
   escaped: $('screen-escaped'),
 };
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
 const creator = new CharacterCreation(screens.create);
+const cutscenes = new Cutscenes($('cutscene'), pad, () => data, () => sounds);
+input.onChange(() => input.render($('cutscene')));
+input.render($('cutscene'));
+
+/** Plays cutscenes over everything, with a song; the menu's focus comes back after. */
+async function showCutscene(shots: Parameters<Cutscenes['play']>[0], song?: string) {
+  if (song) music?.play(song);
+  await cutscenes.play(shots);
+  nav.focusFirst();
+}
+
+/** The character's first name, as the game's texts address them. */
+const firstName = (c: Character) => c.name.trim().split(/\s+/)[0] ?? c.name;
+if (import.meta.env.DEV) {
+  (window as unknown as { arenaVision?: (name: string, death?: boolean) => Promise<void> }).arenaVision = (name, death) =>
+    showCutscene(death ? deathVision(name) : firstVision(name), SONGS.vision);
+}
 
 const nav = new MenuNav(menu, pad, input, {
   back: () => {
@@ -117,6 +147,8 @@ function showScreen(next: Screen) {
   screen = next;
   for (const [name, el] of Object.entries(screens)) el.hidden = name !== next;
   menu.dataset.screen = next;
+  // The main menu's song, unless a map is being played (its music carries on under the pause menu) or a character is being made.
+  if (!playing() && next !== 'create') music?.play(SONGS.menu);
   updateHints();
   nav.focusFirst();
 }
@@ -124,22 +156,22 @@ function showScreen(next: Screen) {
 /** The button hints along the bottom: Back steps back through character creation, closes the Controls screen, or returns to the game. */
 function updateHints() {
   $('hint-back').hidden = screen !== 'controls' && screen !== 'create' && !playing();
-  $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : 'Resume';
-  $('hint-change').hidden = screen !== 'play' && screen !== 'controls' && screen !== 'create';
+  $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
+  $('hint-change').hidden = screen !== 'controls' && screen !== 'create' && screen !== 'wait';
 }
 
+/**
+ * The main menu as Skyrim's: Continue (with the character made last time)
+ * and New on the title screen; Resume and Main Menu over a game.
+ */
 function updatePlayOptions() {
-  resumeButton.hidden = !playing();
-  mapButton.hidden = !playing();
-  playButton.textContent = playing() && mapSelect.value === engineMap ? 'Start over' : 'Enter the dungeon';
+  const inGame = playing();
   const saved = creationLoaded && loadCharacter(creationLoaded);
-  newCharacterButton.hidden = !saved;
-  who.hidden = !saved;
-  if (saved && creationLoaded) {
-    const race = creationLoaded.races[saved.race]?.name ?? '';
-    const cls = creationLoaded.classes[saved.cls]?.name ?? '';
-    who.textContent = `${saved.name}, ${race} ${cls}`;
-  }
+  resumeButton.hidden = !inGame;
+  mainMenuButton.hidden = !inGame;
+  playButton.hidden = inGame || !saved;
+  newCharacterButton.hidden = inGame;
+  $('change-folder').hidden = !data;
   updateHints();
 }
 
@@ -190,8 +222,11 @@ function setStatus(text: string) {
   status.textContent = text;
 }
 
-/** QUESTION.TXT, CLASSES.DAT and NAMECHNK.DAT; any that are missing or unreadable are left out. */
-async function readCreationFiles(game: GameData): Promise<{ questions?: Question[]; chooser?: ClassChooser; names?: string[][] }> {
+/** Where each race's description is in TEMPLATE.DAT, in the races' order (as OpenTESArena has them). */
+const RACE_LORE = [1409, 1410, 1411, 1412, 1413, 1414, 1415, 1416];
+
+/** QUESTION.TXT, CLASSES.DAT, NAMECHNK.DAT and the races' descriptions in TEMPLATE.DAT; any that are missing or unreadable are left out. */
+async function readCreationFiles(game: GameData): Promise<{ questions?: Question[]; chooser?: ClassChooser; names?: string[][]; raceLore?: string[] }> {
   const read = async <T>(name: string, parse: (bytes: Uint8Array) => T): Promise<T | undefined> => {
     if (!game.has(name)) return undefined;
     try {
@@ -205,6 +240,11 @@ async function readCreationFiles(game: GameData): Promise<{ questions?: Question
     questions: await read('QUESTION.TXT', (bytes) => parseQuestions(new TextDecoder('latin1').decode(bytes))),
     chooser: await read('CLASSES.DAT', parseClassAnswers),
     names: await read('NAMECHNK.DAT', parseNameChunks),
+    raceLore: await read('TEMPLATE.DAT', (bytes) => {
+      const templates = parseTemplates(new TextDecoder('latin1').decode(bytes));
+      const lore = RACE_LORE.map((n) => templates.get(String(n)));
+      return lore.every((t) => t) ? (lore as string[]) : undefined;
+    }),
   };
 }
 
@@ -214,7 +254,7 @@ async function creationFor(): Promise<CreationData | undefined> {
   if (!game) return undefined;
   creation ??= (async () => {
     if (tables === undefined) tables = await loadTables(game);
-    return creationData(tables?.character, await readCreationFiles(game));
+    return creationData(tables?.character, await readCreationFiles(game), { raceAttributes: tables?.raceAttributes, messages: tables?.messages });
   })();
   const loaded = await creation;
   if (data !== game) return undefined; // another folder was chosen meanwhile
@@ -231,18 +271,25 @@ async function enterDungeon(name: string) {
   else await createCharacter(name);
 }
 
-/** Opens character creation; the new character then plays the map. */
+/**
+ * Opens character creation, after the story of how the Emperor was betrayed,
+ * as a new game does in Arena; the new character then has Ria Silmane's
+ * vision and plays the map.
+ */
 async function createCharacter(map: string) {
   const made = await creationFor();
   if (!made) return;
+  await showCutscene(NEW_GAME, SONGS.story);
   showScreen('create');
+  music?.play(SONGS.creation);
   creator.start({
     data: made,
     weapons: tables?.weapons ?? [],
     portraits,
     finish: 'Enter the dungeon',
-    done: (character) => {
+    done: async (character) => {
       saveCharacter(character, made.classes[character.cls]);
+      await showCutscene(firstVision(firstName(character)), SONGS.vision);
       void startMap(map, character);
     },
     cancel: () => showScreen('play'),
@@ -274,6 +321,16 @@ async function loadTables(game: GameData): Promise<ExeData | null> {
   return null;
 }
 
+/** The game's spells, from SPELLSG.65; none when it can't be read, and then nobody casts. */
+async function loadSpells(game: GameData): Promise<SpellRecord[]> {
+  try {
+    return parseSpells(await game.read('SPELLSG.65'));
+  } catch (err) {
+    console.warn('Could not read the spells from SPELLSG.65:', err);
+    return [];
+  }
+}
+
 async function startMap(name: string, character: Character) {
   if (!data || !creationLoaded) return;
   const made = creationLoaded;
@@ -286,15 +343,17 @@ async function startMap(name: string, character: Character) {
     const levelIndex = Math.min(mif.startingLevelIndex, mif.levels.length - 1);
     const infName = mif.levels[levelIndex].info;
     const inf = parseInf(await data.read(infName));
-    const level = buildLevel(mif, levelIndex, inf);
+    if (tables === undefined) tables = await loadTables(data);
+    const level = buildLevel(mif, levelIndex, inf, tables?.platforms);
     // Arena's first dungeon, under the Imperial Palace.
     if (name === DEFAULT_MAP) level.name = 'Imperial Dungeons';
     const palette = parseCol(await data.read('PAL.COL'));
     if (tables === undefined) tables = await loadTables(data);
+    if (spells === undefined) spells = await loadSpells(data);
     const cache = new TextureCache(data, palette);
-    const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]));
+    const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
     const scene = await buildLevelScene(level, cache);
-    const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem));
+    const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem), level);
     const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => cache.screenImages(file));
     await weapon.use(dungeon.stats.weapon.cif);
     weapon.useBlood(await cache.screenAnimation('BLOODEXP.CFA'));
@@ -307,10 +366,13 @@ async function startMap(name: string, character: Character) {
       sounds,
       map: new MapView(dungeon, scene.material, $('map-north')),
       minimap: new Minimap($<HTMLCanvasElement>('minimap'), dungeon),
+      spells: new SpellView(),
     });
     next.onPause = pause;
     next.onMenu = openGameMenu;
     next.onDeath = died;
+    next.onWait = openWait;
+    next.onDream = (visions) => void dream(visions);
     next.onEscape = escaped;
     next.onMap = (open) => {
       mapScreen.hidden = !open;
@@ -318,13 +380,14 @@ async function startMap(name: string, character: Character) {
     };
     setEngine(next, name);
     runCharacter = character;
+    music?.play(SONGS.dungeons);
     textures = cache;
     $('map-name').textContent = level.name || name;
     if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
     if (scene.skippedFlats.length) {
-      console.info(`Not drawn yet (animated sprites): ${[...new Set(scene.skippedFlats)].join(', ')}`);
+      console.warn(`Could not draw: ${[...new Set(scene.skippedFlats)].join(', ')}`);
     }
-    setStatus(`${level.name || name} · ${level.width}×${level.depth}`);
+    setStatus('');
     if (!tables && level.creatures.length) {
       hud.notify('The monsters could not be read from the game program, so this dungeon is empty');
     }
@@ -399,20 +462,70 @@ function showMenu(next: Screen) {
 
 function pause() {
   showMenu('play');
-  const d = engine?.dungeon;
-  if (d && playing()) {
-    const s = d.stats;
-    const potions = s.potions === 1 ? '1 healing potion' : `${s.potions} healing potions`;
-    const goal = d.objective ? `\n${d.quest!.name}: ${d.objective.text}` : '';
-    setStatus(`${d.level.name || engineMap} · Level ${s.level} · ${s.weapon.name} · ${potions} · ${s.gold} gold${goal}`);
-  }
 }
 
-function died() {
-  const d = engine!.dungeon;
-  $('dead-notes').textContent = d.kills
-    ? `You fell after ${d.kills === 1 ? 'one kill' : `${d.kills} kills`}, ${formatTime(d.time)} into the dungeon.`
-    : `You fell ${formatTime(d.time)} into the dungeon.`;
+// ---- Waiting, as Skyrim's wait menu, with Arena's camping ----
+
+const HOURS_MAX = 24;
+let waitHours = 8;
+const waitRow = screens.wait.querySelector<HTMLElement>('[data-setting="waitHours"]')!;
+
+function showWaitHours() {
+  waitRow.querySelector('.value')!.textContent = String(waitHours);
+  waitRow.style.setProperty('--fill', String(waitHours / HOURS_MAX));
+  waitRow.setAttribute('aria-valuetext', `${waitHours} hours`);
+}
+waitRow.addEventListener('step', (e) => {
+  const { delta, wrap } = (e as StepEvent).detail;
+  waitHours = wrap && waitHours + delta > HOURS_MAX ? 1 : Math.min(HOURS_MAX, Math.max(1, waitHours + delta));
+  showWaitHours();
+});
+waitRow.addEventListener('click', () => {
+  waitHours = waitHours >= HOURS_MAX ? 1 : waitHours + 1;
+  showWaitHours();
+});
+
+/** T or View: Skyrim's wait menu, in Arena's words when the game's can be read. */
+function openWait() {
+  if (!engine || !playing()) return;
+  const m = tables?.messages ?? {};
+  // Skyrim's wait menu leads with the time and date; these are Arena's.
+  const calendar = tables?.calendar ?? FALLBACK_CALENDAR;
+  $('wait-time').textContent = formatClock(engine.dungeon.minutes, calendar);
+  $('wait-date').textContent = formatDate(engine.dungeon.minutes, calendar);
+  $('wait-question').textContent = m.hoursToRest ?? 'How many hours will you rest?';
+  $('wait-hours').textContent = m.restForHours ?? 'Rest';
+  $('wait-healed').textContent = m.restUntilHealed ?? 'Until healed';
+  showWaitHours();
+  showMenu('wait');
+}
+
+/** Starts camping, or says why not, back in the game. */
+function camp(hours: number | 'healed') {
+  if (!engine || !playing()) return;
+  const refusal = engine.dungeon.camp(hours);
+  resume();
+  if (refusal) hud.message(refusal);
+}
+$('wait-hours').addEventListener('click', () => camp(waitHours));
+$('wait-healed').addEventListener('click', () => camp('healed'));
+
+/** Ria comes to the sleeping player: her visions play, then the rest goes on. */
+async function dream(visions: Vision[]) {
+  if (!engine || !runCharacter) return;
+  engine.pause();
+  if (document.pointerLockElement) document.exitPointerLock();
+  hudEl.hidden = true;
+  await showCutscene(dreamVisions(visions, firstName(runCharacter)), SONGS.vision);
+  music?.play(SONGS.dungeons);
+  menu.hidden = true;
+  resume();
+}
+
+/** The game's words for how the player died (drowning and the like) show first, then Ria Silmane's farewell, as in Arena. */
+async function died(cause?: string) {
+  $('dead-notes').textContent = cause ?? '';
+  if (runCharacter) await showCutscene(deathVision(firstName(runCharacter)), SONGS.vision);
   showMenu('dead');
 }
 
@@ -458,7 +571,8 @@ let padWasConnected = false;
 function uiFrame(now: number) {
   pad.poll(now);
   input.update(pad);
-  if (!menu.hidden) nav.frame(now);
+  if (cutscenes.isPlaying) cutscenes.frame();
+  else if (!menu.hidden) nav.frame(now);
   else if (gameMenus.isOpen) gameMenus.frame(now);
   // Like Skyrim, pause if the controller goes away mid-game.
   else if (padWasConnected && !pad.connected && playing()) pause();
@@ -500,32 +614,34 @@ async function useSource(source: FileSource): Promise<boolean> {
   try {
     data = await GameData.open(source);
     tables = undefined;
+    spells = undefined;
     creation = undefined;
     creationLoaded = undefined;
     portraits = new Portraits(data);
     sounds = new SoundBank(data);
     sounds.setVolume(settings.volume);
     sounds.wake();
+    music?.play(undefined);
+    music = new MusicPlayer(data);
+    music.setVolume(settings.music);
+    music.wake();
+    if (import.meta.env.DEV) (window as unknown as { arenaMusic?: MusicPlayer }).arenaMusic = music;
   } catch (err) {
     folderError.textContent = `Could not read the game data: ${(err as Error).message}`;
     folderError.hidden = false;
     setStatus('');
     return false;
   }
-  const maps = data.mapNames();
-  mapSelect.replaceChildren(
-    ...maps.map((m) => {
-      const o = document.createElement('option');
-      o.value = o.textContent = m;
-      if (m === DEFAULT_MAP) o.selected = true;
-      return o;
-    }),
-  );
   updatePlayOptions();
   showScreen('play');
-  setStatus(`Found ${data.bsa.entries.length} files in GLOBAL.BSA.`);
+  setStatus('');
   // Read the classes now, to say who plays and to have character creation ready.
   void creationFor().then(updatePlayOptions);
+  music.play(SONGS.menu);
+  if (settings.intro && !openingShown) {
+    openingShown = true;
+    await showCutscene(OPENING);
+  }
   return true;
 }
 
@@ -614,6 +730,7 @@ folderInput.addEventListener('change', async () => {
 });
 
 $('change-folder').addEventListener('click', () => {
+  music?.play(undefined);
   setEngine(undefined);
   void showBackdrop();
   data = undefined;
@@ -633,20 +750,33 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-back]')) {
 }
 
 resumeButton.addEventListener('click', resume);
-mapButton.addEventListener('click', openMap);
-playButton.addEventListener('click', () => enterDungeon(mapSelect.value));
-newCharacterButton.addEventListener('click', () => createCharacter(mapSelect.value));
+playButton.addEventListener('click', () => enterDungeon(startMapName()));
+newCharacterButton.addEventListener('click', () => createCharacter(startMapName()));
+mainMenuButton.addEventListener('click', () => {
+  // Leave the game for the title screen, as Skyrim's Quit to Main Menu does.
+  setEngine(undefined);
+  void showBackdrop();
+  updatePlayOptions();
+  showScreen('play');
+});
 $('try-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
 $('play-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
-mapSelect.addEventListener('change', updatePlayOptions);
-// Choosing the map list itself (A on a controller, or Enter) plays the map picked in it.
-mapSelect.addEventListener('choose', () => enterDungeon(mapSelect.value));
 
 bindSettingRows(screens.controls, settings, (key) => {
   if (key === 'volume') sounds?.setVolume(settings.volume);
+  if (key === 'music') music?.setVolume(settings.music);
 });
 // Browsers start sound only after a click or key press.
-for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, () => sounds?.wake(), true);
+for (const type of ['pointerdown', 'keydown']) {
+  window.addEventListener(
+    type,
+    () => {
+      sounds?.wake();
+      music?.wake();
+    },
+    true,
+  );
+}
 fillBindings();
 showScreen('folder');
 void showBackdrop();

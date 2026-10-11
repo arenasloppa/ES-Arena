@@ -135,7 +135,7 @@ export function backdropLevel(): { level: Level; textures: TextureProvider } {
       } else if (edge || pillar) {
         cell.kind = 'wall';
       } else if (y === 2 && x >= 5 && x <= 7) {
-        Object.assign(cell, { kind: 'raised', raisedHeight: 0.22, capTex: 0, capIsWall: false });
+        Object.assign(cell, { kind: 'raised', raisedBottom: 0, raisedTop: 0.22, capTex: 0, capIsWall: false });
       } else if (y >= 10 && x >= 2 && x <= 10) {
         cell.chasm = 'wet';
       }

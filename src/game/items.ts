@@ -92,12 +92,13 @@ export type Slot = 'weapon' | 'shield' | `armour${number}`;
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
-export function makeWeapon(weapons: WeaponInfo[], type: number, material: number): NewItem {
+/** A weapon of the material; a plain one (as the player starts with) has no material in its name. */
+export function makeWeapon(weapons: WeaponInfo[], type: number, material: number, plain = false): NewItem {
   const info = weapons[type];
   const m = MATERIALS[material];
   return {
     kind: 'weapon',
-    name: `${m.name} ${info.name}`,
+    name: plain ? info.name : `${m.name} ${info.name}`,
     type,
     material,
     damage: [info.damage[0], Math.max(info.damage[0], Math.round(info.damage[1] * m.quality))],
@@ -178,17 +179,24 @@ export function randomGear(weapons: WeaponInfo[], level: number, random: Random)
   return makeShield(Math.floor(random() * SHIELDS.length), material);
 }
 
+/** Places in the game's weapon list. */
+const DAGGER = 1;
+const SHORTSWORD = 2;
+const BROADSWORD = 3;
+
 /**
- * What a class starts with: a weapon it may use (a shortsword when it can)
- * and, if it may wear any, a cuirass of the heaviest armour allowed.
+ * What a new character carries, as in Arena (its giveWeapon, and the
+ * original's own inventory at the start): one plain weapon by the class's
+ * place in the list (a dagger for the first six, a shortsword for the next
+ * six, a broadsword for the rest) and nothing else. A class without its place
+ * (the remake's own) gets the first of those it may use.
  */
 export function startingGear(weapons: WeaponInfo[], cls?: ClassInfo): NewItem[] {
-  const usable = usableWeapons(weapons).filter((i) => !cls?.weapons || cls.weapons.includes(i));
-  const choice = [2, 11, 1, 0].find((i) => usable.includes(i)) ?? usable[0];
-  const gear: NewItem[] = [];
-  if (choice !== undefined) gear.push(makeWeapon(weapons, choice, STEEL));
-  if (cls && cls.armour < 3) gear.push(makeArmour(cls.armour, 0, IRON));
-  return gear;
+  const usable = usableWeapons(weapons);
+  let choice: number | undefined;
+  if (cls?.id !== undefined) choice = cls.id >= 12 ? BROADSWORD : cls.id >= 6 ? SHORTSWORD : DAGGER;
+  else choice = [SHORTSWORD, DAGGER, BROADSWORD].find((i) => usable.includes(i) && (!cls?.weapons || cls.weapons.includes(i))) ?? usable[0];
+  return choice !== undefined && weapons[choice] ? [makeWeapon(weapons, choice, STEEL, true)] : [];
 }
 
 /** The key the menus use for an entry: an item's, or the healing potions'. */

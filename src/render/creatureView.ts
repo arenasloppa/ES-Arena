@@ -7,6 +7,8 @@
 import * as THREE from 'three';
 import { creatureFrame, viewAngle, type Creature } from '../game/creatures';
 import type { CreatureSprite } from './textures';
+import { floorHeight, type Level } from '../game/level';
+import { cellIndex } from '../game/grid';
 import { liftFor, placeSprite } from './levelScene';
 
 /** Frames before the attack in each view file: six of walking, two of looking about. */
@@ -23,19 +25,27 @@ export class CreatureView {
   readonly group = new THREE.Group();
   private readonly actors: Actor[] = [];
 
+  private readonly plane = new THREE.PlaneGeometry(1, 1);
+  private load: (stem: string) => Promise<CreatureSprite | undefined> = async () => undefined;
+
+  private constructor(private readonly level?: Level) {}
+
   /** Creatures whose animations are missing are left out. */
-  static async create(creatures: Creature[], load: (stem: string) => Promise<CreatureSprite | undefined>): Promise<CreatureView> {
-    const view = new CreatureView();
-    const plane = new THREE.PlaneGeometry(1, 1);
-    for (const creature of creatures) {
-      const sprite = await load(creature.info.animation);
-      if (!sprite) continue;
-      const material = new THREE.MeshBasicMaterial({ map: sprite.views[0].frames[0], alphaTest: 0.5, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(plane, material);
-      view.group.add(mesh);
-      view.actors.push({ creature, sprite, mesh, material });
-    }
+  static async create(creatures: Creature[], load: (stem: string) => Promise<CreatureSprite | undefined>, level?: Level): Promise<CreatureView> {
+    const view = new CreatureView(level);
+    view.load = load;
+    for (const creature of creatures) await view.add(creature);
     return view;
+  }
+
+  /** Draws a creature from now on, such as one that came upon the player resting. */
+  async add(creature: Creature): Promise<void> {
+    const sprite = await this.load(creature.info.animation);
+    if (!sprite) return;
+    const material = new THREE.MeshBasicMaterial({ map: sprite.views[0].frames[0], alphaTest: 0.5, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(this.plane, material);
+    this.group.add(mesh);
+    this.actors.push({ creature, sprite, mesh, material });
   }
 
   /** Frees every animation frame, including those not on screen. */
@@ -59,7 +69,9 @@ export class CreatureView {
       const file = pose.death ? sprite.death : view;
       const map = file.frames[Math.min(pose.frame, file.frames.length - 1)];
       if (material.map !== map) material.map = map;
-      placeSprite(mesh, c.x, c.y, file.width, file.height, liftFor(-c.info.lift), angle.mirror && !pose.death);
+      // Up on a platform it has stepped onto.
+      const floor = this.level ? Math.max(0, floorHeight(this.level.cells[cellIndex(this.level, c.x, c.y)], this.level)) : 0;
+      placeSprite(mesh, c.x, c.y, file.width, file.height, floor + liftFor(-c.info.lift), angle.mirror && !pose.death);
       mesh.rotation.y = Math.atan2(eye.x - c.x, eye.z - c.y);
     }
   }

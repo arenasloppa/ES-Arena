@@ -1,11 +1,13 @@
 import * as THREE from 'three';
-import type { Level, LevelFlat } from '../game/level';
+import type { DoorKind, Level, LevelFlat } from '../game/level';
 import { buildLevelGeometry, type QuadBatch } from './levelGeometry';
 
 /** Where level textures come from: the player's game files (TextureCache) or the built-in backdrop. */
 export interface TextureProvider {
   tile(file: string, frame?: number): Promise<THREE.DataTexture | undefined>;
   sprite(file: string): Promise<THREE.DataTexture | undefined>;
+  /** Every frame of an animated decoration (DFA). */
+  spriteFrames?(file: string): Promise<THREE.DataTexture[]>;
   liquid(file: string): Promise<THREE.DataTexture[]>;
 }
 
@@ -14,6 +16,31 @@ export interface DoorMesh {
   /** 0 = closed, 1 = fully open. */
   openAmount: number;
   target: number;
+  /** How it opens, and toward which walls (see DoorGeometry). */
+  kind: DoorKind;
+  alongX: boolean;
+}
+
+/**
+ * Poses a door `open` (0 to 1) of the way open: raising doors go up into
+ * the ceiling, sliding ones sideways into the wall beside them, swinging
+ * ones turn on their corner into that wall.
+ */
+export function poseDoor(door: DoorMesh, open: number, roomHeight: number): void {
+  const m = door.mesh;
+  switch (door.kind) {
+    case 'raising':
+    case 'splitting':
+      m.position.y = open * roomHeight * 0.95;
+      break;
+    case 'sliding':
+      if (door.alongX) m.position.x = -open * 0.98;
+      else m.position.z = -open * 0.98;
+      break;
+    case 'swinging':
+      m.rotation.y = (door.alongX ? -1 : 1) * open * (Math.PI / 2);
+      break;
+  }
 }
 
 export interface LevelScene {
@@ -27,7 +54,7 @@ export interface LevelScene {
   material(key: string): Promise<THREE.Material>;
   /** Advances animated textures (water, lava). */
   animate(seconds: number): void;
-  /** Flats the remake cannot draw yet (animated DFA sprites). */
+  /** Flats that could not be drawn (missing or unreadable files). */
   skippedFlats: string[];
 }
 
@@ -102,24 +129,37 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
 
   const doors = new Map<number, DoorMesh>();
   for (const d of geo.doors) {
-    const mesh = new THREE.Mesh(toGeometry(d.batch), await material(d.key));
+    const geometry = toGeometry(d.batch);
+    const mesh = new THREE.Mesh(geometry, await material(d.key));
+    // A swinging door turns on its north-west corner, so its geometry is built around it.
+    if (d.kind === 'swinging') {
+      geometry.translate(-d.x, 0, -d.y);
+      mesh.position.set(d.x, 0, d.y);
+    }
     group.add(mesh);
-    doors.set(d.cellIndex, { mesh, openAmount: 0, target: 0 });
+    doors.set(d.cellIndex, { mesh, openAmount: 0, target: 0, kind: d.kind, alongX: d.alongX });
   }
 
   const skippedFlats: string[] = [];
   const billboards: THREE.Mesh[] = [];
   const plane = new THREE.PlaneGeometry(1, 1);
+  /** Animated decorations, and their frames: Arena plays them at 12 frames a second (OpenTESArena). */
+  const animatedFlats: Array<{ mat: THREE.MeshBasicMaterial; frames: THREE.DataTexture[] }> = [];
   const flatSprite = async (flat: LevelFlat): Promise<THREE.Mesh | undefined> => {
-    const tex = flat.name.endsWith('.IMG') ? await textures.sprite(flat.name) : undefined;
+    const frames = flat.name.endsWith('.DFA') ? ((await textures.spriteFrames?.(flat.name)) ?? []) : [];
+    const tex = flat.name.endsWith('.IMG') ? await textures.sprite(flat.name) : frames[0];
     if (!tex) {
       skippedFlats.push(flat.name);
       return undefined;
     }
     const img = tex.image as { width: number; height: number };
-    const sprite = new THREE.Mesh(plane, new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide }));
-    // Things hung from the ceiling may reach through it; the ceiling hides the rest.
-    placeSprite(sprite, flat.x, flat.y, img.width, img.height, (flat.base ?? 0) * level.height + liftFor(flat.yOffset));
+    const flatMaterial = new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide });
+    if (frames.length > 1) animatedFlats.push({ mat: flatMaterial, frames });
+    const sprite = new THREE.Mesh(plane, flatMaterial);
+    // Larger kinds (F:4 and F:64) are drawn at their scale; things hung from the ceiling (F:32) hang from it.
+    const scale = flat.scale ?? 1;
+    const bottom = flat.ceiling ? level.height - img.height * scale * PIXEL_HEIGHT : (flat.base ?? 0) + liftFor(flat.yOffset);
+    placeSprite(sprite, flat.x, flat.y, img.width * scale, img.height * scale, bottom);
     group.add(sprite);
     billboards.push(sprite);
     return sprite;
@@ -130,6 +170,7 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
 
   const animate = (seconds: number) => {
     for (const a of animated) a.mat.map = a.frames[Math.floor(seconds * 6) % a.frames.length];
+    for (const a of animatedFlats) a.mat.map = a.frames[Math.floor(seconds * 12) % a.frames.length];
   };
 
   return { group, doors, billboards, items, material, animate, skippedFlats };

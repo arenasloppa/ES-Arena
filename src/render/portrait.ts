@@ -104,6 +104,23 @@ export class Portraits {
     return (await this.picture({ file: 'TAMRIEL.MNU' }))?.image;
   }
 
+  /**
+   * The piece Arena draws over the map's Exit while a character is being made
+   * (NOEXIT.IMG), with where it goes. It has no colours of its own: it is
+   * drawn in the map's.
+   */
+  async noExit(): Promise<{ x: number; y: number; image: HTMLCanvasElement } | undefined> {
+    if (!this.data.has('NOEXIT.IMG') || !this.data.has('TAMRIEL.MNU')) return undefined;
+    try {
+      const [piece, map] = await Promise.all([this.data.read('NOEXIT.IMG'), this.data.read('TAMRIEL.MNU')]).then((files) => files.map(parseImg));
+      if (!map.palette) return undefined;
+      return { x: piece.xOffset, y: piece.yOffset, image: toCanvas(piece, parseCol(map.palette)) };
+    } catch (err) {
+      console.warn('Could not load NOEXIT.IMG:', err);
+      return undefined;
+    }
+  }
+
   private async picture(layer: Layer): Promise<Picture | undefined> {
     return (await this.load(layer.file))[layer.frame ?? 0];
   }

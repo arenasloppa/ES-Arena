@@ -1,15 +1,22 @@
 /**
  * Turns a parsed MIF level + its INF into a renderer-agnostic voxel level.
  *
- * MAP1 voxel encoding (per community docs / OpenTESArena):
+ * MAP1 voxel encoding (as OpenTESArena's MapGeneration.cpp reads it):
  *   0x0000               empty
  *   hi == lo, bit15 = 0  solid wall, texture hi
  *   hi != lo, bit15 = 0  raised platform: side = BOXSIDE[v & 0x0F],
- *                        cap = BOXCAP[(v >> 4) & 0x0F]
+ *                        top = BOXCAP[(v >> 4) & 0x0F], bottom the ceiling's
+ *                        texture; its bottom sits at heights[hi & 7] and it is
+ *                        thicknesses[(hi >> 3) & 15] thick (Arena units, from
+ *                        the game's program), times the INF's box scale / 256
  *   0x8xxx               flat (sprite), index v & 0xFF into @FLATS
- *   0x9xxx               transparent wall (bars), texture v & 0xFF
- *   0xAxxx               edge wall (fence), texture v & 0xFF
- *   0xBxxx               door, texture v & 0x3F
+ *   0x9xxx               see-through block (bars, arches), texture v & 0xFF;
+ *                        bit 0x0100 set means it can be walked through
+ *   0xAxxx               edge (fence): one face on the side (v >> 6) & 3
+ *                        names (north, west, south, east), texture v & 0x3F,
+ *                        raised ((v >> 9) & 7) * 8 units; solid with 0x0100
+ *   0xBxxx               door, texture v & 0x3F; (v >> 6) & 3 is how it opens:
+ *                        swinging, sliding, raising (or splitting)
  *   0xDxxx               diagonal wall, texture v & 0xFF
  * Wall texture numbers count the floor textures first: number n is wall
  * texture n - 1 - (number of floor textures, SET frames included).
@@ -26,11 +33,25 @@
  * higher rows), as do OpenTESArena's axes. Drawn as stored, the world would
  * be a mirror image, so the level is flipped east-west here: in a Level, +x
  * is east and +y is south.
+ *
+ * Heights: a voxel is 128 Arena units wide, and heights are in the same
+ * units drawn 1.2 times taller, as Arena's tall screen pixels showed them
+ * (ARENA_HEIGHT world units each). Rooms are the INF's *CEILING height
+ * tall, 100 units when it gives none; without a *CEILING texture the
+ * ceiling uses the first floor texture, as OpenTESArena does.
  */
+import type { RaisedPlatforms } from '../formats/exe';
 import type { MifFile, MifLevel } from '../formats/mif';
 import { expandTextures, roleTexture, type InfFile } from '../formats/inf';
 
-export type CellKind = 'empty' | 'wall' | 'door' | 'raised' | 'transparent' | 'diagonal';
+export type CellKind = 'empty' | 'wall' | 'door' | 'raised' | 'transparent' | 'diagonal' | 'edge';
+export type DoorKind = 'swinging' | 'sliding' | 'raising' | 'splitting';
+export type Side = 'north' | 'east' | 'south' | 'west';
+
+/** World units per Arena unit of height: 128 units across a voxel, and Arena's pixels 1.2 times taller than wide. */
+export const ARENA_HEIGHT = 1.2 / 128;
+/** Room height in Arena units when the INF doesn't say. */
+export const DEFAULT_CEILING_UNITS = 100;
 export type ChasmKind = 'dry' | 'wet' | 'lava';
 
 export interface Cell {
@@ -40,8 +61,9 @@ export interface Cell {
   /** Index into Level.floorTextures. */
   floorTex: number;
   chasm?: ChasmKind;
-  /** Raised platform top, as a fraction of the room height. */
-  raisedHeight?: number;
+  /** Raised platform: where it starts and ends above the floor, in world units. */
+  raisedBottom?: number;
+  raisedTop?: number;
   /** Raised platform cap texture: index into floorTextures or wallTextures, see capIsWall. */
   capTex?: number;
   capIsWall?: boolean;
@@ -49,6 +71,12 @@ export interface Cell {
   diagonalFlip?: boolean;
   /** A door you can see through (bars). */
   seeThrough?: boolean;
+  /** How a door opens. */
+  door?: DoorKind;
+  /** A see-through block (arch, bars) that can be walked through. */
+  passable?: boolean;
+  /** An edge (fence): the side its face is on, how far up it starts (world units), and whether it stops you. */
+  edge?: { side: Side; lift: number; solid: boolean };
   /** A wall that leads out of the level: the INF's LEVELUP (e.g. the Shift Gate) or LEVELDOWN. */
   exit?: 'up' | 'down';
 }
@@ -60,8 +88,15 @@ export interface LevelFlat {
   name: string;
   /** Vertical offset in Arena units from the INF (negative is up). */
   yOffset?: number;
-  /** Height of the floor it stands on, as a fraction of the room height (raised platforms). */
+  /** Height of the floor it stands on, in world units (raised platforms). */
   base?: number;
+  /** From the INF's F: and S: modifiers: it stops you, it is drawn larger, it hangs from the ceiling, the light it gives. */
+  solid?: boolean;
+  scale?: number;
+  ceiling?: boolean;
+  seeThrough?: boolean;
+  puddle?: boolean;
+  light?: number;
 }
 
 export type ItemKind = 'key' | 'corpse' | 'equipment' | 'treasure' | 'chest';
@@ -109,15 +144,38 @@ export interface Level {
   locks: Map<number, number>;
   triggers: LevelTrigger[];
   start: { x: number; y: number };
+  /** The sounds each kind of door makes, from the INF's sound list; missing ones are left silent. */
+  doorSounds?: Partial<Record<DoorKind, DoorSounds>>;
 }
 
+/**
+ * A door's sounds. A swinging door sounds as it opens and again once it has
+ * shut; the others make one sound opening and one as they start to close.
+ */
+export interface DoorSounds {
+  open?: string;
+  close?: string;
+  /** The close sound plays once shut rather than as it starts closing. */
+  closeWhenShut: boolean;
+}
+
+/**
+ * Where in an INF's sound list each door's sounds are (OpenTESArena's
+ * ArenaVoxelUtils): a swinging door opens with 6 and shuts with 5, a sliding
+ * one uses 14 both ways and a raising one 15.
+ */
+const DOOR_SOUND_INDICES: Partial<Record<DoorKind, [number, number]>> = { swinging: [6, 5], sliding: [14, 14], raising: [15, 15] };
+
 const CHASM_IDS: Record<number, ChasmKind> = { 0x0c: 'dry', 0x0d: 'wet', 0x0e: 'lava' };
-const DEFAULT_CEILING = 100;
 const ITEM_KINDS: Record<number, ItemKind> = { 1: 'key', 2: 'corpse', 3: 'equipment', 4: 'treasure', 5: 'treasure', 6: 'treasure', 7: 'chest', 8: 'chest' };
 /** "*ITEM 32" is the first creature. */
 export const FIRST_CREATURE_ITEM = 32;
 
-export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Level {
+/**
+ * `platforms` are the game's raised platform tables; without them platforms
+ * are given even steps of thickness from the floor.
+ */
+export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile, platforms?: RaisedPlatforms): Level {
   const ml: MifLevel = mif.levels[levelIndex];
   if (!ml) throw new Error(`Level ${levelIndex} does not exist`);
   const { width, depth } = mif;
@@ -173,8 +231,11 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
             cell.capIsWall = inf.walls.includes(cap.texture);
             cell.capTex = cap.index;
           }
-          // The exact height encoding is not confirmed yet; treat the high byte as Arena units out of 128.
-          cell.raisedHeight = Math.min(1, Math.max(0.1, (hi & 0x7f) / 128));
+          const bottom = platforms ? platforms.heights[hi & 7] : 0;
+          const thickness = (platforms ? platforms.thicknesses[(hi >> 3) & 15] : (((hi >> 3) & 15) + 1) * 6.25) * ((inf.boxScale ?? 256) / 256);
+          const room = inf.ceilingHeight ?? DEFAULT_CEILING_UNITS;
+          cell.raisedBottom = Math.min(bottom, room) * ARENA_HEIGHT;
+          cell.raisedTop = Math.min(bottom + thickness, room) * ARENA_HEIGHT;
         }
       } else {
         switch (hi >> 4) {
@@ -182,13 +243,22 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
             placed.push({ x, y, flat: lo });
             break;
           case 0x9:
-          case 0xa:
             cell.kind = 'transparent';
             cell.wallTex = wallTex(lo);
+            if (v & 0x0100) cell.passable = true;
             break;
+          case 0xa: {
+            cell.kind = 'edge';
+            cell.wallTex = wallTex(v & 0x3f);
+            // Mirroring the grid east-west swaps the east and west faces.
+            const side = (['north', 'east', 'south', 'west'] as const)[(v >> 6) & 3];
+            cell.edge = { side, lift: ((v >> 9) & 7) * 8 * ARENA_HEIGHT, solid: (v & 0x0100) !== 0 };
+            break;
+          }
           case 0xb:
             cell.kind = 'door';
             cell.wallTex = wallTex(v & 0x3f);
+            cell.door = (['swinging', 'sliding', 'raising', 'splitting'] as const)[(v >> 6) & 3];
             if (seeThrough.has(cell.wallTex)) cell.seeThrough = true;
             break;
           case 0xd:
@@ -234,8 +304,9 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
       continue;
     }
     const flat: LevelFlat = { ...at, name: def.name, yOffset: def.yOffset };
+    for (const key of ['solid', 'scale', 'ceiling', 'seeThrough', 'puddle', 'light'] as const) if (def[key] !== undefined) (flat as unknown as Record<string, unknown>)[key] = def[key];
     const under = cells[p.y * width + east(p.x)];
-    if (under.kind === 'raised') flat.base = under.raisedHeight;
+    if (under.kind === 'raised' && !under.raisedBottom) flat.base = under.raisedTop;
     const kind = def.item === undefined ? undefined : ITEM_KINDS[def.item];
     if (!kind) flats.push(flat);
     else {
@@ -252,18 +323,13 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
   const startPoint = mif.startPoints[0];
   const start = startPoint ? { x: width - startPoint.x, y: startPoint.y } : findOpenCell(cells, width, depth);
 
-  // The INF has no separate ceiling texture for most dungeons; use the most common floor.
-  const floorCounts = new Map<number, number>();
-  for (const c of cells) if (c.kind !== 'wall' && !c.chasm) floorCounts.set(c.floorTex, (floorCounts.get(c.floorTex) ?? 0) + 1);
-  let ceilingTex = 0;
-  let best = -1;
-  for (const [tex, n] of floorCounts) if (n > best) [ceilingTex, best] = [tex, n];
+  const ceilingTex = clampFloor(inf.ceilingTexture ?? 0);
 
   return {
     name: ml.name,
     width,
     depth,
-    height: (inf.ceilingHeight ?? DEFAULT_CEILING) / DEFAULT_CEILING,
+    height: (inf.ceilingHeight ?? DEFAULT_CEILING_UNITS) * ARENA_HEIGHT,
     cells,
     wallTextures,
     floorTextures,
@@ -274,32 +340,65 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
     creatures,
     locks,
     triggers,
+    doorSounds: Object.fromEntries(
+      Object.entries(DOOR_SOUND_INDICES).map(([kind, [open, close]]) => [kind, { open: inf.sounds[open], close: inf.sounds[close], closeWhenShut: kind === 'swinging' }]),
+    ),
     start,
   };
 }
 
-/** True when the player cannot stand in this cell. */
+/** How high a step can be walked up without jumping: a quarter of a voxel, as OpenTESArena has it. */
+export const STEP_HEIGHT = 32 * ARENA_HEIGHT;
+/** How tall the player stands, to the top of the head: 61 Arena units (the eye is at 60). */
+export const PLAYER_HEIGHT = 61 * ARENA_HEIGHT;
+
+/**
+ * True when nothing standing on the floor can be in this cell: walls,
+ * closed doors, bars and arches that can't be walked through, solid fences,
+ * and raised platforms too high to step onto that don't leave room beneath.
+ * The player's own movement looks at platform heights itself (player.ts).
+ */
 export function isBlocking(cell: Cell | undefined, openDoors?: Set<number>, index?: number): boolean {
   if (!cell) return true;
   switch (cell.kind) {
     case 'wall':
-    case 'transparent':
     case 'diagonal':
       return true;
+    case 'transparent':
+      return !cell.passable;
+    case 'edge':
+      return !!cell.edge?.solid;
     case 'door':
       return !(openDoors && index !== undefined && openDoors.has(index));
     case 'raised':
-      return (cell.raisedHeight ?? 1) > 0.35;
+      return (cell.raisedTop ?? 0) > STEP_HEIGHT && (cell.raisedBottom ?? 0) < PLAYER_HEIGHT;
     default:
       return false;
   }
 }
 
-/** True when nothing in the cell blocks sight: open floor, raised steps, open doors. */
+/** Height of the floor in a cell: a platform's top when it can be stood on, below the floor for pits and water. */
+export function floorHeight(cell: Cell | undefined, level: Pick<Level, 'height'>): number {
+  if (!cell) return 0;
+  if (cell.kind === 'raised' && !cell.raisedBottom) return cell.raisedTop ?? 0;
+  if (cell.chasm) return chasmFloor(cell.chasm, level.height);
+  return 0;
+}
+
+/**
+ * How far below the floor the player is in a chasm, from OpenTESArena's
+ * values for the original: swimming in a dungeon's water or lava puts the
+ * eye 25 units lower; a dry pit is a whole room deep.
+ */
+export function chasmFloor(kind: ChasmKind, roomHeight: number): number {
+  return kind === 'dry' ? -roomHeight : -25 * ARENA_HEIGHT;
+}
+
+/** True when nothing in the cell blocks sight: open floor, platforms, bars and arches, fences, open doors. */
 export function isSeeThrough(cell: Cell | undefined, openDoors?: Set<number>, index?: number): boolean {
   if (!cell) return false;
   if (cell.kind === 'door') return !!cell.seeThrough || (!!openDoors && index !== undefined && openDoors.has(index));
-  return cell.kind === 'empty' || cell.kind === 'raised' || cell.kind === 'transparent';
+  return cell.kind === 'empty' || cell.kind === 'raised' || cell.kind === 'transparent' || cell.kind === 'edge';
 }
 
 function findOpenCell(cells: Cell[], width: number, depth: number): { x: number; y: number } {

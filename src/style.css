@@ -251,6 +251,30 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #health .bar-fill { background: linear-gradient(#d4584b, #8e2519); transform-origin: center; }
 #stamina { right: max(32px, 5vw); width: min(260px, 28vw); }
 #stamina .bar-fill { background: linear-gradient(#62b066, #2c6a30); transform-origin: right; }
+#magicka { left: max(32px, 5vw); width: min(260px, 28vw); }
+#magicka .bar-fill { background: linear-gradient(#5d8ee0, #23428a); transform-origin: left; }
+#magicka.short { animation: short 0.5s ease-out 2; }
+@keyframes short { 50% { border-color: #e05a4b; box-shadow: 0 0 12px rgba(224, 90, 75, 0.9); } }
+
+/* The spell in hand, above the magicka bar, and its glow at the bottom left when cast. */
+#spell-readied {
+  position: absolute; left: max(32px, 5vw); bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+  display: flex; gap: 10px; align-items: baseline; font: 600 15px/1 'Barlow Condensed', sans-serif;
+  letter-spacing: 0.06em; text-transform: uppercase; color: #f3f0e8; text-shadow: 0 1px 3px #000;
+}
+#spell-readied::before { content: ''; width: 8px; height: 8px; transform: rotate(45deg); background: var(--spell, #d68cff); box-shadow: 0 0 8px var(--spell, #d68cff); }
+#spell-cost { color: rgba(243, 240, 232, 0.65); font-weight: 400; }
+#hand {
+  position: absolute; left: -12vw; bottom: -18vh; width: 46vw; height: 46vh; pointer-events: none; opacity: 0;
+  background: radial-gradient(closest-side, var(--spell, #d68cff), transparent); mix-blend-mode: screen;
+}
+#hand.ready { opacity: 0.16; transition: opacity 0.4s; }
+#hand.cast { animation: cast 0.6s ease-out; }
+@keyframes cast { 0% { opacity: 0.75; } 100% { opacity: 0.16; } }
+#effects {
+  position: absolute; left: max(32px, 5vw); bottom: calc(72px + env(safe-area-inset-bottom, 0px)); margin: 0; padding: 0; list-style: none;
+  font: 500 13px/1.5 'Barlow Condensed', sans-serif; letter-spacing: 0.05em; color: rgba(243, 240, 232, 0.8); text-shadow: 0 1px 3px #000;
+}
 
 #enemy {
   position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
@@ -383,6 +407,10 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
   opacity: 0; transition: opacity 0.8s;
 }
 #message.shown { opacity: 1; transition-duration: 0.25s; }
+/* Camping: the view darkens and the hours count down in the middle. */
+#resting { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); pointer-events: none; }
+#resting[hidden] { display: none; }
+#resting p { margin: 0; font: 400 clamp(22px, 2.6vw, 30px)/1.3 var(--font-ui); letter-spacing: 0.08em; text-shadow: 0 0 12px #000; }
 /* Skyrim's help: the controls down the left side for a while at the start. */
 #tips {
   position: absolute; left: 24px; top: 50%; transform: translateY(-50%); max-width: min(420px, 38vw);
@@ -444,7 +472,8 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 .create-name::placeholder { color: rgba(243, 240, 232, 0.3); }
 /* The map of Tamriel, in Arena's tall pixels, with a diamond on the province picked. */
 .create-map { position: relative; width: min(560px, 92vw, (100vh - 340px) * 4 / 3); aspect-ratio: 4 / 3; }
-.create-map canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 36px rgba(0, 0, 0, 0.85); }
+/* The parchment's edges are torn and see-through, so the shadow follows its shape rather than the canvas's box. */
+.create-map canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; filter: drop-shadow(0 0 18px rgba(0, 0, 0, 0.85)); }
 .create-marker {
   position: absolute; width: 18px; height: 18px; pointer-events: none;
   border: 2px solid #fff; transform: translate(-50%, -50%) rotate(45deg);
@@ -454,7 +483,6 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 @keyframes marker { 50% { opacity: 0.55; } }
 /* A fixed size beside the map, so the map stays put while the words under the list change. */
 .create-race-list { display: grid; gap: 12px; justify-items: center; width: 280px; }
-.create-gifts { width: 100%; height: 2.8em; margin: 0; color: var(--dim); font-size: 17px; line-height: 1.4; }
 .create-sheet { align-items: center; }
 .create-attributes { display: grid; gap: 8px; justify-items: center; width: min(460px, 100%); }
 .create-attributes .settings, .create-face { width: min(460px, 100%); }
@@ -462,7 +490,19 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 .create-sheet .option { padding-top: 4px; padding-bottom: 4px; }
 .create-bonus { margin: 0; font-size: 16px; letter-spacing: 0.16em; text-transform: uppercase; color: #ecc86a; }
 .create-bonus.done { color: var(--dim); }
-.create-preview { margin: 0; color: var(--dim); font-size: 16px; letter-spacing: 0.04em; }
+/* The wait menu's time over its date, as Skyrim's. */
+.wait-time { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--dim); text-align: center; }
+#wait-date { font-size: clamp(22px, 2.6vw, 32px); }
+.create-bonus.warn { color: #e07a5f; letter-spacing: 0.04em; text-transform: none; font-size: 18px; }
+/* What each attribute gives, under its name, as Arena's sheet has it beside each. */
+.create-sheet .row-label { display: grid; text-align: left; }
+.create-sheet .row-label .create-sub { font-size: 14px; letter-spacing: 0.04em; color: var(--dim); text-transform: none; }
+.create-sheet-side { display: grid; gap: 14px; justify-items: center; }
+.create-status { display: grid; grid-template-columns: auto auto; gap: 2px 18px; margin: 0; font-size: 17px; }
+.create-status dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.12em; font-size: 14px; align-self: center; }
+.create-status dd { margin: 0; text-align: right; }
+.create-choice { display: grid; gap: 6px; justify-items: center; }
+.create-choice .create-text { margin: 0; }
 .value.raised { color: #ecc86a; }
 .create-doll-frame {
   height: min(440px, calc(100vh - 330px)); min-height: 240px; aspect-ratio: var(--doll-aspect, 148 / 240);
@@ -584,11 +624,18 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 .gm-card-note { margin: 10px 0 0; color: var(--dim); font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; }
 .gm-card.forbidden .gm-card-note { color: var(--error); font-size: 17px; letter-spacing: 0.02em; text-transform: none; }
 
-.gm-magic {
-  position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(560px, 90vw);
-  display: grid; gap: 12px; justify-items: center; text-align: center;
+/* Magic: the spells down the left, as Skyrim's, and the picked one's card on the right. */
+.gm-magic .gm-list {
+  position: absolute; left: max(32px, 5vw); top: 16vh; bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  width: min(460px, 40vw); overflow-y: auto; padding-left: 16px; border-left: 1px solid var(--line); scrollbar-width: thin;
 }
-#game-menu :is(.gm-magic, .gm-favourites) h2 { margin: 0; font: 600 clamp(24px, 3vw, 32px)/1.1 var(--font-title); letter-spacing: 0.22em; text-transform: uppercase; }
+.gm-magic .gm-row .gm-count { font-size: 0.8em; }
+.gm-magic .gm-row.forbidden .gm-count { color: rgba(224, 138, 124, 0.9); }
+.gm-magic .gm-row.equipped .gm-mark { background: var(--spell, var(--ink)); }
+.gm-spell-card { --spell: #d68cff; border-top: 2px solid var(--spell); }
+.gm-spell-effects { margin: 0 0 12px; padding: 0; list-style: none; font-size: 19px; line-height: 1.35; }
+.gm-magic > .gm-empty { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); width: min(560px, 90vw); text-align: center; }
+#game-menu .gm-favourites h2 { margin: 0; font: 600 clamp(24px, 3vw, 32px)/1.1 var(--font-title); letter-spacing: 0.22em; text-transform: uppercase; }
 .gm-empty { margin: 0; color: var(--dim); font-size: 20px; }
 
 /* The character sheet: the paper doll beside the numbers. */
@@ -637,12 +684,13 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   #tips { display: none !important; }
   .gm-categories { top: 10vh; }
   .gm-items .gm-list { left: calc(var(--left) + var(--kinds) + 8px); width: auto; right: 16px; }
+  .gm-magic .gm-list { width: auto; right: 16px; }
   .gm-right { display: none; }
   #kofi { top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; font-size: 13px; }
   #kofi span { display: none; }
   #minimap-frame { width: 112px; top: calc(52px + env(safe-area-inset-top, 0px)); right: 16px; }
   #banner { top: calc(12vh + env(safe-area-inset-top, 0px)); }
-  #stamina { width: 22vw; }
+  #stamina, #magicka { width: 22vw; }
   #compass { top: calc(10px + env(safe-area-inset-top, 0px)); }
   .bindings { font-size: 15px; }
   .bindings th { font-size: 12px; letter-spacing: 0.1em; }
@@ -666,3 +714,15 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   #hud.low-health::after { animation: none; opacity: 0.7; }
   #banner.shown { animation-name: banner-still; }
 }
+
+/* Cutscenes: Arena's 320x200 pictures stretched to the 4:3 screen they were made for, the words in the black band beneath the picture. */
+#cutscene { --picture: min(100vh, 100vw * 3 / 4); position: fixed; inset: 0; z-index: 30; background: #000; display: grid; place-items: center; cursor: pointer; }
+#cutscene canvas { width: calc(var(--picture) * 4 / 3); height: var(--picture); image-rendering: pixelated; display: block; }
+.cutscene-text {
+  position: absolute; left: 50%; bottom: calc((100vh - var(--picture)) / 2 + var(--picture) * 0.012); transform: translateX(-50%);
+  width: calc(var(--picture) * 4 / 3 * 0.92); margin: 0;
+  font: 500 calc(var(--picture) * 0.032)/1.3 var(--font-ui); letter-spacing: 0.02em; text-align: center; white-space: pre-line;
+  text-shadow: 0 0 4px #000, 0 2px 4px #000;
+}
+.cutscene-hints { top: 0; bottom: auto; left: auto; right: 0; padding: 14px 20px; background: none; opacity: 0.6; font-size: 14px; }
+.cutscene-hints::before { display: none; }

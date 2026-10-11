@@ -1,3 +1,4 @@
+import { LEATHER, makeArmour } from '../src/game/items';
 import { describe, expect, it } from 'vitest';
 import type { ExeData } from '../src/formats/exe';
 import {
@@ -94,7 +95,8 @@ describe('combat rules', () => {
     p.health = 5;
     expect(gainExperience(p, 999, always(0))).toBe(0);
     expect(gainExperience(p, 1, always(0))).toBe(1);
-    expect(p).toMatchObject({ level: 2, maxHealth: 34, health: 34, maxStamina: 110 });
+    // A roll of 0 on the hit die plus the bonus of 3; fatigue doesn't grow with level.
+    expect(p).toMatchObject({ level: 2, maxHealth: 33, health: 33, maxStamina: 100 });
     expect(gainExperience(p, 6000, always(0))).toBe(2);
     expect(p.level).toBe(4);
   });
@@ -360,16 +362,29 @@ describe('a run through a dungeon', () => {
     expect(d.doors.get(13)!.target).toBe(1);
   });
 
-  it('shows each message once but plays its sound every time', () => {
+  it('shows a "~" message once and others each time, and plays the sound every time, as Arena does', () => {
     const level = corridor();
-    level.triggers = [{ x: 2, y: 1, text: 'Water drips.', sound: 'DRIP1.VOC' }];
+    level.triggers = [
+      { x: 2, y: 1, text: 'Water drips.', sound: 'DRIP1.VOC' },
+      { x: 3, y: 1, text: 'You awaken.', once: true },
+    ];
     const d = new Dungeon(level, TABLES, always(0));
-    for (const x of [2.5, 1.5, 2.5]) {
+    for (const x of [2.5, 3.5, 2.5, 3.5]) {
       d.player.x = x;
       d.update(0.01, IDLE_INPUT);
     }
-    expect(d.events.filter((e) => e.type === 'message')).toHaveLength(1);
+    const messages = d.events.flatMap((e) => (e.type === 'message' ? [e.text] : []));
+    expect(messages).toEqual(['Water drips.', 'You awaken.', 'Water drips.']);
     expect(sounds(d.events).filter((s) => s === 'DRIP1.VOC')).toHaveLength(2);
+  });
+
+  it('makes each kind of door’s sounds from the level’s list: a portcullis grinds up and down', () => {
+    const level = corridor();
+    level.doorSounds = { raising: { open: 'PORTC.VOC', close: 'PORTC.VOC', closeWhenShut: false }, swinging: { open: 'OPENDOOR.VOC', close: 'CLOSDOOR.VOC', closeWhenShut: true } };
+    const d = new Dungeon(level, TABLES, always(0));
+    const door = [...d.doors.keys()][0];
+    (d as unknown as { openDoor(c: number): void }).openDoor(door);
+    expect(sounds(d.events)).toContain('PORTC.VOC');
   });
 
   const arena = () => textLevel(['#######', '#@....#', '#######'], { creatures: [{ x: 2.7, y: 1.5, type: 0 }] });
@@ -414,10 +429,11 @@ describe('a run through a dungeon', () => {
     const level = textLevel(['#####', '#@..#', '#####'], { items: [{ x: 2.5, y: 1.5, name: 'EQUIPMEN.IMG', kind: 'equipment' }] });
     // Gear (0), a weapon (0), Steel (0.5, 0.5 of the three materials at level 1), the fourth usable weapon (0.8).
     const d = new Dungeon(level, TABLES, sequence(0, 0, 0.5, 0.5, 0.8));
-    expect(d.stats.weapon.name).toBe('Steel Shortsword');
+    // The plain shortsword every character starts with.
+    expect(d.stats.weapon.name).toBe('Shortsword');
     d.activate();
     expect(notes(d.events)).toContain('Steel Broadsword added');
-    expect(d.stats.weapon.name).toBe('Steel Shortsword');
+    expect(d.stats.weapon.name).toBe('Shortsword');
     const found = d.entries().find((e) => e.name === 'Steel Broadsword')!;
     expect(found).toMatchObject({ category: 'weapons', equipped: false });
     expect(d.use(found.key)).toBe('Steel Broadsword equipped');
@@ -583,15 +599,12 @@ describe('the character in the dungeon', () => {
   const arena = () => textLevel(['#######', '#@....#', '#######'], { creatures: [{ x: 2.7, y: 1.5, type: 0 }] });
   const firstHurt = (d: Dungeon) => d.events.find((e) => e.type === 'hurt');
 
-  it('starts with the class’s own gear, a healing potion and a little gold', () => {
-    const d = new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER, health: 33 }));
-    expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Steel Dagger', 'Leather Cuirass']);
-    expect(d.stats).toMatchObject({ health: 33, potions: 1, gold: 25, weapon: { name: 'Steel Dagger' } });
-    expect(d.entries().map((e) => [e.name, e.category, e.equipped])).toEqual([
-      ['Steel Dagger', 'weapons', true],
-      ['Leather Cuirass', 'apparel', true],
-      ['Healing Potion', 'potions', false],
-    ]);
+  it('starts as Arena does: a plain weapon by the class’s place in the list, gold and 700 experience, nothing more', () => {
+    // A class sixth or later in the game's list gets a shortsword; one without a place, the first it may use.
+    const d = new Dungeon(arena(), TABLES, always(0), hero({ cls: { ...TINKER, id: 7, weapons: [1, 2, 3] }, health: 33, gold: 120 }));
+    expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Shortsword']);
+    expect(d.stats).toMatchObject({ health: 33, potions: 0, gold: 120, experience: 700, weapon: { name: 'Shortsword' } });
+    expect(new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER })).stats.weapon.name).toBe('Dagger');
   });
 
   it('takes blows down by the armour worn', () => {
@@ -665,12 +678,13 @@ describe('the character in the dungeon', () => {
   it('drops gear for good, off the favourites and number keys, but never the weapon in hand', () => {
     const d = new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER }));
     const key = (name: string) => d.entries().find((e) => e.name === name)!.key;
-    expect(d.drop(key('Steel Dagger'))).toBe('Equip another weapon before you drop this one');
+    d.inventory.equip(d.inventory.add(makeArmour(LEATHER, 0, 0)));
+    expect(d.drop(key('Dagger'))).toBe('Equip another weapon before you drop this one');
     const cuirass = key('Leather Cuirass');
     d.setHotkey(2, cuirass);
     expect(d.drop(cuirass)).toBe('Leather Cuirass dropped');
-    expect(d.entries().map((e) => e.name)).toEqual(['Steel Dagger', 'Healing Potion']);
-    expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Steel Dagger']);
+    expect(d.entries().map((e) => e.name)).toEqual(['Dagger']);
+    expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Dagger']);
     expect(d.inventory.favourites).not.toContain(cuirass);
     expect(d.inventory.hotkeys[2]).toBeUndefined();
     expect(d.drop('item:999')).toBeUndefined();

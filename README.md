@@ -29,15 +29,24 @@ screenshots of earlier versions.
 
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
 - Make your character as in Arena, in the game's own words: answer ten questions or choose from the eighteen classes,
-  pick a name, choose your race on the map of Tamriel, share out bonus points among your attributes and pick a face.
-  Your class and attributes count in play: they set your health, damage, pace and how much you can carry, which
-  armour and weapons you can use, and whether you can pick locks.
+  pick a name, choose your race on the map of Tamriel, share out bonus points among attributes rolled by Arena's rules
+  on a sheet that shows what the original's does, and pick a face. Your class and attributes count in play: they set
+  your health, fatigue, damage, pace and how much you can carry, which armour and weapons you can use, and whether you
+  can pick locks.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
-  find the Shift Gate. Or try any of the game's other maps from the menu.
+  find the Shift Gate.
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners
   and fight.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
   three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you.
+- Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
+  Medusa's Gaze and the rest of the Mages Guild's list that the remake can do so far (30 of its 64). Spellcasting
+  classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Ready a
+  spell in the magic menu and cast it with the block button, as with a spell in Skyrim's left hand; bolts fly, area
+  spells burst, and paralysis, poison, shields and light last as many rounds as the game says.
+- Camp as in Arena, from a wait menu like Skyrim's: rest some hours or until healed, by Arena's healing sums and in its
+  words, though not with monsters near, and monsters may come upon you while you sleep. The first rest after reaching
+  level 2 brings Ria Silmane's dream of the Staff of Chaos and of Fang Lair, in her own voice.
 - Health, stamina, healing potions and levels. Search bodies and chests for gold, potions, weapons and armour, and open
   locked doors with their key, pick their locks or break them down.
 - Skyrim's menus: a menu of menus for your character, items, magic and the map; an item menu with the game's picture of
@@ -46,6 +55,12 @@ screenshots of earlier versions.
 - A 3D map that fills in as you explore, a minimap, quest objectives, and markers on the compass for the next
   objective and the creatures nearby.
 - Arena's own sound effects, each coming from where it happens in the dungeon.
+- Arena's own music, played as on a 1994 AdLib or Sound Blaster: the remake emulates the FM chip and plays the game's
+  songs with the game's own instruments. The main menu, character creation, the visions and each dungeon have their
+  songs, as in Arena.
+- Arena's cutscenes: the opening with the book, the title and the scroll; the story of the Emperor's betrayal before
+  you make a character; and Ria Silmane's visions, spoken by the CD version's voices with the words beneath, when you
+  wake in your cell and when you die.
 - The original wall, floor and ceiling textures, animated water and lava, raised platforms, doors that slide open,
   barred doors you can see through, decorations such as chains and barrels, and the dungeon's own messages when you
   reach their squares.
@@ -53,7 +68,7 @@ screenshots of earlier versions.
   that match your controller, jumping, sneaking and sprinting, the dungeon's name as you arrive, and a banner when you
   level up.
 
-Coming later: cities and the wilderness, spells, music and saving.
+Coming later: cities and the wilderness, the Mages Guild and the spellmaker, and saving.
 
 ## Play it
 
@@ -104,7 +119,7 @@ controller, with the PlayStation button in brackets.
 | Look | Mouse (click the view to capture it) | Right stick |
 | Turn and walk | Arrow keys | |
 | Attack, hold for a power attack | Left mouse button | RT (R2) |
-| Block, attack while blocking to bash | Right mouse button | LT (L2) |
+| Block, attack while blocking to bash; with a spell readied, cast it | Right mouse button | LT (L2) |
 | Use, take, open | <kbd>E</kbd> | A (✕) |
 | Jump | <kbd>Space</kbd> | Y (△) |
 | Sprint | <kbd>Shift</kbd> | LB (L1) |
@@ -113,8 +128,12 @@ controller, with the PlayStation button in brackets.
 | Use the favourite on a number key | <kbd>1</kbd> to <kbd>8</kbd> (the healing potion starts on <kbd>1</kbd>) | Left or right on the D-pad, for 1 and 2 |
 | Character, items, magic and map | <kbd>Tab</kbd> | B (○) |
 | Items, magic | <kbd>I</kbd>, <kbd>P</kbd> | |
-| Map | <kbd>M</kbd> | View (Share) |
+| Map | <kbd>M</kbd> | Down from the menu of menus (B) |
+| Wait: camp for some hours or until healed (again to wake) | <kbd>T</kbd> | View (Share) |
 | Pause menu | <kbd>Esc</kbd> | Start (Options) |
+
+In the magic menu (<kbd>P</kbd>, or left from the menu of menus), ready a spell with <kbd>E</kbd> or A, make it a
+favourite with <kbd>F</kbd> or Y, or put it on a number key by pressing the number.
 
 In the item menu, pick a kind of item on the left (LB and RB also change it), then use or equip the picked one with
 <kbd>E</kbd> or A, make it a favourite with <kbd>F</kbd> or Y, and drop it with <kbd>R</kbd> or X. Pressing a number
@@ -125,9 +144,12 @@ On the map, move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the
 the right stick to turn it, and zoom with the mouse wheel or the triggers.
 
 In the main menu and character creation, move with the arrow keys, the D-pad or the left stick, choose with
-<kbd>Enter</kbd> or A, change a setting with left and right, and go back with <kbd>Esc</kbd> or B. LB and RB, or
-<kbd>Page Up</kbd> and <kbd>Page Down</kbd>, skip ten maps at a time. The Controls screen sets look speed, inverted
-look, sound volume and vibration.
+<kbd>Enter</kbd> or A, change a setting with left and right, and go back with <kbd>Esc</kbd> or B. The Settings screen
+sets look speed, inverted look, sound and music volume, whether the opening plays and vibration, and changes the
+ARENA folder.
+
+In a cutscene, <kbd>Enter</kbd>, <kbd>Space</kbd>, a click or A goes on to the next picture or line, and <kbd>Esc</kbd>,
+B or Start skips the rest.
 
 ### Files it reads
 
@@ -137,17 +159,20 @@ The monsters' and weapons' stats come from the game's program, `ACD.EXE` or `A.E
 memory; the pictures, animations and sounds come from `GLOBAL.BSA`. Character creation reads its questions, classes,
 names and words from `QUESTION.TXT`, `CLASSES.DAT`, `NAMECHNK.DAT` and the game's program, the map of Tamriel from
 `TAMRIEL.MNU`, and the faces, clothes and armour of the paper doll from `GLOBAL.BSA`; without them it offers three
-classes of its own. Loose files take priority over the copies inside `GLOBAL.BSA`, as in the original. Saves and other
+classes of its own. The spells come from `SPELLSG.65`. The music is in `GLOBAL.BSA` and its instruments in `SAMPLE.AD`
+(or `SAMPLE.OPL`); without them the game is silent. The cutscenes are the CD version's loose `.FLC` animations and the
+pictures in `GLOBAL.BSA`, with the visions' words from `TEMPLATE.DAT` and their voices from the `SPEECH` folder; any
+that are missing are left out. Loose files take priority over the copies inside `GLOBAL.BSA`, as in the original. Saves and other
 files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`, `SOUND.CFG`, `VISION.EMS`) are ignored.
 
 ## How it works
 
 | Path | What it does |
 |---|---|
-| `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, CIF and CFA animations, VOC sounds, MIF maps, INF level definitions, the game's program (unpacking it and reading the creature, weapon and class tables and the character creation words), the class questions and name pieces, and the LZSS and LZHUF decompressors. No browser or Three.js code. |
+| `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, CIF and CFA animations, VOC sounds, MIF maps, INF level definitions, the game's program (unpacking it and reading the creature, weapon and class tables and the character creation words), the class questions and name pieces, the LZSS and LZHUF decompressors, the spells, the XMI music and its instruments, the FLC cutscenes and the game's texts. No browser or Three.js code. |
 | `src/data/` | Finding and reading the player's `ARENA` folder, and checking the required files. |
 | `src/game/` | The level model built from a MIF map and its INF file, movement and collision, the character and what their class and attributes do, the monsters, combat, the inventory, the quest, what the player has explored, and the game loop. |
-| `src/audio/` | Arena's sound effects, played through the Web Audio API so each comes from where it happens. |
+| `src/audio/` | Arena's sound effects, played through the Web Audio API so each comes from where it happens, and its music: an emulated AdLib FM chip, a sound driver that plays the songs on it as the game's did, and a player that makes each song into sound in the background and loops it. |
 | `src/input/` | Controllers, read through the browser's Gamepad API. |
 | `src/ui/` | The Skyrim-style menu and HUD: moving through the menu, character creation, the menus over the game, the compass, the minimap, button prompts and the settings. |
 | `src/render/` | Turning a level into Three.js meshes and textures, the creatures, the weapon in hand, the 3D map, the paper doll and item pictures, and the stand-in hall shown behind the menu, whose textures the remake draws itself. |
