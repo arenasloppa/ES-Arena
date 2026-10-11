@@ -22,6 +22,7 @@ import { parseClassAnswers, parseNameChunks, parseQuestions, type ClassChooser, 
 import { readExeData, type ExeData } from './formats/exe';
 import { parseSpells, type SpellRecord } from './formats/spells';
 import { parseTemplates } from './formats/template';
+import { FALLBACK_CALENDAR, formatDate, formatTime as formatClock } from './formats/calendar';
 import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
@@ -488,6 +489,10 @@ waitRow.addEventListener('click', () => {
 function openWait() {
   if (!engine || !playing()) return;
   const m = tables?.messages ?? {};
+  // Skyrim's wait menu leads with the time and date; these are Arena's.
+  const calendar = tables?.calendar ?? FALLBACK_CALENDAR;
+  $('wait-time').textContent = formatClock(engine.dungeon.minutes, calendar);
+  $('wait-date').textContent = formatDate(engine.dungeon.minutes, calendar);
   $('wait-question').textContent = m.hoursToRest ?? 'How many hours will you rest?';
   $('wait-hours').textContent = m.restForHours ?? 'Rest';
   $('wait-healed').textContent = m.restUntilHealed ?? 'Until healed';

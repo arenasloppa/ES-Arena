@@ -70,10 +70,18 @@ describe('gear', () => {
     }
   });
 
-  it('starts a class with a weapon it may use and a cuirass of the heaviest armour it may wear', () => {
-    expect(startingGear(WEAPONS, cls()).map((g) => g.name)).toEqual(['Steel Shortsword', 'Iron Chain Cuirass']);
-    expect(startingGear(WEAPONS, cls({ weapons: [0, 1], armour: 3 })).map((g) => g.name)).toEqual(['Steel Dagger']);
-    expect(startingGear(WEAPONS).map((g) => g.name)).toEqual(['Steel Shortsword']);
+  it('starts a class with one plain weapon by its place in the list, as Arena does', () => {
+    expect([0, 5, 6, 11, 12, 17].map((id) => startingGear(WEAPONS, cls({ id })).map((g) => g.name))).toEqual([
+      ['Dagger'],
+      ['Dagger'],
+      ['Shortsword'],
+      ['Shortsword'],
+      ['Broadsword'],
+      ['Broadsword'],
+    ]);
+    // A class of the remake's own, with no place in the list: the first it may use.
+    expect(startingGear(WEAPONS, cls({ weapons: [0, 1] })).map((g) => g.name)).toEqual(['Dagger']);
+    expect(startingGear(WEAPONS).map((g) => g.name)).toEqual(['Shortsword']);
   });
 });
 

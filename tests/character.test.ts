@@ -4,6 +4,10 @@ import {
   classFromAnswers,
   creationData,
   derivedAttributes,
+  AGILITY,
+  ENDURANCE,
+  PERSONALITY,
+  STRENGTH,
   FALLBACK_CLASSES,
   fillText,
   forgetCharacter,
@@ -12,12 +16,21 @@ import {
   pickQuestions,
   randomName,
   rollAttributes,
-  rollClassic,
+  arenaRoll,
+  startingHealth,
+  to100,
+  to256,
   saveCharacter,
   WILLPOWER,
   type Character,
 } from '../src/game/character';
 import { always } from './helpers/level';
+
+/** Returns the numbers given in turn, then the last one over and over. */
+const sequence = (...values: number[]) => {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)];
+};
 
 /** Made-up classes and races: none of these values come from the game. */
 const TINKER: ClassInfo = { name: 'Tinker', healthDie: 9, experience: 800, spellcaster: false, critical: true, thief: true, armour: 1, shields: [0] };
@@ -67,35 +80,52 @@ describe('character creation', () => {
   /** A random number that Arena's dice turn into the given whole number. */
   const raw = (n: number) => (n + 0.5) / 0x10000;
 
-  it('rolls Arena’s dice: 4d5 for each attribute and 5d5 bonus points, rolling again over the most', () => {
-    expect(rollClassic(20, always(0))).toBe(4);
-    expect(rollClassic(25, always(0))).toBe(5);
-    expect(rollClassic(20, always(raw(4)))).toBe(20);
-    expect(rollClassic(6, always(raw(11)))).toBe(5);
-    // Nine is rolled as two dice of five; ten is too many, so it rolls again.
-    const rolls = [raw(4), raw(4), raw(0), raw(2)];
-    expect(rollClassic(9, () => rolls.shift() ?? 0)).toBe(4);
+  it('rolls Arena’s dice: dice of six or five counting from 0, rolled again over the most', () => {
+    // 20 is four dice of 0 to 5; 25 five; 12 two of 0 to 6; up to 8 a plain 0 to n - 1.
+    expect(arenaRoll(20, always(0))).toBe(0);
+    expect(arenaRoll(20, always(raw(5)))).toBe(20);
+    expect(arenaRoll(25, always(raw(5)))).toBe(25);
+    expect(arenaRoll(12, always(raw(6)))).toBe(12);
+    expect(arenaRoll(6, always(raw(11)))).toBe(5);
+    // 14 is rounded up to 15, three dice of 0 to 5; over 14 rolls again.
+    const rolls = [raw(5), raw(5), raw(5), raw(1), raw(2), raw(3)];
+    expect(arenaRoll(14, () => rolls.shift() ?? 0)).toBe(6);
   });
 
-  it('starts from the race’s attributes for the gender, with health, gold and bonus points rolled', () => {
-    const table = Array.from({ length: 16 }, (_, r) => Array.from({ length: 8 }, (_, i) => 30 + r + i));
+  it('turns between the sheet’s hundred and Arena’s 256 as the game does', () => {
+    expect([0, 1, 4, 20, 21, 50].map(to256)).toEqual([0, 3, 10, 51, 54, 128]);
+    expect([77, 89, 102, 128, 182, 255].map(to100)).toEqual([30, 35, 40, 50, 71, 100]);
+  });
+
+  it('starts from the race’s attributes for the gender, adding a roll of 20 and one more on Arena’s scale', () => {
+    // Made-up rows on Arena's scale: row 3 is race 1's women.
+    const table = Array.from({ length: 16 }, (_, r) => Array.from({ length: 8 }, (_, i) => 77 + r + i));
     const low = rollAttributes(1, 'female', TINKER, always(0), table);
-    expect(low.attributes).toEqual(table[3].map((a) => a + 4));
-    expect(low).toMatchObject({ bonus: 5, health: 26, gold: 50 });
-    const high = rollAttributes(0, 'male', TINKER, always(raw(4)), table);
-    expect(high.attributes).toEqual(table[0].map((a) => a + 20));
+    expect(low.attributes).toEqual(table[3].map((a) => to100(a + 3)));
+    expect(low).toMatchObject({ bonus: 0, gold: 50 });
+    // Every die at its most for the attributes (8 x 4) and bonus points (5), then the health roll at nothing.
+    const high = rollAttributes(0, 'male', TINKER, sequence(...new Array(37).fill(raw(5)), 0), table);
+    expect(high.attributes).toEqual(table[0].map((a) => to100(a + 54)));
     expect(high.bonus).toBe(25);
-    // Without the game's table, the remake's own: 40 across the board.
-    expect(rollAttributes(0, 'male', TINKER, always(0)).attributes).toEqual(new Array(8).fill(44));
+    // Without the game's table, the remake's own: 40 across the board, plus the roll.
+    expect(rollAttributes(0, 'male', TINKER, always(0)).attributes).toEqual(new Array(8).fill(41));
   });
 
-  it('works out the sheet’s values from the attributes as Arena does', () => {
-    expect(derivedAttributes([43, 50, 38, 45, 50, 50, 46, 50])).toMatchObject({ damage: 0, maxKilos: 86, magicDefence: -2, toHit: -1, toDefend: -1, charisma: 0 });
-    expect(derivedAttributes([70, 50, 64, 70, 50, 50, 75, 50])).toMatchObject({ damage: 4, maxKilos: 140, magicDefence: 2, toHit: 4, charisma: 5 });
-    // Endurance on Arena's scale of 256: 50 is 128, 12 over the middle less than a step of 25.
-    expect(derivedAttributes([50, 50, 50, 50, 50, 50, 50, 50]).health).toBe(0);
-    expect(derivedAttributes([50, 50, 50, 50, 50, 90, 50, 50])).toMatchObject({ health: 2, healMod: 2 });
-    expect(derivedAttributes([50, 50, 50, 50, 50, 10, 50, 50]).health).toBe(-1);
+  it('starts with 25 health plus the hit die and Endurance’s bonus, those at least 1', () => {
+    // Tinker's die of 9 is two dice of 0 to 5, rolled again over 9.
+    expect(startingHealth(TINKER, 0, sequence(raw(4), raw(4)))).toBe(25 + 8);
+    expect(startingHealth(TINKER, -2, always(0))).toBe(26);
+  });
+
+  it('works out the sheet’s numbers as the original shows them', () => {
+    // Pairs seen on the original's sheet: Strength 36 to 68 against damage, and so on.
+    const sheet = (a: Partial<Record<number, number>>) => derivedAttributes(Array.from({ length: 8 }, (_, i) => a[i] ?? 50));
+    expect([36, 38, 42, 43, 48, 54, 57, 58, 63, 68].map((v) => sheet({ [STRENGTH]: v }).damage)).toEqual([-2, -1, -1, 0, 0, 1, 1, 2, 3, 4]);
+    expect([35, 36, 40, 41, 45, 46, 55].map((v) => sheet({ [AGILITY]: v }).toHit)).toEqual([-3, -2, -2, -1, -1, 0, 1]);
+    expect([35, 41, 46].map((v) => sheet({ [WILLPOWER]: v }).magicDefence)).toEqual([-3, -1, 0]);
+    expect([37, 54, 55, 64, 65].map((v) => sheet({ [ENDURANCE]: v }).health)).toEqual([0, 0, 1, 1, 2]);
+    expect([45, 54, 55].map((v) => sheet({ [PERSONALITY]: v }).charisma)).toEqual([-1, 0, 1]);
+    expect(sheet({ [STRENGTH]: 71 }).maxKilos).toBe(142);
   });
 
   it('works out what the character brings to a fight from the class, attributes and what was rolled', () => {

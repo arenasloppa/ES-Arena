@@ -309,7 +309,8 @@ export class Engine {
 
   private frame = (now: number) => {
     if (!this.running) return;
-    const dt = Math.min((now - this.last) / 1000, 0.1);
+    // The first frame can be stamped a little before the engine started: never a step back in time.
+    const dt = Math.max(0, Math.min((now - this.last) / 1000, 0.1));
     this.last = now;
     this.options.pad?.poll(now);
     this.update(dt);

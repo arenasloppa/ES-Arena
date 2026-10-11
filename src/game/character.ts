@@ -14,7 +14,7 @@
 import type { CharacterTables, ClassInfo, CreationTexts, RaceInfo } from '../formats/classes';
 import type { ClassChooser, Question } from '../formats/creation';
 import type { GameMessages } from '../formats/messages';
-import { roll, type Hero, type Random } from './combat';
+import type { Hero, Random } from './combat';
 import { regainsMagicka, startingMagicka } from './magic';
 
 export type Gender = 'male' | 'female';
@@ -96,9 +96,10 @@ const FALLBACK_SHEET: SheetTexts = {
 
 /** The remake's own classes, for when the game's can't be read. */
 export const FALLBACK_CLASSES: ClassInfo[] = [
-  { name: 'Warrior', healthDie: 15, experience: 1100, spellcaster: false, critical: true, thief: false, armour: 0, shields: [0, 1, 2, 3], needs: 'mighty and tough' },
+  { name: 'Warrior', id: 16, healthDie: 15, experience: 1100, spellcaster: false, critical: true, thief: false, armour: 0, shields: [0, 1, 2, 3], needs: 'mighty and tough' },
   {
     name: 'Mage',
+    id: 0,
     healthDie: 7,
     experience: 1100,
     spellcaster: true,
@@ -111,6 +112,7 @@ export const FALLBACK_CLASSES: ClassInfo[] = [
   },
   {
     name: 'Thief',
+    id: 10,
     healthDie: 11,
     experience: 1100,
     spellcaster: false,
@@ -195,14 +197,16 @@ export function fillText(text: string, slots: string[], gender: Gender = 'male')
 }
 
 // ---- Attributes ----
+//
+// Checked against the original running in DOSBox (88 rolled sheets) and its
+// program: Arena keeps attributes on a scale of 0 to 255 and shows them out of
+// 100; each starts at the race's value for the gender plus a dice roll, and
+// the sheet's other numbers are worked out from them as below.
 
-/**
- * Starting attributes when the game's own table (exe.ts, readRaceAttributes)
- * can't be read: the remake's own, 40 across the board.
- */
-const FALLBACK_RACE_ATTRIBUTES = Array.from({ length: ATTRIBUTE_COUNT }, () => 40);
+/** Starting attributes, 0 to 255, when the game's own table can't be read: the remake's own, 40 out of 100 across the board. */
+const FALLBACK_RACE_ATTRIBUTES = Array.from({ length: ATTRIBUTE_COUNT }, () => 102);
 
-/** The race's starting attributes for the gender, from the game's table when there is one. */
+/** The race's starting attributes for the gender, 0 to 255, from the game's table when there is one. */
 export function raceAttributes(race: number, gender: Gender, table?: number[][]): number[] {
   const row = table?.[race * 2 + (gender === 'female' ? 1 : 0)];
   return row?.length === ATTRIBUTE_COUNT ? [...row] : [...FALLBACK_RACE_ATTRIBUTES];
@@ -213,34 +217,49 @@ function next(random: Random): number {
   return Math.floor(random() * 0x10000) & 0xffff;
 }
 
+/** 0 to n - 1. */
+function below(n: number, random: Random): number {
+  return next(random) % n;
+}
+
 /**
- * Arena's dice for creation (OpenTESArena's rollClassic): up to n. Small n is
- * a plain roll from 0 to n - 1; otherwise n is split into dice of six, five
- * or four sides (going up from n until one fits) and rolled again whenever
- * the total comes to more than n. 20 is 4d5, 25 is 5d5.
+ * Arena's dice (its program at 0x161D2): up to 8, a plain roll from 0 to
+ * n - 1; above that, n is split into dice of six or five (going up from n
+ * until one divides it), each counting 0 to its size, rolled again whenever
+ * the total comes to more than n. 20 is four dice of 0 to 5; 25 is five.
  */
-export function rollClassic(n: number, random: Random): number {
-  if (n <= 8) return next(random) % n;
-  let test = n;
-  let sides = 0;
+export function arenaRoll(n: number, random: Random): number {
+  if (n <= 0) return 0;
   for (;;) {
-    sides = [6, 5, 4].find((d) => test % d === 0) ?? 0;
-    if (sides) break;
-    test++;
-  }
-  const dice = test / sides;
-  for (;;) {
-    let total = 0;
-    for (let i = 0; i < dice; i++) total += 1 + (next(random) % sides);
+    let total: number;
+    if (n <= 8) total = below(n, random);
+    else {
+      let m = n;
+      while (m % 6 !== 0 && m % 5 !== 0) m++;
+      const sides = m % 6 === 0 ? 6 : 5;
+      total = 0;
+      for (let i = 0; i < m / sides; i++) total += below(sides + 1, random);
+    }
     if (total <= n) return total;
   }
 }
 
-/** What each attribute gets added to it at random, and how many bonus points there are. */
+/** Out of 100 to Arena's 0 to 255 (its program at 0x17474): times 2.56, rounded half away from zero. */
+export function to256(value: number): number {
+  const q = Math.floor((Math.abs(value) * 256 + 50) / 100);
+  return value < 0 ? -q : q;
+}
+
+/** Arena's 0 to 255 to the 100 the sheet shows, rounded. */
+export function to100(raw: number): number {
+  return Math.floor((raw * 100 + 128) / 256);
+}
+
 const ATTRIBUTE_ROLL = 20;
 const BONUS_ROLL = 25;
 
 export interface AttributeRoll {
+  /** Out of 100, as the sheet shows them. */
   attributes: number[];
   /** Points to share out on top. */
   bonus: number;
@@ -250,26 +269,27 @@ export interface AttributeRoll {
 }
 
 /**
- * Rolls a character as Arena does: the race's starting attributes plus 4d5
- * each, 5d5 bonus points, health of 25 plus one roll of the class's hit die,
- * and 50 to 199 gold.
+ * Rolls a character as Arena does: each attribute is the race's plus a roll
+ * of 20 and one more, on Arena's scale; 25 is rolled for the bonus points;
+ * health is 25 plus a roll of the class's hit die plus Endurance's bonus (at
+ * least 1 for the roll and bonus); and gold is 50 to 199.
  */
 export function rollAttributes(race: number, gender: Gender, cls: ClassInfo, random: Random, table?: number[][]): AttributeRoll {
-  const attributes = raceAttributes(race, gender, table).map((a) => Math.min(ATTRIBUTE_MAX, a + rollClassic(ATTRIBUTE_ROLL, random)));
+  const attributes = raceAttributes(race, gender, table).map((raw) => to100(Math.min(255, raw + to256(arenaRoll(ATTRIBUTE_ROLL, random) + 1))));
   return {
     attributes,
-    bonus: rollClassic(BONUS_ROLL, random),
-    health: startingHealth(cls, random),
-    gold: 50 + Math.floor(random() * 150),
+    bonus: arenaRoll(BONUS_ROLL, random),
+    health: startingHealth(cls, derivedAttributes(attributes).health, random),
+    gold: 50 + below(150, random),
   };
 }
 
-/** 25 plus one roll of the class's hit die. */
-export function startingHealth(cls: ClassInfo, random: Random): number {
-  return 25 + roll(random, 1, cls.healthDie);
+/** 25 plus a roll of the class's hit die plus Endurance's health bonus, those two counting at least 1. */
+export function startingHealth(cls: ClassInfo, healthBonus: number, random: Random): number {
+  return 25 + Math.max(1, arenaRoll(cls.healthDie, random) + healthBonus);
 }
 
-/** The values the character sheet shows beside the attributes, worked out as Arena does (OpenTESArena's ArenaPlayerUtils). */
+/** The values the character sheet shows beside the attributes. */
 export interface DerivedAttributes {
   /** From Strength. */
   damage: number;
@@ -286,28 +306,26 @@ export interface DerivedAttributes {
   charisma: number;
 }
 
-/** Agility's (and Personality's) step: -1 up to 45, 0 at 46, then one for every five above 50. */
-function agilityBonus(value: number): number {
-  if (value <= 45) return -1;
-  if (value <= 46) return 0;
-  return Math.trunc((value - 50) / 5);
-}
-
+/**
+ * The sheet's numbers, as the original shows them for every roll seen:
+ * Strength's damage on Arena's own scale ((Strength - 122) / 13); the others
+ * a step for every five points from 50 (Endurance: every ten from 45), each
+ * cut toward zero. OpenTESArena's versions hold some of these at 0 or -1
+ * below a point; the original doesn't.
+ */
 export function derivedAttributes(a: number[]): DerivedAttributes {
-  const str = a[STRENGTH];
-  const wil = a[WILLPOWER];
-  // Endurance is worked on Arena's own scale of 256 and brought back to 100.
-  const end256 = Math.trunc((a[ENDURANCE] * 256) / 100);
-  const health = Math.round((Math.trunc((end256 - 128 + 12) / 25) * 100) / 256);
+  // Adding 0 turns -0 into 0.
+  const step = (v: number, from: number, every: number) => Math.trunc((v - from) / every) + 0;
+  const health = step(a[ENDURANCE], 45, 10);
   return {
-    damage: str <= 43 ? 0 : Math.trunc((str - 48) / 5),
-    maxKilos: str * 2,
-    magicDefence: wil <= 38 ? -2 : wil <= 41 ? -1 : wil <= 46 ? 0 : Math.trunc((wil - 46) / 9),
-    toHit: agilityBonus(a[AGILITY]),
-    toDefend: agilityBonus(a[AGILITY]),
+    damage: step(to256(a[STRENGTH]), 122, 13),
+    maxKilos: a[STRENGTH] * 2,
+    magicDefence: step(a[WILLPOWER], 50, 5),
+    toHit: step(a[AGILITY], 50, 5),
+    toDefend: step(a[AGILITY], 50, 5),
     health,
     healMod: health,
-    charisma: agilityBonus(a[PERSONALITY]),
+    charisma: step(a[PERSONALITY], 50, 5),
   };
 }
 

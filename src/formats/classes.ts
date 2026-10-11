@@ -36,6 +36,8 @@ const ATTRIBUTES = 8;
 export interface ClassInfo {
   /** e.g. "Spellsword". */
   name: string;
+  /** Its place in the game's class list, Mage 0 to Knight 17; Arena's rules go by it. */
+  id?: number;
   /** Health each level adds is rolled from 1 to this. */
   healthDie: number;
   /** Experience needed to reach level 2. */
@@ -154,6 +156,7 @@ export function readCharacterTables(image: Uint8Array): CharacterTables {
 
   const classes: ClassInfo[] = names.map((name, i) => ({
     name,
+    id: i,
     healthDie: dice[i],
     experience: experience[i],
     spellcaster: (flags[i] & 0x20) !== 0,

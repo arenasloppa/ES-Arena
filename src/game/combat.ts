@@ -9,6 +9,7 @@
  * class and attributes add is worked out in character.ts.
  */
 import type { ClassInfo } from '../formats/classes';
+import { arenaRoll } from './character';
 
 export type Random = () => number;
 
@@ -146,20 +147,25 @@ export function experienceFor(level: number, base = DEFAULT_HERO.experience): nu
   return level <= 1 ? 0 : base * (2 ** (level - 1) - 1);
 }
 
-/**
- * Adds experience and raises the player's level as often as it allows;
- * returns how many levels were gained. Each level adds health and stamina
- * and refills them, and spell points too (which, as in Arena, don't grow
- * with level).
- */
+/** Adds experience and raises the player's level as often as it allows (see levelUp); returns how many levels were gained. */
 export function gainExperience(p: PlayerStats, amount: number, random: Random, hero: Hero = DEFAULT_HERO): number {
   p.experience += amount;
+  return levelUp(p, random, hero);
+}
+
+/**
+ * Raises the player's level as often as their experience allows; returns how
+ * many levels were gained. Each level adds health and refills it, fatigue and
+ * spell points (which, as in Arena, don't grow with level).
+ */
+export function levelUp(p: PlayerStats, random: Random, hero: Hero = DEFAULT_HERO): number {
   let gained = 0;
   while (p.experience >= experienceFor(p.level + 1, hero.experience)) {
     p.level++;
     gained++;
-    p.maxHealth += Math.max(1, roll(random, 1, hero.healthDie) + hero.healthBonus);
-    p.maxStamina += 10;
+    // As at creation: a roll of the hit die (Arena's dice) and Endurance's bonus, at least 1. Fatigue
+    // comes from Strength and Endurance alone, so it doesn't grow with level.
+    p.maxHealth += Math.max(1, arenaRoll(hero.healthDie, random) + hero.healthBonus);
     p.health = p.maxHealth;
     p.stamina = p.maxStamina;
     p.magicka = p.maxMagicka;

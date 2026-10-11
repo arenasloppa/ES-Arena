@@ -1,6 +1,6 @@
 /**
  * Character creation, as in Arena: a class chosen from the list or by
- * answering ten questions, a gender and a name, a race chosen by its
+ * answering ten questions, a name and a gender, a race chosen by its
  * province on the map of Tamriel, the game's words on the race and on what
  * the class needs, then bonus points shared out among the rolled attributes
  * on a sheet like Arena's, and a face. Each step shows the game's own words, read
@@ -193,7 +193,7 @@ export class CharacterCreation {
         this.root.append(body);
         this.options(
           [
-            ['Accept', () => this.go('gender')],
+            ['Accept', () => this.go('name')],
             ['Choose another', () => this.go('classes')],
           ],
           'create-choices',
@@ -209,7 +209,7 @@ export class CharacterCreation {
           const b = el('button', 'option', c.name);
           b.addEventListener('click', () => {
             d.cls = i;
-            this.go('gender');
+            this.go('name');
           });
           b.addEventListener('focus', () => details.replaceChildren(this.classDetails(c)));
           list.append(b);
@@ -264,7 +264,7 @@ export class CharacterCreation {
         });
         next.addEventListener('click', () => {
           d.name = d.name.trim();
-          if (d.name) this.go('race');
+          if (d.name) this.go('gender');
         });
         update();
         nav.append(box, random, next);
@@ -404,7 +404,7 @@ export class CharacterCreation {
 
   private setGender(gender: Gender): void {
     this.draft.gender = gender;
-    this.go('name');
+    this.go('race');
   }
 
   // ---- The map ----
@@ -435,12 +435,11 @@ export class CharacterCreation {
       return b;
     });
     side.append(list);
-    const near = (e: MouseEvent): number | 'exit' | undefined => {
+    // Arena hides the map's Exit while a character is being made; Esc or B goes back instead.
+    const near = (e: MouseEvent): number | undefined => {
       const rect = canvas.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * MAP_WIDTH;
       const y = ((e.clientY - rect.top) / rect.height) * MAP_HEIGHT;
-      // Arena's own "Exit" in the corner of the map.
-      if (x > 272 && y > 180) return 'exit';
       const spots = [...PROVINCE_AT, IMPERIAL_AT];
       let best = -1;
       let bestDist = Infinity;
@@ -457,8 +456,7 @@ export class CharacterCreation {
     });
     canvas.addEventListener('click', (e) => {
       const i = near(e);
-      if (i === 'exit') this.back();
-      else if (i !== undefined) this.pickRace(i);
+      if (i !== undefined) this.pickRace(i);
     });
     const portraits = this.host?.portraits;
     if (!portraits) mapBox.hidden = true;
@@ -470,7 +468,10 @@ export class CharacterCreation {
       }
       canvas.width = image.width;
       canvas.height = image.height;
-      canvas.getContext('2d')!.drawImage(image, 0, 0);
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      // Arena hides the map's Exit while a character is being made: the parchment edge beside it covers it.
+      if (image.width === MAP_WIDTH && image.height === MAP_HEIGHT) ctx.drawImage(canvas, 222, 178, 50, 22, 270, 178, 50, 22);
       mapBox.style.visibility = '';
     });
     body.append(mapBox, side);
@@ -505,7 +506,7 @@ export class CharacterCreation {
    * The sheet, laid out like Arena's (CHARSTAT.IMG): each attribute with what
    * it gives beside it, then health, fatigue, gold, experience and level, and
    * the bonus points left. "Done" asks, as Arena does, whether to keep the
-   * attributes or roll them again, and won't go on with points left over.
+   * attributes or roll them again; keeping them wants every point shared out.
    * Returns the first row.
    */
   private renderAttributes(): HTMLElement {
@@ -541,15 +542,17 @@ export class CharacterCreation {
       rows.forEach((r) => (r.disabled = on));
       (on ? save : done).focus();
     };
-    done.addEventListener('click', () => {
-      if (this.bonusLeft > 0) {
-        left.textContent = sheet.distributeAll;
-        left.classList.add('warn');
+    // As in Arena, Done always asks; it is saving that wants every point shared out first.
+    done.addEventListener('click', () => choosing(true));
+    save.addEventListener('click', () => {
+      if (this.bonusLeft === 0) {
+        this.go('face');
         return;
       }
-      choosing(true);
+      choosing(false);
+      left.textContent = sheet.distributeAll;
+      left.classList.add('warn');
     });
-    save.addEventListener('click', () => this.go('face'));
     again.addEventListener('click', () => {
       this.reroll();
       show();
@@ -572,7 +575,7 @@ export class CharacterCreation {
           ['Damage', signed(v.damage)],
           ['Max Kilos', String(v.maxKilos)],
         ],
-        [['Spell Pts', String(spellPoints)]],
+        [['Spell Pts', `${spellPoints}/${spellPoints}`]],
         [['Magic Def', signed(v.magicDefence)]],
         [
           ['To Hit', signed(v.toHit)],

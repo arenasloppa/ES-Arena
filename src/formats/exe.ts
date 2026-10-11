@@ -27,6 +27,7 @@
  *
  * The character tables (classes, races, creation texts) are in classes.ts.
  */
+import { readCalendar, type Calendar } from './calendar';
 import { readCharacterTables, type CharacterTables } from './classes';
 import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
 import { readMessages, type GameMessages } from './messages';
@@ -88,11 +89,14 @@ export interface ExeData {
   /** The game's own messages (drowning, camping and the like). */
   messages?: GameMessages;
   /**
-   * Each race's starting attributes, 0 to 100, for men (row race * 2) and
-   * women (race * 2 + 1), in the attributes' order. Missing when the
-   * program is laid out differently from the two versions known.
+   * Each race's starting attributes on Arena's scale of 0 to 255, for men
+   * (row race * 2) and women (race * 2 + 1), in the attributes' order.
+   * Missing when the program is laid out differently from the two versions
+   * known.
    */
   raceAttributes?: number[][];
+  /** The months, weekdays and words for dates and times; missing when they can't be found. */
+  calendar?: Calendar;
   /** What turns up when monsters come upon the player (resting, for one); missing as above. */
   encounters?: EncounterTables;
   /** Classes, races and the words of character creation; missing when they could not be read. */
@@ -105,7 +109,7 @@ const TABLE_ENTRIES = 24;
 const WEAPONS = 18;
 
 export function readExeData(image: Uint8Array): ExeData {
-  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image), raceAttributes: readRaceAttributes(image), encounters: readEncounters(image) };
+  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image), platforms: readRaisedPlatforms(image), messages: readMessages(image), raceAttributes: readRaceAttributes(image), encounters: readEncounters(image), calendar: readCalendar(image) };
   try {
     data.character = readCharacterTables(image);
   } catch (err) {
@@ -156,14 +160,13 @@ export function readEncounters(image: Uint8Array): EncounterTables | undefined {
 
 /**
  * The race attribute table ([Entities] RaceAttributes in OpenTESArena's
- * lists): 16 rows of 8 bytes on a 0-255 scale, turned to 0-100 as
- * OpenTESArena does.
+ * lists): 16 rows of 8 bytes on Arena's scale of 0 to 255.
  */
 export function readRaceAttributes(image: Uint8Array): number[][] | undefined {
   const v = version(image);
   if (!v || v.raceAttributes + 128 > image.length) return undefined;
-  const rows = Array.from({ length: 16 }, (_, r) => Array.from(image.subarray(v.raceAttributes + r * 8, v.raceAttributes + r * 8 + 8), (b) => Math.round(b / 2.55)));
-  return rows.every((row) => row.every((a) => a >= 10 && a <= 90)) ? rows : undefined;
+  const rows = Array.from({ length: 16 }, (_, r) => Array.from(image.subarray(v.raceAttributes + r * 8, v.raceAttributes + r * 8 + 8)));
+  return rows.every((row) => row.every((a) => a >= 25 && a <= 230)) ? rows : undefined;
 }
 
 export function readRaisedPlatforms(image: Uint8Array): RaisedPlatforms | undefined {

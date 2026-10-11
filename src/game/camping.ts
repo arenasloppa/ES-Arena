@@ -1,24 +1,32 @@
 /**
- * Camping, as Arena does it (OpenTESArena's reading of the original): the
- * player rests a number of hours or until fully healed, time passes 600
- * times as fast, and six times a second health, fatigue and spell points
- * come back by Arena's rest formulas. It can't begin with monsters near or
- * anywhere but on the ground, and each hour monsters may come upon the
- * resting player, which ends it. Pure logic, so it can be unit tested; the
+ * Camping, as Arena does it (the OpenTESArena wiki's reading of the program,
+ * checked against the original running): the player rests a number of hours
+ * or until fully healed, the clock running on 20 minutes at a time, and each
+ * hour health, fatigue and spell points come back by Arena's sums. It can't
+ * begin with monsters near or anywhere but on the ground, and each hour
+ * monsters may come upon the resting player, which ends it. Pure logic, so it can be unit tested; the
  * dungeon (dungeon.ts) runs it and the wait menu (ui/waitMenu.ts) starts it.
  */
 import type { EncounterTables } from '../formats/exe';
-import { rollClassic } from './character';
+import { arenaRoll } from './character';
 import type { Random } from './combat';
 import { cellIndex } from './grid';
 import { isBlocking, type Level } from './level';
 
 /** Game seconds that pass in a real one: a day takes about 110 minutes (OpenTESArena's ArenaClockUtils). */
 export const GAME_SECONDS_PER_SECOND = 86400 / 6646.153846153846;
-/** While camping, time passes this many times as fast. */
-export const CAMPING_TIME_SCALE = 600;
-/** Real seconds between each bit of healing while camping. */
-export const RECOVERY_TICK = 1 / 6;
+/**
+ * Resting moves the clock on 20 game minutes at a time (the OpenTESArena
+ * wiki's reading of the program; an hour at a time in a rented room), healing
+ * each hour.
+ */
+export const REST_STEP = 20 * 60;
+/**
+ * Real seconds each step takes. The original runs them as fast as the
+ * machine goes (three hours in under half a second in DOSBox); the remake
+ * gives each a moment so the hours can be seen going by.
+ */
+export const REST_STEP_SECONDS = 1 / 30;
 /** Monsters this near (in voxels) keep the player from camping. */
 export const SAFE_SLEEP_DISTANCE = 8;
 /** Arena's place for a main quest dungeon, such as the Imperial Dungeons, in its encounter tables. */
@@ -29,8 +37,6 @@ const RESTING = 5;
 const DUNGEON_ENCOUNTERS = 7;
 /** Highest level encounters are scaled to. */
 const MAX_ENCOUNTER_LEVEL = 20;
-/** OpenTESArena: the class (Healer, fifth in the game's list) that heals more for resting. */
-const REST_HEALING_BONUS: Record<string, number> = { Healer: 20 };
 
 /** The numbers resting changes. */
 export interface Resting {
@@ -51,22 +57,18 @@ export interface Rester {
   regainsMagicka: boolean;
 }
 
-/** On Arena's scale of 256 and back (OpenTESArena's ArenaStatUtils). */
-const to256 = (v: number) => Math.trunc((v * 256) / 100);
-const from256 = (v: number) => Math.round((v * 100) / 256);
-
 /**
- * One bit of healing while camping (OpenTESArena's applyRestHealing, with a
- * rest factor of 1): health by the heal mod and the class's bonus, fatigue
- * likewise, and an eighth of the spell points.
+ * An hour's healing while resting, as the OpenTESArena wiki gives the
+ * program: health by the heal mod, 2 percent more for a Healer and the heal
+ * mod again (if it helps) for a Barbarian, at least 1; fatigue likewise; and
+ * an eighth of the spell points for casters other than the Sorcerer.
  */
 export function restHealing(p: Resting, who: Rester): void {
-  const bonus = REST_HEALING_BONUS[who.className ?? ''] ?? 0;
-  const heal = Math.max(1, Math.trunc((Math.trunc(p.maxHealth) * (who.healMod * 5 + 60 + bonus)) / 1000));
-  p.health = Math.min(p.maxHealth, p.health + heal);
-  const stamina256 = Math.trunc((to256(Math.trunc(p.maxStamina)) << 6) / 1000);
-  const stamina = from256((stamina256 * (who.healMod * 5 + 70)) >> 6);
-  p.stamina = Math.min(p.maxStamina, p.stamina + stamina);
+  const healer = who.className === 'Healer' ? 20 : 0;
+  let heal = Math.trunc((Math.trunc(p.maxHealth) * (who.healMod * 5 + 60 + healer)) / 1000);
+  if (who.className === 'Barbarian') heal += Math.max(0, who.healMod);
+  p.health = Math.min(p.maxHealth, p.health + Math.max(1, heal));
+  p.stamina = Math.min(p.maxStamina, p.stamina + Math.trunc((Math.trunc(p.maxStamina) * (who.healMod * 5 + 70)) / 1000));
   if (who.regainsMagicka && p.magicka < p.maxMagicka) p.magicka = Math.min(p.maxMagicka, p.magicka + (Math.trunc(p.maxMagicka) >> 3));
 }
 
@@ -94,7 +96,7 @@ export function chooseEncounter(tables: EncounterTables, playerLevel: number, ra
   let level = Math.min(playerLevel + 1, MAX_ENCOUNTER_LEVEL) + (next(random) % 4);
   // Arena rolls until it gets one; the limit only guards against a broken random source.
   for (let tries = 0; ; tries++) {
-    let r = rollClassic(level * 2, random);
+    let r = arenaRoll(level * 2, random);
     if (r > level) r = level * 2 - r;
     if (r >= Math.trunc(level / 2) || tries > 1000) {
       level = Math.max(r, 1);

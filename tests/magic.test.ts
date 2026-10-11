@@ -168,12 +168,13 @@ describe('magic in the dungeon', () => {
     ]);
   });
 
-  it('teaches a spell with each level gained', () => {
+  it('learns no spell by levelling: in Arena spells are bought from the Mages Guild', () => {
     const d = new Dungeon(room(), { ...TABLES, creatures: [fakeCreature({ health: [1, 1], experience: 5000 })] }, always(0), caster(), SPELLS);
+    const known = d.spellbook.map((s) => s.name);
     d.update(0.05, cast);
-    tick(d, 1);
+    // Long enough for a game minute to pass, when Arena gives the level.
+    tick(d, 6);
     expect(d.stats.level).toBeGreaterThan(1);
-    expect(d.spellbook.map((s) => s.name)).toContain('Blast');
-    expect(notes(d.events)).toContain('Spell learned: Blast');
+    expect(d.spellbook.map((s) => s.name)).toEqual(known);
   });
 });

@@ -28,7 +28,7 @@ import {
   bashChance,
   DEFAULT_HERO,
   drinkPotion,
-  gainExperience,
+  levelUp,
   newPlayerStats,
   recover,
   roll,
@@ -71,7 +71,6 @@ import {
   lightReach,
   magickaCost,
   magnitude,
-  nextSpell,
   NON_TARGET,
   offensive,
   OPEN,
@@ -92,12 +91,13 @@ import { isBlocking, type DoorSounds, type Level, type LevelItem } from './level
 import { airborne, groundUnder, inChasm, jump, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
 import type { GameMessages } from '../formats/messages';
 import type { CreatureInfo, EncounterTables } from '../formats/exe';
+import { START_MINUTES } from '../formats/calendar';
 import {
-  CAMPING_TIME_SCALE,
   chooseEncounter,
   GAME_SECONDS_PER_SECOND,
   needsRest,
-  RECOVERY_TICK,
+  REST_STEP,
+  REST_STEP_SECONDS,
   restEncounterChance,
   restHealing,
   SAFE_SLEEP_DISTANCE,
@@ -279,9 +279,10 @@ const PICK_TIME = 1.2;
  * then the dungeon has no monsters either). Its numbers are the remake's own.
  */
 const DEFAULT_WEAPON: Weapon = { name: 'Shortsword', damage: [2, 6], cif: 'SWORD.CIF' };
-/** A character of their own starts with these, as well as their gear (and gold, unless rolled at creation). */
-const START_POTIONS = 1;
+/** Gold for a character from before gold was rolled at creation. */
 const START_GOLD = 25;
+/** A new character's experience, as the original's sheet shows it at the start (and its program sets it). */
+const START_EXPERIENCE = 700;
 /**
  * Swimming tires the player: Arena's waking loss of 11/64 fatigue a game
  * minute, at 13 game seconds a real one, 30 times over, on its 0-256 scale
@@ -371,9 +372,9 @@ export class Dungeon {
   readied?: SpellRecord;
   /** Spells in flight. */
   readonly bolts: Bolt[] = [];
-  /** Game seconds since the game began; time passes 13 times as fast as play, and 600 times faster again while camping. */
+  /** Game seconds since the game began; time passes 13 times as fast as play, and in steps of 20 minutes while camping. */
   clock = 0;
-  /** Resting: hours left (or, until healed, hours so far) and the time to the next bit of healing. */
+  /** Resting: hours left (or, until healed, hours so far) and the time to the clock's next step. */
   camping?: { hoursLeft?: number; hoursPassed: number; tick: number };
   /** Ria has shown the player the Staff in a dream. */
   dreamt = false;
@@ -402,7 +403,6 @@ export class Dungeon {
   private moving = false;
   private cleared = false;
   private sprintHeld = false;
-  private readonly allSpells: SpellRecord[];
   private nextBolt = 0;
   private sinceCast = Infinity;
   private castHeld = false;
@@ -435,11 +435,11 @@ export class Dungeon {
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
     const held = this.inventory.weapon;
     this.stats = newPlayerStats(held ? weaponOf(held) : DEFAULT_WEAPON, hero);
+    // As in Arena, a character starts with their weapon, their gold and 700 experience: no potions, no armour.
     if (hero.cls) {
-      this.stats.potions = START_POTIONS;
       this.stats.gold = hero.gold ?? START_GOLD;
+      this.stats.experience = START_EXPERIENCE;
     }
-    this.allSpells = spells;
     if (hero.magicka > 0) {
       this.spellbook.push(...startingSpells(spells));
       this.readied = this.spellbook.find(offensive) ?? this.spellbook[0];
@@ -477,7 +477,9 @@ export class Dungeon {
       this.updateCamping(dt);
       return;
     }
+    const minute = Math.floor(this.clock / 60);
     this.clock += dt * GAME_SECONDS_PER_SECOND;
+    if (!this.outcome && Math.floor(this.clock / 60) !== minute) this.checkLevel();
     if (!this.outcome) {
       this.move(dt, input);
       this.updateAttack(dt, input);
@@ -523,6 +525,23 @@ export class Dungeon {
     return this.quest?.current;
   }
 
+  /**
+   * Arena checks for a new level each game minute, and only with no monsters
+   * near and the player not resting (the OpenTESArena wiki's reading of the
+   * program), so a level won in a fight comes once the fight is over.
+   */
+  private checkLevel(): void {
+    if (this.camping || this.enemiesNear()) return;
+    const s = this.stats;
+    const before = { health: s.maxHealth, stamina: s.maxStamina };
+    if (levelUp(s, this.random, this.hero)) {
+      this.events.push(
+        { type: 'levelUp', level: s.level, health: s.maxHealth - before.health, stamina: s.maxStamina - before.stamina },
+        { type: 'sound', name: 'FANFARE1.VOC' },
+      );
+    }
+  }
+
   // ---- Camping ----
 
   /**
@@ -530,9 +549,11 @@ export class Dungeon {
    * button does; returns the game's words for why not when it can't. Arena
    * won't let the player rest with monsters near or anywhere but on the
    * floor, nor rest until healed when there is nothing to heal. The first
-   * rest at level 2 or above brings Ria to the player's dreams: the Staff of
-   * Chaos and then where its first piece lies, or, as in the original, only
-   * the second when the player has already reached level 3 (UESP).
+   * rest at level 2 or above brings Ria to the player's dreams once it is
+   * over (the program shows the main quest's vision after resting): the
+   * Staff of Chaos and then where its first piece lies, or, as in the
+   * original, only the second when the player has already reached level 3
+   * (UESP).
    */
   camp(hours: number | 'healed'): string | undefined {
     if (this.outcome) return undefined;
@@ -540,26 +561,36 @@ export class Dungeon {
     if (this.enemiesNear()) return m.enemiesNearby ?? CAMP_WORDS.enemiesNearby;
     if (this.swimming || this.climb || airborne(this.level, this.player)) return m.campingNotAllowed ?? CAMP_WORDS.campingNotAllowed;
     if (hours === 'healed' && !needsRest(this.stats, this.rester)) return m.fullyRested ?? CAMP_WORDS.fullyRested;
-    this.camping = { hoursLeft: hours === 'healed' ? undefined : Math.max(1, Math.floor(hours)), hoursPassed: 0, tick: RECOVERY_TICK };
+    this.camping = { hoursLeft: hours === 'healed' ? undefined : Math.max(1, Math.floor(hours)), hoursPassed: 0, tick: REST_STEP_SECONDS };
     this.blocking = false;
     this.running = false;
     this.swing = undefined;
     this.events.push({ type: 'camping' });
-    if (!this.dreamt && this.stats.level >= 2) {
-      this.dreamt = true;
-      this.events.push({ type: 'dream', visions: this.stats.level >= 3 ? ['fangLair'] : ['staffIntro', 'fangLair'] });
-    }
     return undefined;
   }
 
-  /** Stops camping early, as pressing Arena's camp button again does. */
+  /** Stops camping early, as pressing Arena's camp button again does (or monsters coming). */
   stopCamping(text?: string): void {
     if (!this.camping) return;
     this.camping = undefined;
     this.events.push({ type: 'camped', text });
   }
 
+  /** A rest run its course: woken or healed, then Ria's dream if one is due. */
+  private finishCamping(text: string): void {
+    this.stopCamping(text);
+    if (!this.dreamt && this.stats.level >= 2) {
+      this.dreamt = true;
+      this.events.push({ type: 'dream', visions: this.stats.level >= 3 ? ['fangLair'] : ['staffIntro', 'fangLair'] });
+    }
+  }
+
   /** "3 hours remaining..." or, resting until healed, "2 hours passed....", in the game's words. */
+  /** Game minutes since the start of 3E 389, as Arena counts the time (see formats/calendar.ts). */
+  get minutes(): number {
+    return START_MINUTES + Math.floor(this.clock / 60);
+  }
+
   get campingText(): string | undefined {
     const c = this.camping;
     if (!c) return undefined;
@@ -584,17 +615,19 @@ export class Dungeon {
   private updateCamping(dt: number): void {
     const c = this.camping!;
     const m = this.messages;
-    for (c.tick -= dt; c.tick <= 0 && this.camping; c.tick += RECOVERY_TICK) {
+    for (c.tick -= dt; c.tick <= 0 && this.camping; c.tick += REST_STEP_SECONDS) {
+      const hour = Math.floor(this.clock / 3600);
+      this.clock += REST_STEP;
+      if (Math.floor(this.clock / 3600) === hour) continue;
+      // Each hour: healing, the count, and perhaps monsters.
       restHealing(this.stats, this.rester);
-      if (c.hoursLeft === undefined && !needsRest(this.stats, this.rester)) this.stopCamping(m.doneHealed ?? CAMP_WORDS.doneHealed);
-    }
-    const before = Math.floor(this.clock / 3600);
-    this.clock += dt * GAME_SECONDS_PER_SECOND * CAMPING_TIME_SCALE;
-    for (let hour = before; hour < Math.floor(this.clock / 3600) && this.camping; hour++) {
       if (c.hoursLeft !== undefined) {
         c.hoursLeft--;
-        if (c.hoursLeft <= 0) this.stopCamping(m.doneWakeUp ?? CAMP_WORDS.doneWakeUp);
-      } else c.hoursPassed++;
+        if (c.hoursLeft <= 0) this.finishCamping(m.doneWakeUp ?? CAMP_WORDS.doneWakeUp);
+      } else {
+        c.hoursPassed++;
+        if (!needsRest(this.stats, this.rester)) this.finishCamping(m.doneHealed ?? CAMP_WORDS.doneHealed);
+      }
       this.encounter();
     }
     // The monsters go about their business meanwhile.
@@ -980,22 +1013,8 @@ export class Dungeon {
   private killed(c: Creature): void {
     this.kills++;
     this.events.push({ type: 'sound', name: 'BODYFALL.VOC', at: { x: c.x, y: c.y } });
-    const s = this.stats;
-    const before = { health: s.maxHealth, stamina: s.maxStamina };
-    const gained = gainExperience(s, c.info.experience + c.info.experiencePerHealth * c.maxHealth, this.random, this.hero);
-    if (gained) {
-      this.events.push(
-        { type: 'levelUp', level: s.level, health: s.maxHealth - before.health, stamina: s.maxStamina - before.stamina },
-        { type: 'sound', name: 'FANFARE1.VOC' },
-      );
-      // Until there is a Mages Guild, each level teaches a spell.
-      for (let i = 0; i < gained && this.hero.magicka > 0; i++) {
-        const spell = nextSpell(this.allSpells, this.spellbook);
-        if (!spell) break;
-        this.spellbook.push(spell);
-        this.events.push({ type: 'notify', text: `Spell learned: ${spell.name}` });
-      }
-    }
+    // The level comes later, once a game minute passes with no monsters near (checkLevel).
+    this.stats.experience += c.info.experience + c.info.experiencePerHealth * c.maxHealth;
     if (!this.cleared && this.creatures.every((o) => !isAlive(o))) {
       this.cleared = true;
       this.events.push({ type: 'cleared' });

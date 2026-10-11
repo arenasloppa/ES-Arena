@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EncounterTables, ExeData } from '../src/formats/exe';
-import { CAMPING_TIME_SCALE, chooseEncounter, GAME_SECONDS_PER_SECOND, needsRest, restHealing, spawnSpot, type Resting } from '../src/game/camping';
+import { chooseEncounter, needsRest, REST_STEP, REST_STEP_SECONDS, restHealing, spawnSpot, type Resting } from '../src/game/camping';
 import { Dungeon, IDLE_INPUT, type DungeonEvent } from '../src/game/dungeon';
 import { DEFAULT_HERO } from '../src/game/combat';
 import { always, fakeCreature, textLevel } from './helpers/level';
@@ -12,20 +12,24 @@ const sequence = (...values: number[]) => {
   let i = 0;
   return () => values[Math.min(i++, values.length - 1)];
 };
-/** Real seconds an hour of camping takes. */
-const HOUR = 3600 / (GAME_SECONDS_PER_SECOND * CAMPING_TIME_SCALE);
+/** Real seconds an hour of camping takes: three steps of 20 minutes. */
+const HOUR = (3600 / REST_STEP) * REST_STEP_SECONDS;
 
 const worn = (): Resting => ({ health: 10, maxHealth: 40, stamina: 20, maxStamina: 100, magicka: 0, maxMagicka: 40 });
 
 describe('camping rules', () => {
-  it('heals as Arena does each sixth of a second: health by the heal mod and class, fatigue, and an eighth of the spell points', () => {
+  it('heals as Arena does each hour: health by the heal mod and class, fatigue, and an eighth of the spell points', () => {
     const p = worn();
     restHealing(p, { healMod: 0, regainsMagicka: true });
-    // 40 * 60 / 1000; fatigue 100 is 256 on Arena's scale, 16 a tick, times 70, back to 7; 40 / 8.
+    // 40 * 60 / 1000; fatigue 100 * 70 / 1000; 40 / 8.
     expect(p).toMatchObject({ health: 12, stamina: 27, magicka: 5 });
     const healer = worn();
     restHealing(healer, { className: 'Healer', healMod: 0, regainsMagicka: false });
     expect(healer).toMatchObject({ health: 13, magicka: 0 });
+    // A Barbarian adds the heal mod again, when it helps.
+    const barbarian = worn();
+    restHealing(barbarian, { className: 'Barbarian', healMod: 2, regainsMagicka: false });
+    expect(barbarian.health).toBe(10 + 2 + 2);
     // Always at least one point of health.
     const small = { ...worn(), health: 1, maxHealth: 10 };
     restHealing(small, { healMod: -2, regainsMagicka: true });
@@ -110,19 +114,33 @@ describe('camping in the dungeon', () => {
     expect(d.stats.health).toBe(d.stats.maxHealth);
   });
 
-  it('brings Ria at the first rest from level 2: the Staff, then Fang Lair; only Fang Lair from level 3', () => {
+  it('brings Ria after the first rest from level 2: the Staff, then Fang Lair; only Fang Lair from level 3', () => {
     const dreams = (level: number) => {
       const d = new Dungeon(textLevel(ROOM), TABLES, always(0.5));
       d.stats.level = level;
+      const visions = (events: DungeonEvent[]) => events.flatMap((e) => (e.type === 'dream' ? [e.visions] : []));
       d.camp(1);
-      const first = d.events.splice(0).flatMap((e) => (e.type === 'dream' ? [e.visions] : []));
-      d.stopCamping();
+      // Nothing while resting; it comes once the rest is over.
+      const during = visions(d.events.splice(0));
+      const first = visions(rest(d, HOUR * 1.5));
       d.camp(1);
-      return [first, d.events.flatMap((e) => (e.type === 'dream' ? [e.visions] : []))];
+      return [during, first, visions(rest(d, HOUR * 1.5))];
     };
-    expect(dreams(1)).toEqual([[], []]);
-    expect(dreams(2)).toEqual([[['staffIntro', 'fangLair']], []]);
-    expect(dreams(3)).toEqual([[['fangLair']], []]);
+    expect(dreams(1)).toEqual([[], [], []]);
+    expect(dreams(2)).toEqual([[], [['staffIntro', 'fangLair']], []]);
+    expect(dreams(3)).toEqual([[], [['fangLair']], []]);
+  });
+
+  it('gives a level won in a fight only once no monster is near, as Arena checks each game minute', () => {
+    const level = textLevel(ROOM, { creatures: [{ x: 4.5, y: 1.5, type: 0 }] });
+    const d = new Dungeon(level, TABLES, always(0.5));
+    d.stats.experience = 1e6;
+    rest(d, 10);
+    expect(d.stats.level).toBe(1);
+    d.creatures[0].state = 'dead';
+    const events = rest(d, 10);
+    expect(d.stats.level).toBeGreaterThan(1);
+    expect(events.some((e) => e.type === 'levelUp')).toBe(true);
   });
 
   it('is ended by monsters that come upon the player, at the game’s chance an hour', () => {
