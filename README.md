@@ -11,6 +11,8 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 >
 > — arenasloppa, the human
 
+[![Support arenasloppa on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
+
 ## Who does what
 
 Claude writes everything here: the decoders for Arena's 1994 file formats, the 3D engine, the tests and this page.
@@ -164,7 +166,9 @@ checking against the original game.
 
 ## Support
 
-If you enjoy it, you can buy arenasloppa a coffee on [Ko-fi](https://ko-fi.com/arenasloppa).
+If you enjoy it, you can buy arenasloppa a coffee on Ko-fi.
+
+[![Support arenasloppa on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
 
 ## Legal
 
