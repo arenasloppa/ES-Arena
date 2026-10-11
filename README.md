@@ -67,9 +67,10 @@ npm run app     # or open it as the desktop app
 ### Controls
 
 The controls follow Skyrim's. Any controller the browser or app recognises works, including Xbox, PlayStation and
-Switch Pro controllers, and the on-screen prompts show its own buttons.
+Switch Pro controllers, and the on-screen prompts show its own buttons. Below, buttons are named as on an Xbox
+controller, with the PlayStation button in brackets.
 
-| Action | Keyboard and mouse | Controller (PlayStation) |
+| Action | Keyboard and mouse | Controller |
 |---|---|---|
 | Move | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Left stick |
 | Look | Mouse (click the view to capture it) | Right stick |
