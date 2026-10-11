@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { DoorKind, Level, LevelFlat } from '../game/level';
-import { buildLevelGeometry, type QuadBatch } from './levelGeometry';
+import { buildLevelGeometry, type DoorGeometry, type QuadBatch } from './levelGeometry';
 
 /** Where level textures come from: the player's game files (TextureCache) or the built-in backdrop. */
 export interface TextureProvider {
@@ -12,21 +12,27 @@ export interface TextureProvider {
 }
 
 export interface DoorMesh {
-  mesh: THREE.Mesh;
+  /** The door as one mesh, or for a swinging door a group of its faces, each turning on its own hinge. */
+  mesh: THREE.Object3D;
   /** 0 = closed, 1 = fully open. */
   openAmount: number;
   target: number;
   /** How it opens, and toward which walls (see DoorGeometry). */
   kind: DoorKind;
   alongX: boolean;
+  /** The middle of its cell. */
+  centre?: { x: number; z: number };
 }
 
 /**
  * Poses a door `open` (0 to 1) of the way open: raising doors go up into
- * the ceiling, sliding ones sideways into the wall beside them, swinging
- * ones turn on their corner into that wall.
+ * the ceiling, sliding ones sideways into the wall beside them, and each
+ * face of a swinging one turns in on its hinge (see DoorPanel), as in Arena.
+ * Arena draws only the face of a swinging door on the viewer's side, so its
+ * far face does not show through the bars, nor lie along the doorway's other
+ * wall once open; give `viewer` to do the same.
  */
-export function poseDoor(door: DoorMesh, open: number, roomHeight: number): void {
+export function poseDoor(door: DoorMesh, open: number, roomHeight: number, viewer?: { x: number; z: number }): void {
   const m = door.mesh;
   switch (door.kind) {
     case 'raising':
@@ -38,9 +44,29 @@ export function poseDoor(door: DoorMesh, open: number, roomHeight: number): void
       else m.position.z = -open * 0.98;
       break;
     case 'swinging':
-      m.rotation.y = (door.alongX ? -1 : 1) * open * (Math.PI / 2);
+      for (const face of m.children) {
+        face.rotation.y = open * (Math.PI / 2);
+        const n = face.userData.normal as { x: number; z: number } | undefined;
+        const c = door.centre;
+        if (viewer && n && c) face.visible = (viewer.x - c.x) * n.x + (viewer.z - c.z) * n.z > 0;
+      }
       break;
   }
+}
+
+/** A door's mesh; a swinging door's faces are each built around their hinge, so turning one turns it on that corner. */
+export function doorObject(d: DoorGeometry, material: THREE.Material): THREE.Object3D {
+  if (d.kind !== 'swinging') return new THREE.Mesh(toGeometry(d.batch), material);
+  const group = new THREE.Group();
+  for (const panel of d.panels) {
+    const geometry = toGeometry(panel.batch);
+    geometry.translate(-panel.hinge.x, 0, -panel.hinge.z);
+    const face = new THREE.Mesh(geometry, material);
+    face.position.set(panel.hinge.x, 0, panel.hinge.z);
+    face.userData.normal = panel.normal;
+    group.add(face);
+  }
+  return group;
 }
 
 export interface LevelScene {
@@ -129,15 +155,9 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
 
   const doors = new Map<number, DoorMesh>();
   for (const d of geo.doors) {
-    const geometry = toGeometry(d.batch);
-    const mesh = new THREE.Mesh(geometry, await material(d.key));
-    // A swinging door turns on its north-west corner, so its geometry is built around it.
-    if (d.kind === 'swinging') {
-      geometry.translate(-d.x, 0, -d.y);
-      mesh.position.set(d.x, 0, d.y);
-    }
+    const mesh = doorObject(d, await material(d.key));
     group.add(mesh);
-    doors.set(d.cellIndex, { mesh, openAmount: 0, target: 0, kind: d.kind, alongX: d.alongX });
+    doors.set(d.cellIndex, { mesh, openAmount: 0, target: 0, kind: d.kind, alongX: d.alongX, centre: { x: d.x + 0.5, z: d.y + 0.5 } });
   }
 
   const skippedFlats: string[] = [];

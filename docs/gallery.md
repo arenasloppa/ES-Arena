@@ -3,15 +3,26 @@
 How ES Arena has looked from one release to the next, newest first. The screenshots are taken with
 `npm run screenshots`, which keeps the ones it replaces here.
 
-## 0.4.2 (latest)
+## 0.4.3 (latest)
 
 | | |
 |---|---|
 | ![The main menu](screenshots/menu.png)<br>The main menu | ![Choosing a race on the map of Tamriel](screenshots/race.png)<br>Choosing a race on the map of Tamriel |
 | ![Sharing out bonus points, beside the paper doll](screenshots/attributes.png)<br>Sharing out bonus points, beside the paper doll | ![Arriving in the cell where Arena begins](screenshots/cell.png)<br>Arriving in the cell where Arena begins |
 | ![A goblin raises its axe](screenshots/goblin.png)<br>A goblin raises its axe | ![Sneaking up on a rat](screenshots/sneak.png)<br>Sneaking up on a rat |
-| ![The item menu](screenshots/items.png)<br>The item menu | ![The character sheet](screenshots/character.png)<br>The character sheet |
-| ![The map fills in as you explore](screenshots/map.png)<br>The map fills in as you explore | ![Waiting, with the date and time in Arena](screenshots/wait.png)<br>Waiting, with the date and time in Arena |
+| ![The menu of menus, aiming at the items](screenshots/tween.png)<br>The menu of menus, aiming at the items | ![The item menu](screenshots/items.png)<br>The item menu |
+| ![The character sheet](screenshots/character.png)<br>The character sheet | ![The map fills in as you explore](screenshots/map.png)<br>The map fills in as you explore |
+| ![Waiting, with the date and time in Arena](screenshots/wait.png)<br>Waiting, with the date and time in Arena | ![A level gained, with bonus points to share out](screenshots/level.png)<br>A level gained, with bonus points to share out |
+
+## 0.4.2
+
+| | |
+|---|---|
+| ![The main menu](screenshots/0.4.2/menu.png)<br>The main menu | ![Choosing a race on the map of Tamriel](screenshots/0.4.2/race.png)<br>Choosing a race on the map of Tamriel |
+| ![Sharing out bonus points, beside the paper doll](screenshots/0.4.2/attributes.png)<br>Sharing out bonus points, beside the paper doll | ![Arriving in the cell where Arena begins](screenshots/0.4.2/cell.png)<br>Arriving in the cell where Arena begins |
+| ![A goblin raises its axe](screenshots/0.4.2/goblin.png)<br>A goblin raises its axe | ![Sneaking up on a rat](screenshots/0.4.2/sneak.png)<br>Sneaking up on a rat |
+| ![The item menu](screenshots/0.4.2/items.png)<br>The item menu | ![The character sheet](screenshots/0.4.2/character.png)<br>The character sheet |
+| ![The map fills in as you explore](screenshots/0.4.2/map.png)<br>The map fills in as you explore | ![Waiting, with the date and time in Arena](screenshots/0.4.2/wait.png)<br>Waiting, with the date and time in Arena |
 
 ## 0.4.0
 

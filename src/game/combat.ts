@@ -9,7 +9,6 @@
  * class and attributes add is worked out in character.ts.
  */
 import type { ClassInfo } from '../formats/classes';
-import { arenaRoll } from './character';
 
 export type Random = () => number;
 
@@ -52,6 +51,15 @@ export interface PlayerStats {
   /** Key numbers carried; each opens the locks of the same level. */
   keys: Set<number>;
   weapon: Weapon;
+  /**
+   * Max health less what Endurance gave at the start, and the hit die rolled
+   * at each level since: with Endurance's bonus as it is now for every
+   * level, they make max health (see maxHealthFor).
+   */
+  baseHealth: number;
+  healthRolls: number[];
+  /** Bonus points from the levels gained, still to be shared out among the attributes. */
+  bonusPoints: number;
 }
 
 /** What the player's character brings to a fight; see character.ts. */
@@ -61,10 +69,10 @@ export interface Hero {
   /** Health and stamina at level 1. */
   health: number;
   stamina: number;
-  /** Each level adds 1 to healthDie health, plus healthBonus (but always at least 1). */
+  /** Each level adds 1 to healthDie health, plus Endurance's healthBonus, which counts for every level (see maxHealthFor). */
   healthDie: number;
   healthBonus: number;
-  /** Experience needed for level 2; each level after needs twice as much again. */
+  /** Experience needed for level 2; each level after needs more (see experienceFor). */
   experience: number;
   /** Added to every blow. */
   damageBonus: number;
@@ -136,15 +144,22 @@ export function newPlayerStats(weapon: Weapon, hero: Hero = DEFAULT_HERO): Playe
     potions: 0,
     keys: new Set(),
     weapon,
+    baseHealth: hero.health - hero.healthBonus,
+    healthRolls: [],
+    bonusPoints: 0,
   };
 }
 
 /**
- * Experience needed to reach a level, as in Arena each level needs twice
- * the last: with 1,000 for level 2, 3,000 for 3, 7,000 for 4 and so on.
+ * Experience needed to reach a level, as Arena works it out (its program at
+ * 0x26B93): the class's figure for level 2, then 30/16 of the last for each
+ * level up to 10 and 24/16 after that, rounded down each time.
  */
 export function experienceFor(level: number, base = DEFAULT_HERO.experience): number {
-  return level <= 1 ? 0 : base * (2 ** (level - 1) - 1);
+  if (level <= 1) return 0;
+  let next = base;
+  for (let l = 3; l <= level; l++) next = Math.floor((next * (l <= 10 ? 30 : 24)) / 16);
+  return next;
 }
 
 /** Adds experience and raises the player's level as often as it allows (see levelUp); returns how many levels were gained. */
@@ -155,22 +170,39 @@ export function gainExperience(p: PlayerStats, amount: number, random: Random, h
 
 /**
  * Raises the player's level as often as their experience allows; returns how
- * many levels were gained. Each level adds health and refills it, fatigue and
- * spell points (which, as in Arena, don't grow with level).
+ * many levels were gained. As in Arena's program (0x26B38 and 0x12974), each
+ * level rolls the class's hit die, 1 to the die, for health, with Endurance's
+ * bonus on top, and gives 3 to 6 bonus points to share out among the
+ * attributes. It raises the most health can be, not the health itself;
+ * fatigue and spell points come from the attributes, so they grow only with
+ * the points.
  */
 export function levelUp(p: PlayerStats, random: Random, hero: Hero = DEFAULT_HERO): number {
   let gained = 0;
   while (p.experience >= experienceFor(p.level + 1, hero.experience)) {
     p.level++;
     gained++;
-    // As at creation: a roll of the hit die (Arena's dice) and Endurance's bonus, at least 1. Fatigue
-    // comes from Strength and Endurance alone, so it doesn't grow with level.
-    p.maxHealth += Math.max(1, arenaRoll(hero.healthDie, random) + hero.healthBonus);
-    p.health = p.maxHealth;
-    p.stamina = p.maxStamina;
-    p.magicka = p.maxMagicka;
+    p.healthRolls.push(1 + Math.floor(random() * hero.healthDie));
+    p.bonusPoints += 3 + Math.floor(random() * 4);
   }
+  if (gained) p.maxHealth = maxHealthFor(p, hero.healthBonus);
   return gained;
+}
+
+/**
+ * Max health with Endurance counting back over every level: the health the
+ * character started with, each level's roll of the hit die, and Endurance's
+ * bonus as it is now for every level, the first included. (Arena adds the
+ * bonus as it stands at each level, so raising Endurance late counts for
+ * little; here it counts for all of them.)
+ */
+export function maxHealthFor(p: Pick<PlayerStats, 'baseHealth' | 'healthRolls' | 'level'>, healthBonus: number): number {
+  return Math.max(1, p.baseHealth + healthBonus * p.level + p.healthRolls.reduce((sum, r) => sum + r, 0));
+}
+
+/** What `now` out of `max` becomes when the most is `to`: anything more is had at once, and never more than the most. */
+export function raiseTo(now: number, max: number, to: number): number {
+  return Math.min(to, now + Math.max(0, to - max));
 }
 
 /** Uses stamina if there is any; returns false (using none) when the player is out of breath. */

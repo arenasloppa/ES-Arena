@@ -16,6 +16,16 @@ import { ARENA_HEIGHT } from './level';
 const EYE = 60 * ARENA_HEIGHT;
 const SNEAK_EYE = 40 * ARENA_HEIGHT;
 const DEAD_EYE = 10 * ARENA_HEIGHT;
+/**
+ * Swimming, the eye is just above the water, below the floor around it, so
+ * its edge stands up like a wall as it does in Arena (DOSBox); the height is
+ * the remake's reading of it.
+ */
+const SWIM_EYE = 12 * ARENA_HEIGHT;
+/** How quickly the view catches up with a step up onto a platform: most of the way in a tenth of a second. */
+const STEP_CATCH_UP = 18;
+/** A rise of the feet in one frame bigger than this, standing, is a step up (3 Arena units). */
+const STEP_RISE = 3 * ARENA_HEIGHT;
 const MOUSE_SENSITIVITY = 0.0022;
 const TURN_SPEED = 2.4; // radians per second for arrow keys
 const STICK_TURN = 3.2; // radians per second at full right-stick tilt
@@ -150,6 +160,9 @@ export class Engine {
   private last = 0;
   private sneaking = false;
   private eye = EYE;
+  /** How far the view lags below the feet after a step up, so it rises instead of jumping. */
+  private stepLag = 0;
+  private lastFeet = 0;
   private targetKey = '';
   /**
    * Failed mouse captures in a row. One can be a fluke (asking again right after Esc releases it); after two
@@ -191,6 +204,8 @@ export class Engine {
   onEscape?: () => void;
   /** The map screen opened (true) or closed. */
   onMap?: (open: boolean) => void;
+  /** A level was gained, with `health` more health and bonus points to share out (see Dungeon.applyAttributes); without this, a banner says so. */
+  onLevelUp?: (gained: { level: number; health: number; points: number }) => void;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly autopilot: boolean;
@@ -388,12 +403,17 @@ export class Engine {
     }
     d.update(dt, { forward, strafe, sprint, sneaking: this.sneaking, block, attack });
     this.playEvents();
-    const eye = d.outcome === 'dead' ? DEAD_EYE : this.sneaking ? SNEAK_EYE : EYE;
+    const eye = d.outcome === 'dead' ? DEAD_EYE : d.swimming ? SWIM_EYE : this.sneaking ? SNEAK_EYE : EYE;
     this.eye += (eye - this.eye) * Math.min(1, dt * (d.outcome ? 3 : 10));
+    // The feet go up a step at once; the view follows them up smoothly.
+    const feet = d.player.z ?? 0;
+    if (feet - this.lastFeet > STEP_RISE && !(d.player.vz ?? 0)) this.stepLag -= feet - this.lastFeet;
+    this.stepLag *= Math.exp(-STEP_CATCH_UP * dt);
+    this.lastFeet = feet;
 
     for (const [index, door] of d.doors) {
       const mesh = this.levelScene.doors.get(index);
-      if (mesh) poseDoor(mesh, door.open, d.level.height);
+      if (mesh) poseDoor(mesh, door.open, d.level.height, { x: d.player.x, z: d.player.y });
     }
     for (const item of d.items) {
       const sprite = this.levelScene.items[item.id];
@@ -480,7 +500,8 @@ export class Engine {
           hud?.noMagicka();
           break;
         case 'levelUp':
-          hud?.banner(`Level ${e.level}`, 'Level up', `Health +${e.health} · Stamina +${e.stamina}`);
+          if (this.onLevelUp) this.onLevelUp(e);
+          else hud?.banner(`Level ${e.level}`, 'Level up', `Health +${e.health}`);
           break;
         case 'questStarted':
           hud?.banner(e.name, 'Quest started');
@@ -550,7 +571,7 @@ export class Engine {
     const p = d.player;
     const h = d.level.height;
     // The eye rides on the feet: up on platforms and in jumps, down in water and pits.
-    const eye = Math.min((p.z ?? 0) + this.eye, h - 0.03);
+    const eye = Math.min((p.z ?? 0) + this.stepLag + this.eye, h - 0.03);
     // Sprinting widens the view a little, as in Skyrim.
     const fov = FOV + (d.running ? SPRINT_FOV : 0);
     if (Math.abs(this.camera.fov - fov) > 0.01) {

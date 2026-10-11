@@ -50,6 +50,8 @@ export interface GameMessages {
   rerollStats?: string;
   /** "You must distribute all your bonus points." */
   distributeAll?: string;
+  /** What the game says when the player gains a level. */
+  levelUp?: string;
 }
 
 /** A piece of each message's text to find it by. */
@@ -76,6 +78,7 @@ const KEYS: Record<keyof GameMessages, string> = {
   saveStats: 'ave stats',
   rerollStats: 'eroll stats',
   distributeAll: 'You must distribute all your bonus',
+  levelUp: 'level of experience',
 };
 
 export function readMessages(image: Uint8Array): GameMessages {

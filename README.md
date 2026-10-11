@@ -20,7 +20,8 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 | ![The item menu, with the broadsword the character starts with picked, its picture from the game and its damage, weight and value](docs/screenshots/items.png)<br>The item menu | ![The character sheet, with the paper doll beside the attributes, health, damage and experience](docs/screenshots/character.png)<br>The character sheet |
 | ![The cell where the game begins, with the dungeon's name across the top and the first objective in the corner](docs/screenshots/cell.png)<br>Arriving in the cell where Arena begins | ![Sneaking up behind a rat, with the eye that shows how close it is to noticing](docs/screenshots/sneak.png)<br>Sneaking up on a rat |
 | ![The 3D map of the Imperial Dungeons, showing the parts explored so far](docs/screenshots/map.png)<br>The map fills in as you explore | ![The main menu, over a hall the remake draws itself](docs/screenshots/menu.png)<br>The main menu |
-| ![The wait menu, with Arena's time and date over the hours to rest and Arena's two ways to camp](docs/screenshots/wait.png)<br>Waiting, with the date and time in Arena | |
+| ![The wait menu, with Arena's time and date over the hours to rest and Arena's two ways to camp](docs/screenshots/wait.png)<br>Waiting, with the date and time in Arena | ![The character sheet after two levels gained, with bonus points to share out and some already on Endurance](docs/screenshots/level.png)<br>A level gained, with bonus points to share out |
+| ![The menu of menus, Skyrim's separated plus, with the items arm and its name lit as the player aims at it](docs/screenshots/tween.png)<br>The menu of menus, aiming at the items | |
 
 The screenshots are taken from the game as it stands with `npm run screenshots` and retaken for every release.
 They show Arena's own art, which the remake reads from a copy of the game. The [gallery](docs/gallery.md) keeps the
@@ -30,8 +31,9 @@ screenshots of earlier versions.
 
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
 - Make your character as in Arena, in the game's own words: answer ten questions or choose from the eighteen classes,
-  pick a name, choose your race on the map of Tamriel, share out bonus points among attributes rolled by Arena's rules
-  on a sheet that shows what the original's does, and pick a face. Your class and attributes count in play: they set
+  pick a name (or a random one in any race's style, Arena's own or by the race's customs in the lore), choose your race
+  on the map of Tamriel, share out bonus points among attributes rolled by Arena's rules on a sheet that shows what the
+  original's does, and pick a face. Your class and attributes count in play: they set
   your health, fatigue, damage, pace and how much you can carry, which armour and weapons you can use, and whether you
   can pick locks.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
@@ -48,11 +50,15 @@ screenshots of earlier versions.
 - Camp as in Arena, from a wait menu like Skyrim's: rest some hours or until healed, by Arena's healing sums and in its
   words, though not with monsters near, and monsters may come upon you while you sleep. The first rest after reaching
   level 2 brings Ria Silmane's dream of the Staff of Chaos and of Fang Lair, in her own voice.
-- Health, stamina, healing potions and levels. Search bodies and chests for gold, potions, weapons and armour, and open
-  locked doors with their key, pick their locks or break them down.
-- Skyrim's menus: a menu of menus for your character, items, magic and the map; an item menu with the game's picture of
-  each piece, where you equip, drink, favourite and drop things; a character sheet with Arena's paper doll wearing
-  what you wear; and favourites you can put on number keys or the D-pad to use mid-fight.
+- Level up as in Arena: its experience for each level, your class's hit die for health, and 3 to 6 bonus points a
+  level to share out among your attributes on the character sheet. Endurance's health bonus counts for every level you
+  have, so raising it late is worth as much as raising it early.
+- Health, stamina and healing potions. Search bodies and chests for gold, potions, weapons and armour, and open locked
+  doors with their key, pick their locks or break them down.
+- Skyrim's menus: a menu of menus for your character, items, magic and the map, where you aim at one and let go to
+  open it; an item menu with the game's picture of each piece, where you equip, drink, favourite and drop things; a
+  character sheet with Arena's paper doll wearing what you wear; and favourites you can put on number keys or the
+  D-pad to use mid-fight.
 - A 3D map that fills in as you explore, a minimap, quest objectives, and markers on the compass for the next
   objective and the creatures nearby.
 - Arena's own sound effects, each coming from where it happens in the dungeon.
@@ -66,8 +72,7 @@ screenshots of earlier versions.
   barred doors you can see through, decorations such as chains and barrels, and the dungeon's own messages when you
   reach their squares.
 - Play with a controller or the keyboard and mouse, with Skyrim's controls, menu and HUD: a compass, button prompts
-  that match your controller, jumping, sneaking and sprinting, the dungeon's name as you arrive, and a banner when you
-  level up.
+  that match your controller, jumping, sneaking and sprinting, and the dungeon's name as you arrive.
 
 Coming later: cities and the wilderness, the Mages Guild and the spellmaker, and saving.
 
@@ -132,6 +137,10 @@ controller, with the PlayStation button in brackets.
 | Map | <kbd>M</kbd> | Down from the menu of menus (B) |
 | Wait: camp for some hours or until healed (again to wake) | <kbd>T</kbd> | View (Share) |
 | Pause menu | <kbd>Esc</kbd> | Start (Options) |
+
+In the menu of menus, push a way with the arrow keys, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, the left stick
+or the D-pad to light it, and let go to open it; <kbd>Enter</kbd> or A opens the lit one, and the mouse lights one by
+pointing at it.
 
 In the magic menu (<kbd>P</kbd>, or left from the menu of menus), ready a spell with <kbd>E</kbd> or A, make it a
 favourite with <kbd>F</kbd> or Y, or put it on a number key by pressing the number.

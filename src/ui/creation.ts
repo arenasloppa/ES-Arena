@@ -1,9 +1,9 @@
 /**
  * Character creation, as in Arena: a class chosen from the list or by
- * answering ten questions, a name and a gender, a race chosen by its
- * province on the map of Tamriel, the game's words on the race and on what
- * the class needs, then bonus points shared out among the rolled attributes
- * on a sheet like Arena's, and a face. Each step shows the game's own words, read
+ * answering ten questions, with what the class needs beside it; a name and
+ * a gender; a race chosen by its province on the map of Tamriel, with the
+ * game's words on that race as you say yes to it; then bonus points shared
+ * out among the rolled attributes on a sheet like Arena's, and a face. Each step shows the game's own words, read
  * from the player's copy, and is worked like the rest of the menu with the
  * keyboard, the mouse or a controller.
  */
@@ -16,22 +16,23 @@ import {
   ATTRIBUTE_MAX,
   classFromAnswers,
   INTELLIGENCE,
-  LUCK,
   derivedAttributes,
   FACES,
   fillText,
   maxFatigue,
   pickQuestions,
-  randomName,
   rollAttributes,
+  startingHealth,
   type Character,
   type CreationData,
   type Gender,
 } from '../game/character';
 import { Inventory, SHIELDS, startingGear } from '../game/items';
+import { randomName } from '../game/names';
 import { startingMagicka } from '../game/magic';
 import { DOLL_HEIGHT, DOLL_WIDTH, PIXEL_ASPECT, type Portraits } from '../render/portrait';
 import type { StepEvent } from './menu';
+import { attributeNotes, el, settingRow } from './sheet';
 
 /** How many questions choose a class, as in Arena. */
 const QUESTIONS = 10;
@@ -53,7 +54,7 @@ const MAP_WIDTH = 320;
 const MAP_HEIGHT = 200;
 const ARMOUR_ALLOWED = ['Any', 'Chain, leather', 'Leather', 'None'];
 
-type Step = 'method' | 'question' | 'result' | 'classes' | 'gender' | 'name' | 'race' | 'home' | 'knownAs' | 'lore' | 'needs' | 'farewell' | 'attributes' | 'face';
+type Step = 'method' | 'question' | 'result' | 'classes' | 'gender' | 'name' | 'race' | 'home' | 'knownAs' | 'attributes' | 'face';
 
 export interface CreationHost {
   data: CreationData;
@@ -78,12 +79,14 @@ interface Draft {
   rolled?: number[];
   added: number[];
   bonus: number;
-  /** Health and gold, rolled with the attributes. */
-  health: number;
+  /** The hit die's roll for health, and the gold, rolled with the attributes. */
+  healthRoll: number;
   gold: number;
   /** The race, gender and class the attributes were rolled for. */
   rolledFor?: string;
   face: number;
+  /** The style of name Random name makes: 0 for any race, then each race's men and women in turn. */
+  nameStyle: number;
   questions: Question[];
   /** The path each answer so far counts toward. */
   answers: number[];
@@ -230,7 +233,8 @@ export class CharacterCreation {
           ],
           'create-choices',
         );
-        if (d.gender === 'female') focus = list.children[1] as HTMLElement;
+        // Picked first: the gender chosen before, else the one the name's style was for.
+        if ((d.gender ?? (d.nameStyle && d.nameStyle % 2 === 0 ? 'female' : 'male')) === 'female') focus = list.children[1] as HTMLElement;
         break;
       }
       case 'name': {
@@ -255,11 +259,27 @@ export class CharacterCreation {
           e.preventDefault();
           if (!next.disabled) next.click();
         });
+        // The race and gender come later, as in Arena, so the style of name is picked here: a race's men or women, or any.
+        const style = settingRow('Name style', '');
+        const styles = this.data.races.length * 2 + 1;
+        const showStyle = () => {
+          const n = d.nameStyle;
+          const race = this.data.races[(n - 1) >> 1]?.name;
+          style.querySelector('.value')!.textContent = n && race ? `${race} ${n % 2 ? 'man' : 'woman'}` : 'Any';
+        };
+        const changeStyle = (delta: number) => {
+          d.nameStyle = (d.nameStyle + Math.sign(delta) + styles) % styles;
+          showStyle();
+        };
+        style.addEventListener('step', (e) => changeStyle((e as StepEvent).detail.delta));
+        style.addEventListener('click', () => changeStyle(1));
+        showStyle();
         const random = el('button', 'option', 'Random name');
         random.addEventListener('click', () => {
-          // The race is chosen later, so the name is in the style of one picked at random.
-          const race = d.race ?? Math.floor(this.random() * this.data.races.length);
-          box.value = randomName(race, d.gender ?? 'male', () => this.random(), this.data.names).slice(0, NAME_LENGTH);
+          const n = d.nameStyle;
+          const race = n ? (n - 1) >> 1 : (d.race ?? Math.floor(this.random() * this.data.races.length));
+          const gender = n ? (n % 2 ? 'male' : 'female') : (d.gender ?? (this.random() < 0.5 ? 'male' : 'female'));
+          box.value = randomName(race, gender, () => this.random(), this.data.names).slice(0, NAME_LENGTH);
           update();
         });
         next.addEventListener('click', () => {
@@ -267,7 +287,7 @@ export class CharacterCreation {
           if (d.name) this.go('gender');
         });
         update();
-        nav.append(box, random, next);
+        nav.append(box, style, random, next);
         this.root.append(nav);
         focus = box;
         break;
@@ -278,7 +298,11 @@ export class CharacterCreation {
         break;
       }
       case 'home': {
+        // Arena tells of the race after the choice ("Know ye this also:", from TEMPLATE.DAT);
+        // here it comes with the question, so it can still change the answer.
         this.frame(d.name, race?.province ?? '', fillText(t.home, [race?.province ?? '', race?.plural ?? ''], d.gender));
+        const lore = this.data.raceLore?.[d.race ?? 0]?.replace(/\s*\n\s*/g, ' ').trim();
+        if (lore) this.root.append(el('p', 'create-text create-lore', `${this.data.sheet.knowYe} ${lore}`));
         this.options(
           [
             ['Yes', () => this.go('knownAs')],
@@ -289,25 +313,9 @@ export class CharacterCreation {
         break;
       }
       case 'knownAs': {
+        // Who the character is, and Arena's farewell, together; what the class needs was beside the class list.
         this.frame(`${race?.name ?? ''} ${clsName}`, d.name, fillText(t.knownAs, [clsName, d.name, race?.province ?? '', race?.plural ?? ''], d.gender));
-        this.options([['Continue', () => this.go(this.data.raceLore ? 'lore' : this.cls?.needs ? 'needs' : 'farewell')]], 'create-choices');
-        break;
-      }
-      case 'lore': {
-        // Arena's "Know ye this also:" and the race's description from TEMPLATE.DAT.
-        const lore = this.data.raceLore?.[d.race ?? 0] ?? '';
-        this.frame(d.name, race?.plural ?? '', this.data.sheet.knowYe);
-        this.root.append(el('p', 'create-text', lore.replace(/\s*\n\s*/g, ' ').trim()));
-        this.options([['Continue', () => this.go(this.cls?.needs ? 'needs' : 'farewell')]], 'create-choices');
-        break;
-      }
-      case 'needs': {
-        this.frame(d.name, clsName, fillText(t.needs, [this.cls?.needs ?? '', clsName], d.gender));
-        this.options([['Continue', () => this.go('farewell')]], 'create-choices');
-        break;
-      }
-      case 'farewell': {
-        this.frame(`${race?.name ?? ''} ${clsName}`, d.name, t.farewell);
+        this.root.append(el('p', 'create-text', t.farewell));
         this.options([['Continue', () => this.go('attributes')]], 'create-choices');
         break;
       }
@@ -476,7 +484,8 @@ export class CharacterCreation {
     });
     body.append(mapBox, side);
     this.root.append(body);
-    return buttons[d.race ?? 0];
+    // Picked first: the race chosen before, else the one the name's style was for.
+    return buttons[d.race ?? (d.nameStyle ? (d.nameStyle - 1) >> 1 : 0)];
   }
 
   private pickRace(i: number): void {
@@ -493,7 +502,7 @@ export class CharacterCreation {
     d.rolled = roll.attributes;
     d.added = new Array(ATTRIBUTE_COUNT).fill(0);
     d.bonus = roll.bonus;
-    d.health = roll.health;
+    d.healthRoll = roll.healthRoll;
     d.gold = roll.gold;
     d.rolledFor = `${d.race}:${d.gender}:${d.cls}`;
   }
@@ -560,41 +569,20 @@ export class CharacterCreation {
       rows[0].focus();
     });
     nav.append(done);
-    const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
     const show = () => {
-      const a = this.character().attributes;
+      const c = this.character();
+      const a = c.attributes;
       rows.forEach((row, i) => {
         const value = row.querySelector('.value')!;
         value.textContent = String(a[i]);
         value.classList.toggle('raised', d.added[i] > 0);
       });
-      const v = derivedAttributes(a);
       const spellPoints = startingMagicka(this.cls!, a[INTELLIGENCE]);
-      const beside: Array<Array<[string, string]>> = [
-        [
-          ['Damage', signed(v.damage)],
-          ['Max Kilos', String(v.maxKilos)],
-        ],
-        [['Spell Pts', `${spellPoints}/${spellPoints}`]],
-        [['Magic Def', signed(v.magicDefence)]],
-        [
-          ['To Hit', signed(v.toHit)],
-          ['To Defend', signed(v.toDefend)],
-        ],
-        [],
-        [
-          ['Health', signed(v.health)],
-          ['Heal Mod', signed(v.healMod)],
-        ],
-        [['Charisma', signed(v.charisma)]],
-        // Arena shows nothing for Luck; the remake says what Oblivion's description does.
-        [],
-      ];
-      subs.forEach((sub, i) => (sub.textContent = beside[i].map(([k, x]) => `${k} ${x}`).join('  ·  ')));
-      subs[LUCK].textContent = 'Has an effect on everything you do';
+      const notes = attributeNotes(a, `${spellPoints}/${spellPoints}`);
+      subs.forEach((sub, i) => (sub.textContent = notes[i]));
       const fatigue = maxFatigue(a);
       const lines: Array<[string, string]> = [
-        ['Health', `${d.health}/${d.health}`],
+        ['Health', `${c.health}/${c.health}`],
         ['Fatigue', `${fatigue}/${fatigue}`],
         ['Gold', String(d.gold)],
         ['Experience', '0'],
@@ -656,14 +644,16 @@ export class CharacterCreation {
 
   private character(): Character {
     const d = this.draft;
+    const attributes = (d.rolled ?? new Array(ATTRIBUTE_COUNT).fill(50)).map((v, i) => v + (d.added[i] ?? 0));
     return {
       name: d.name.trim(),
       gender: d.gender ?? 'male',
       race: d.race ?? 0,
       cls: d.cls ?? 0,
-      attributes: (d.rolled ?? new Array(ATTRIBUTE_COUNT).fill(50)).map((v, i) => v + (d.added[i] ?? 0)),
+      attributes,
       face: d.face,
-      health: d.health || undefined,
+      // Worked out with Endurance as it ends up, as Arena does once the points are shared out.
+      health: d.rolled ? startingHealth(d.healthRoll, derivedAttributes(attributes).health) : undefined,
       gold: d.rolled ? d.gold : undefined,
     };
   }
@@ -674,7 +664,7 @@ export class CharacterCreation {
 }
 
 function newDraft(): Draft {
-  return { name: '', added: new Array(ATTRIBUTE_COUNT).fill(0), bonus: 0, health: 0, gold: 0, face: 0, questions: [], answers: [] };
+  return { name: '', added: new Array(ATTRIBUTE_COUNT).fill(0), bonus: 0, healthRoll: 0, gold: 0, face: 0, nameStyle: 0, questions: [], answers: [] };
 }
 
 /** Marks a list that scrolls with whether there is more of it above and below, for its fades. */
@@ -691,27 +681,4 @@ function showMore(list: HTMLElement): void {
 function firstSentence(text: string): string {
   const m = /^.*?[.!?](?=\s|$)/.exec(text);
   return m ? m[0] : text;
-}
-
-/** A row like the settings': a name, and a value stepped with left and right. */
-function settingRow(label: string, value: string): HTMLButtonElement {
-  const row = el('button', 'option option-row');
-  row.dataset.setting = 'creation';
-  const valueBox = el('span', 'row-value');
-  const less = el('span', 'arrow', '‹');
-  less.dataset.step = '-1';
-  less.setAttribute('aria-hidden', 'true');
-  const more = el('span', 'arrow', '›');
-  more.dataset.step = '1';
-  more.setAttribute('aria-hidden', 'true');
-  valueBox.append(less, el('span', 'value', value), more);
-  row.append(el('span', 'row-label', label), valueBox);
-  return row;
-}
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  if (className) e.className = className;
-  if (text !== undefined) e.textContent = text;
-  return e;
 }

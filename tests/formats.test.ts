@@ -4,6 +4,7 @@ import { decodeType04, decodeType08 } from '../src/formats/compression';
 import { parseCol, indicesToRgba } from '../src/formats/palette';
 import { crop, parseImg, parseRci, parseSet } from '../src/formats/img';
 import { decryptInf, expandTextures, parseInf, roleTexture } from '../src/formats/inf';
+import { readMessages } from '../src/formats/messages';
 import { parseMif } from '../src/formats/mif';
 import { encodeLzhuf, encodeLzhufLiterals, encodeLzssLiterals, encryptInf, makeBsa, makeMif, u16 } from './helpers/encode';
 
@@ -208,5 +209,13 @@ describe('MIF', () => {
 
   it('rejects files without a header', () => {
     expect(() => parseMif(new Uint8Array(20))).toThrow(/MHDR/);
+  });
+});
+
+describe('game messages', () => {
+  it('finds each message by a piece of it, with its line breaks as spaces', () => {
+    // Made-up texts with the pieces they are found by.
+    const image = new TextEncoder().encode('\0Lo, a level of experience\ris yours.\0\0Mind you, You must distribute all your bonus marks\0');
+    expect(readMessages(image)).toMatchObject({ levelUp: 'Lo, a level of experience is yours.', distributeAll: 'Mind you, You must distribute all your bonus marks' });
   });
 });

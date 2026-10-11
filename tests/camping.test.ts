@@ -143,6 +143,22 @@ describe('camping in the dungeon', () => {
     expect(events.some((e) => e.type === 'levelUp')).toBe(true);
   });
 
+  it('shares out a level’s points: what the attributes give is had at once, with Endurance’s health for every level', () => {
+    const hero = { ...DEFAULT_HERO, health: 40, healthBonus: 1, healthDie: 8, stamina: 90, magicka: 30, experience: 100 };
+    const d = new Dungeon(textLevel(ROOM), TABLES, always(0.5), hero);
+    d.stats.experience = 150;
+    // Half the hit die, 5, and Endurance's 1; 3 points and half of 3 more.
+    expect(rest(d, 10).find((e) => e.type === 'levelUp')).toMatchObject({ level: 2, health: 6, points: 5 });
+    d.stats.health = 20;
+    d.stats.stamina = 50;
+    d.applyAttributes({ ...hero, healthBonus: 2, stamina: 92, magicka: 33 });
+    // Endurance's one more counts for both levels.
+    expect(d.stats).toMatchObject({ maxHealth: 48, health: 22, maxStamina: 92, stamina: 52, maxMagicka: 33, magicka: 33, bonusPoints: 0 });
+    // With no room for points, Arena heals instead.
+    d.applyAttributes(hero, true);
+    expect(d.stats).toMatchObject({ maxHealth: 46, health: 46 });
+  });
+
   it('is ended by monsters that come upon the player, at the game’s chance an hour', () => {
     const encounters: EncounterTables = {
       chances: [0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0],

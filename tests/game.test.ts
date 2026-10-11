@@ -4,7 +4,9 @@ import { parseMif } from '../src/formats/mif';
 import { ARENA_HEIGHT, buildLevel, isBlocking } from '../src/game/level';
 import { airborne, blockedAt, doorInFront, groundUnder, jump, JUMP_HEIGHT, JUMP_TIME, settle, step, type PlayerState } from '../src/game/player';
 import { textLevel } from './helpers/level';
+import * as THREE from 'three';
 import { buildLevelGeometry } from '../src/render/levelGeometry';
+import { doorObject, poseDoor } from '../src/render/levelScene';
 import { encryptInf, makeMif } from './helpers/encode';
 
 const INF = encryptInf(
@@ -187,6 +189,69 @@ describe('level geometry', () => {
     expect(g.doors).toHaveLength(1);
     expect(g.batches.has('liquid:wet')).toBe(true);
     for (const b of g.batches.values()) expect(b.positions.length / 3).toBe((b.indices.length / 6) * 4);
+  });
+});
+
+describe('swinging doors', () => {
+  // A cell door in a wall running north to south: the cell is east of it, the corridor west.
+  const cellDoor = () => {
+    const l = textLevel(['#####', '#.|.#', '#####']);
+    l.cells[1 * 5 + 2].door = 'swinging';
+    return buildLevelGeometry(l).doors[0];
+  };
+  const corners = (object: THREE.Object3D) => {
+    object.updateMatrixWorld(true);
+    const points: Array<{ x: number; z: number }> = [];
+    for (const face of object.children as THREE.Mesh[]) {
+      const at = face.geometry.getAttribute('position');
+      for (let k = 0; k < at.count; k++) {
+        const v = new THREE.Vector3().fromBufferAttribute(at, k).applyMatrix4(face.matrixWorld);
+        points.push({ x: v.x, z: v.z });
+      }
+    }
+    return points;
+  };
+
+  it('has a face for each way through, not for the walls beside it', () => {
+    const door = cellDoor();
+    expect(door.panels).toHaveLength(2);
+    // Arena hinges each face at its left end seen from outside: the cell side at its south end, the corridor side at its north.
+    expect(door.panels.map((p) => [p.hinge.x, Math.round(p.hinge.z)])).toEqual(
+      expect.arrayContaining([
+        [3, 2],
+        [2, 1],
+      ]),
+    );
+  });
+
+  it('swings each face in, away from whoever opens it, to lie along the doorway', () => {
+    const door = cellDoor();
+    const object = doorObject(door, new THREE.MeshBasicMaterial());
+    const shut = { kind: door.kind, alongX: door.alongX, mesh: object, openAmount: 0, target: 0 };
+    poseDoor(shut, 0, 1);
+    // Shut, the faces are the doorway's east and west sides.
+    for (const p of corners(object)) expect(Math.abs(p.x - 2.5)).toBeCloseTo(0.5, 5);
+    poseDoor(shut, 1, 1);
+    // Open, they lie inside the doorway along its north and south walls, just off them, and leave the way clear.
+    const open = corners(object);
+    for (const p of open) {
+      expect(p.x).toBeGreaterThanOrEqual(2 - 1e-6);
+      expect(p.x).toBeLessThanOrEqual(3 + 1e-6);
+      expect(Math.min(Math.abs(p.z - 1), Math.abs(p.z - 2))).toBeCloseTo(0.01, 5);
+    }
+    const south = open.filter((p) => p.z > 1.5).length;
+    expect(south).toBe(open.length / 2);
+  });
+
+  it('shows only the face on the viewer’s side, as Arena draws it', () => {
+    const door = cellDoor();
+    const object = doorObject(door, new THREE.MeshBasicMaterial());
+    const mesh = { kind: door.kind, alongX: door.alongX, mesh: object, openAmount: 0, target: 0, centre: { x: 2.5, z: 1.5 } };
+    const shown = () => object.children.filter((f) => f.visible).map((f) => (f.userData.normal as { x: number }).x);
+    poseDoor(mesh, 1, 1, { x: 3.6, z: 1.3 });
+    expect(shown()).toEqual([1]);
+    poseDoor(mesh, 1, 1, { x: 1.4, z: 1.5 });
+    expect(shown()).toEqual([-1]);
   });
 });
 

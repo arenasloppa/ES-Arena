@@ -98,10 +98,10 @@ describe('spell rules', () => {
     expect(nextSpell(all, startingSpells(all))?.name).toBe('Bolt');
   });
 
-  it('keeps spell points the same from level to level, refilling them', () => {
+  it('keeps spell points the same from level to level, without refilling them', () => {
     const caster = newPlayerStats({ name: 'Staff', damage: [1, 2], cif: 'STAFF.CIF' }, { ...DEFAULT_HERO, magicka: 100 });
     caster.magicka = 10;
     gainExperience(caster, DEFAULT_HERO.experience, always(0));
-    expect([caster.maxMagicka, caster.magicka]).toEqual([100, 100]);
+    expect([caster.maxMagicka, caster.magicka]).toEqual([100, 10]);
   });
 });

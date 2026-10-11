@@ -3,6 +3,36 @@
 Every release of ES Arena, newest first. Each one is on the
 [Releases page](https://github.com/arenasloppa/ES-Arena/releases) with its downloads.
 
+## 0.4.3 (2026-10-11)
+
+Levelling up as in Arena, with the sheet to share out your bonus points; Skyrim's way of aiming in the menu of menus; names in every race's style; and fixes for the cell door, water and character creation.
+
+Levelling up as in Arena, read from its program.
+
+- Each level needs Arena's experience: your class's figure for level 2, then 30/16 of the last for each level up to 10 and 24/16 after that. Before, each level needed twice the last, far more than the original asks.
+- Each level rolls your class's hit die for health, 1 to the die, and adds Endurance's bonus. As in Arena, it raises the most your health can be, not the health you have, and doesn't refill your stamina or spell points.
+- Each level gives 3 to 6 bonus points, as in Arena, and the character sheet opens with the game's own words for a level gained, to share them out among your attributes. As in Arena, every point has to be placed before you go on. What each attribute gives shows beside it as you go, with the health, fatigue and spell points you'll have, and what you gain is yours at once. With every attribute at 100 there are no points to give, and Arena heals you instead.
+- Endurance counts for every level: its health bonus is added for each level you have, the first included, so raising it at level 8 is worth as much as at level 1 (in Arena it only counts from the level you raise it). Your health at the start also uses Endurance as you leave it on the sheet, as Arena works it out once the points are shared out, so points put into Endurance count from the beginning.
+- Endurance's health bonus is worked out on Arena's own scale, as the program does it; the old rule was one out at Endurance 6, 16 and 94.
+
+The menu of menus as in Skyrim.
+
+- Pushing the stick, the D-pad or a direction key lights that arm of the plus and its name, and letting go opens it. A stick or key still held from walking when the menu opens does nothing until it's let go, and moving round to another arm before letting go opens that one instead. Enter or A opens the lit one at once, and the mouse lights one by pointing at it.
+
+Names for every race.
+
+- Random name now makes names in any race's style: set the race, and a man's or a woman's name, on the new Name style row, or leave it on Any. Half are Arena's own, put together from the game's name pieces as the original does, and half follow the race's customs as UESP's lore pages describe them: Breton family names, Nords named for their fathers or by an epithet, Dark Elf house names, High Elves who leave their family name off, Khajiit with a prefix of rank before their name, and Argonians with a name in Jel or one they took among the other races. The gender and race steps then start on the style you picked.
+
+Fixes.
+
+- The cell door swings open properly again. Each face of a swinging door now turns in on its own hinge, away from whoever opens it, and only the face on your side is drawn, as in Arena, so the bars no longer flicker.
+- You no longer get stuck in water. You swim with your eyes just above the surface, so the edge stands up like a wall as in Arena, and swimming into it lifts you out onto the floor in a moment, even at a slant. Dropping in right at the edge no longer leaves you caught on the floor beside it.
+- The walls beside water and pits line up with the walls next to them, and the sides of water show the stone above the waterline.
+- Stepping up onto a low platform no longer jolts the view; it rises with you.
+- The wait menu no longer shows the game's logo.
+- Character creation no longer gives you several screens of words in a row after you've chosen. Your race's description comes as you confirm your province, and Arena's farewell with who you are.
+- The class list stays still as you move through it, instead of moving from side to side with the length of each class's details.
+
 ## 0.4.2 (2026-10-11)
 
 Magic, Arena's music and cutscenes, its dungeons built as it builds them, camping, and character creation checked against the original game itself.

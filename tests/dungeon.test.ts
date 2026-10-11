@@ -7,6 +7,7 @@ import {
   drinkPotion,
   experienceFor,
   gainExperience,
+  maxHealthFor,
   newPlayerStats,
   recover,
   roll,
@@ -88,28 +89,31 @@ describe('combat rules', () => {
     expect(drinkPotion(p)).toBe(false);
   });
 
-  it('raises the player’s level with experience, each level needing twice the last', () => {
-    expect([1, 2, 3, 4].map((level) => experienceFor(level))).toEqual([0, 1000, 3000, 7000]);
-    expect(experienceFor(3, 900)).toBe(2700);
+  it('raises the player’s level with experience, in Arena’s steps', () => {
+    // The class's figure for level 2, then 30/16 of the last up to level 10 and 24/16 after, rounded down.
+    expect([1, 2, 3, 4].map((level) => experienceFor(level))).toEqual([0, 1000, 1875, 3515]);
+    expect(experienceFor(3, 900)).toBe(1687);
+    expect(experienceFor(10, 900)).toBe(Math.floor((experienceFor(9, 900) * 30) / 16));
+    expect(experienceFor(11, 900)).toBe(Math.floor((experienceFor(10, 900) * 24) / 16));
     const p = newPlayerStats(SWORD);
     p.health = 5;
     expect(gainExperience(p, 999, always(0))).toBe(0);
     expect(gainExperience(p, 1, always(0))).toBe(1);
-    // A roll of 0 on the hit die plus the bonus of 3; fatigue doesn't grow with level.
-    expect(p).toMatchObject({ level: 2, maxHealth: 33, health: 33, maxStamina: 100 });
-    expect(gainExperience(p, 6000, always(0))).toBe(2);
-    expect(p.level).toBe(4);
+    // The hit die's lowest, 1, plus the bonus of 3 raise the most health can be, not the health; the fewest bonus points, 3.
+    expect(p).toMatchObject({ level: 2, maxHealth: 34, health: 5, maxStamina: 100, bonusPoints: 3 });
+    expect(gainExperience(p, 3000, always(0.999))).toBe(2);
+    // Two levels at the die's highest, 5, and the most points, 6.
+    expect(p).toMatchObject({ level: 4, maxHealth: 34 + 2 * (5 + 3), bonusPoints: 3 + 2 * 6 });
   });
 
-  it('levels a character by their class: its experience, and its health die plus their endurance', () => {
+  it('levels a character by their class: its experience, and its health die plus their endurance for every level', () => {
     const hero = { ...DEFAULT_HERO, health: 40, stamina: 90, experience: 500, healthDie: 12, healthBonus: -2 };
     const p = newPlayerStats(SWORD, hero);
     expect(p).toMatchObject({ health: 40, maxHealth: 40, stamina: 90 });
     expect(gainExperience(p, 500, always(0.999), hero)).toBe(1);
     expect(p.maxHealth).toBe(40 + 12 - 2);
-    // Never less than 1 a level.
-    gainExperience(p, 1000, always(0), hero);
-    expect(p.maxHealth).toBe(51);
+    // Endurance counts back: with a bonus of 0 rather than -2, both levels have 2 more.
+    expect(maxHealthFor(p, 0)).toBe(40 + 12 + 2);
   });
 
   it('lets an agile character dodge some blows, within the same limits', () => {
@@ -453,6 +457,34 @@ describe('a run through a dungeon', () => {
     const d = new Dungeon(arena(), undefined, always(0));
     expect(d.creatures).toHaveLength(0);
     expect(d.stats.weapon.name).toBe('Shortsword');
+  });
+});
+
+describe('water', () => {
+  // A pool two cells square, with floor all round it.
+  const pool = () => textLevel(['######', '#.~~.#', '#.~~.#', '#....#', '######']);
+
+  it('lets the player swim about after dropping in at its edge', () => {
+    const d = new Dungeon(pool(), TABLES, always(0));
+    // Over the water, but still hanging over the floor to the west.
+    Object.assign(d.player, { x: 2.15, y: 1.5, z: 0, yaw: Math.PI / 2 });
+    tick(d, 0.5);
+    expect(d.swimming).toBe(true);
+    const y = d.player.y;
+    tick(d, 0.5, input({ forward: 1 }));
+    expect(d.player.y).toBeGreaterThan(y + 0.2);
+  });
+
+  it('climbs out at once when swum into the edge, even at a slant, as Arena does', () => {
+    const d = new Dungeon(pool(), TABLES, always(0));
+    Object.assign(d.player, { x: 3.4, y: 1.5, z: 0, yaw: 0.5 });
+    tick(d, 0.3);
+    expect(d.swimming).toBe(true);
+    tick(d, 1, input({ forward: 1 }));
+    expect(d.swimming).toBe(false);
+    expect(d.climb).toBeUndefined();
+    expect(d.player.x).toBeGreaterThan(4);
+    expect(d.player.z).toBe(0);
   });
 });
 

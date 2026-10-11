@@ -29,7 +29,9 @@ import {
   DEFAULT_HERO,
   drinkPotion,
   levelUp,
+  maxHealthFor,
   newPlayerStats,
+  raiseTo,
   recover,
   roll,
   spendStamina,
@@ -88,7 +90,7 @@ import { armourReduce, Inventory, itemKey, POTION, randomGear, startingGear, wea
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
 import { isBlocking, type DoorSounds, type Level, type LevelItem } from './level';
-import { airborne, groundUnder, inChasm, jump, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
+import { airborne, groundUnder, inChasm, jump, keepInChasm, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
 import type { GameMessages } from '../formats/messages';
 import type { CreatureInfo, EncounterTables } from '../formats/exe';
 import { START_MINUTES } from '../formats/calendar';
@@ -175,7 +177,8 @@ export type DungeonEvent =
   | { type: 'blocked'; damage: number }
   | { type: 'hit'; creature: Creature; damage: number; killed: boolean }
   | { type: 'bashed'; creature: Creature }
-  | { type: 'levelUp'; level: number; health: number; stamina: number }
+  /** A level gained: how much more health there can be, and the bonus points to share out among the attributes. */
+  | { type: 'levelUp'; level: number; health: number; points: number }
   /** A spell cast; the engine plays the cast and flashes the hand. */
   | { type: 'cast'; spell: SpellRecord }
   /** A spell bursting where it hit; `radius` is the area it catches, 0 for one creature. */
@@ -291,14 +294,16 @@ const START_EXPERIENCE = 700;
 const SWIM_TIRING = ((11 / 64) * (86400 / 6646.153846153846)) / 60 * 30 * (100 / 256);
 /** Lava burns 10 health a second (OpenTESArena). */
 const LAVA_BURN = 10;
-/** Pushing forward against the edge this long starts a climb out of water or a pit. */
-const CLIMB_PUSH = 0.25;
+/** Pushing forward against the edge this long starts a climb out of water (or lava) or a pit. */
+const CLIMB_PUSH_WATER = 0.1;
+const CLIMB_PUSH_PIT = 0.25;
 /**
- * Seconds a climb out takes. UESP says getting out of water "takes a few
- * precious seconds" and a blow, or attacking, throws you back in; the
- * exact times are the remake's own.
+ * Seconds a climb out takes. In Arena (played in DOSBox) swimming into the
+ * edge of water lifts you out onto the floor straight away; the remake takes
+ * a moment so the view doesn't jump. A pit is a real climb, and a blow, or
+ * attacking, throws you back in (UESP); its time is the remake's own.
  */
-const CLIMB_WATER = 2;
+const CLIMB_WATER = 0.35;
 const CLIMB_PIT = 4;
 /** Seconds after casting before another spell can be cast. */
 const CAST_TIME = 0.7;
@@ -361,7 +366,7 @@ export class Dungeon {
   /** In water or lava. */
   swimming = false;
   /** Climbing out of water or a pit: how far along (0 to 1), and where it ends. */
-  climb?: { progress: number; seconds: number; from: number; to: { x: number; y: number } };
+  climb?: { progress: number; seconds: number; from: number; start: { x: number; y: number }; to: { x: number; y: number } };
   /** Objectives toward the way out; undefined in a dungeon without one. */
   readonly quest?: Quest;
   /** The gear the player carries and wears. */
@@ -414,6 +419,9 @@ export class Dungeon {
   private light = { reach: 1, until: 0 };
   private regen = { health: 0, every: 0, next: 0, until: 0 };
 
+  /** What the player's character brings; worked out again when they share out bonus points (see applyAttributes). */
+  hero: Hero;
+
   /**
    * `hero` is what the player's character brings; without one, the player
    * has no class and plain numbers. `spells` is the game's spell list, from
@@ -423,9 +431,10 @@ export class Dungeon {
     readonly level: Level,
     tables: ExeData | undefined,
     private readonly random: Random = Math.random,
-    readonly hero: Hero = DEFAULT_HERO,
+    hero: Hero = DEFAULT_HERO,
     spells: SpellRecord[] = [],
   ) {
+    this.hero = hero;
     this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0, z: 0, vz: 0 };
     this.messages = tables?.messages ?? {};
     this.encounters = tables?.encounters;
@@ -533,13 +542,31 @@ export class Dungeon {
   private checkLevel(): void {
     if (this.camping || this.enemiesNear()) return;
     const s = this.stats;
-    const before = { health: s.maxHealth, stamina: s.maxStamina };
+    const before = s.maxHealth;
     if (levelUp(s, this.random, this.hero)) {
-      this.events.push(
-        { type: 'levelUp', level: s.level, health: s.maxHealth - before.health, stamina: s.maxStamina - before.stamina },
-        { type: 'sound', name: 'FANFARE1.VOC' },
-      );
+      this.events.push({ type: 'levelUp', level: s.level, health: s.maxHealth - before, points: s.bonusPoints }, { type: 'sound', name: 'FANFARE1.VOC' });
     }
+  }
+
+  /**
+   * The bonus points have been shared out: `hero` is the character worked
+   * out again with their new attributes. Endurance counts back over every
+   * level, so max health is worked out afresh (maxHealthFor); stamina and
+   * spell points follow Strength, Endurance and Intelligence. What each
+   * gains is had at once. When there was no room for points (every
+   * attribute at 100), Arena heals the player instead: `heal`.
+   */
+  applyAttributes(hero: Hero, heal = false): void {
+    const s = this.stats;
+    const health = maxHealthFor(s, hero.healthBonus);
+    s.health = heal ? health : raiseTo(s.health, s.maxHealth, health);
+    s.maxHealth = health;
+    s.stamina = raiseTo(s.stamina, s.maxStamina, hero.stamina);
+    s.maxStamina = hero.stamina;
+    s.magicka = raiseTo(s.magicka, s.maxMagicka, hero.magicka);
+    s.maxMagicka = hero.magicka;
+    s.bonusPoints = 0;
+    this.hero = hero;
   }
 
   // ---- Camping ----
@@ -706,11 +733,13 @@ export class Dungeon {
     this.running = run && this.moving;
     this.walked += moved;
     this.updateHeight(dt);
-    // Pushing on against the edge of water or a pit climbs out of it.
+    // Pushing on against the edge of water or a pit climbs out of it, even at a slant: held back
+    // at the edge, the player makes less than ~60% of their way forward, sliding along it or not at all.
     const edge = this.swimming || inChasm(this.level, p) ? this.climbTarget() : undefined;
-    if (edge && input.forward > 0.5 && moved < 0.2 * dt) {
+    const ahead = (p.x - x0) * Math.cos(p.yaw) + (p.y - y0) * Math.sin(p.yaw);
+    if (edge && input.forward > 0.5 && (moved < 0.2 * dt || ahead < 0.6 * moved)) {
       this.pushing += dt;
-      if (this.pushing >= CLIMB_PUSH) this.startClimb(edge);
+      if (this.pushing >= (this.swimming ? CLIMB_PUSH_WATER : CLIMB_PUSH_PIT)) this.startClimb(edge);
     } else this.pushing = 0;
     if (this.walked >= this.nextStep && !airborne(this.level, p)) {
       this.nextStep = this.walked + STRIDE;
@@ -724,6 +753,7 @@ export class Dungeon {
   private updateHeight(dt: number): void {
     const p = this.player;
     settle(this.level, p, dt);
+    keepInChasm(this.level, p, this.openDoors);
     const cell = this.level.cells[cellIndex(this.level, p.x, p.y)];
     const swimming = (cell?.chasm === 'wet' || cell?.chasm === 'lava') && inChasm(this.level, p);
     if (swimming && !this.swimming) this.events.push({ type: 'sound', name: 'SPLASH.VOC' });
@@ -758,10 +788,13 @@ export class Dungeon {
   }
 
   private startClimb(to: { x: number; y: number }): void {
-    const cell = this.level.cells[cellIndex(this.level, this.player.x, this.player.y)];
+    const p = this.player;
+    const cell = this.level.cells[cellIndex(this.level, p.x, p.y)];
     this.pushing = 0;
     this.swing = undefined;
-    this.climb = { progress: 0, seconds: cell?.chasm === 'dry' ? CLIMB_PIT : CLIMB_WATER, from: this.player.z ?? 0, to };
+    // Out of the water's pull: the view rises with the climb, and swimming no longer tires.
+    this.swimming = false;
+    this.climb = { progress: 0, seconds: cell?.chasm === 'dry' ? CLIMB_PIT : CLIMB_WATER, from: p.z ?? 0, start: { x: p.x, y: p.y }, to };
   }
 
   private updateClimb(dt: number): void {
@@ -770,10 +803,13 @@ export class Dungeon {
     c.progress = Math.min(1, c.progress + dt / c.seconds);
     p.z = c.from * (1 - c.progress);
     p.vz = 0;
+    // Over the edge in the last part of the climb, once up out of the hole.
+    const over = Math.max(0, (c.progress - 0.6) / 0.4);
+    const t = over * over * (3 - 2 * over);
+    p.x = c.start.x + (c.to.x - c.start.x) * t;
+    p.y = c.start.y + (c.to.y - c.start.y) * t;
     this.moving = false;
     if (c.progress < 1) return;
-    p.x = c.to.x;
-    p.y = c.to.y;
     p.z = groundUnder(this.level, p);
     this.climb = undefined;
     this.swimming = false;
@@ -782,6 +818,8 @@ export class Dungeon {
   /** A blow, or attacking, while climbing out throws the player back in (UESP). */
   private fallBack(): void {
     if (!this.climb) return;
+    this.player.x = this.climb.start.x;
+    this.player.y = this.climb.start.y;
     this.player.z = this.climb.from;
     this.climb = undefined;
   }

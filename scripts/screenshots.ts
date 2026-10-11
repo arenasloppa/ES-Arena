@@ -43,10 +43,12 @@ const CAPTIONS: Record<string, string> = {
   cell: 'Arriving in the cell where Arena begins',
   goblin: 'A goblin raises its axe',
   sneak: 'Sneaking up on a rat',
+  tween: 'The menu of menus, aiming at the items',
   items: 'The item menu',
   character: 'The character sheet',
   map: 'The map fills in as you explore',
   wait: 'Waiting, with the date and time in Arena',
+  level: 'A level gained, with bonus points to share out',
 };
 
 archive();
@@ -136,6 +138,7 @@ try {
 
   await menus(page);
   await wait(page);
+  await levelUp(page);
   writeFileSync(versionFile, `${version}\n`);
   writeGallery();
   console.log(`Saved the screenshots in ${out}. Run "npm run build" for a normal build again.`);
@@ -229,11 +232,9 @@ async function makeCharacter(page: Page): Promise<void> {
   await page.keyboard.press('Enter');
   await step('home');
   await pick('Yes');
-  // Arena's words after the race: who you are, your people, what your class needs, and farewell.
-  for (const name of ['knownAs', 'lore', 'needs', 'farewell']) {
-    await step(name);
-    await pick('Continue');
-  }
+  // Arena's words on who you are, and its farewell.
+  await step('knownAs');
+  await pick('Continue');
   await step('attributes');
   // Some points on strength and endurance, then a shot with the rest still to share out.
   const rows = page.locator('#screen-create .option-row');
@@ -270,9 +271,15 @@ async function wait(page: Page): Promise<void> {
   await page.waitForTimeout(600);
 }
 
-/** The item menu with a piece of armour picked, and the character sheet. */
+/** The menu of menus aimed at the items, the item menu with a piece of armour picked, and the character sheet. */
 async function menus(page: Page): Promise<void> {
-  await page.keyboard.press('KeyI');
+  // Aiming lights the arm and its name; letting go opens it.
+  await page.keyboard.press('Tab');
+  await page.waitForSelector("#game-menu[data-panel='tween']:not([hidden])");
+  await page.keyboard.down('ArrowRight');
+  await page.waitForTimeout(500);
+  await shot(page, 'tween');
+  await page.keyboard.up('ArrowRight');
   await page.waitForSelector("#game-menu[data-panel='items']:not([hidden])");
   // Down the list to the first entry with a picture.
   for (let i = 0; i < 6 && !(await page.isVisible('.gm-picture')); i++) {
@@ -288,6 +295,28 @@ async function menus(page: Page): Promise<void> {
   await page.waitForTimeout(800);
   await shot(page, 'character');
   await page.keyboard.press('Tab');
+}
+
+/** Two levels gained at once, with no monster near: the sheet with Arena's bonus points, some already on Endurance. */
+async function levelUp(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const d = (window as unknown as Win).arenaEngine.dungeon;
+    for (const c of d.creatures) if (Math.hypot(c.x - d.player.x, c.y - d.player.y) < 12) c.state = 'dead';
+    // Enough for level 3: the class's figure for level 2, and 30/16 of that.
+    d.stats.experience = Math.ceil((d.hero.experience * 30) / 16);
+  });
+  await page.waitForSelector('#screen-level:not([hidden])', { timeout: 20_000 });
+  const rows = page.locator('#screen-level .option-row');
+  await rows.nth(5).focus();
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(600);
+  await shot(page, 'level');
+  for (let row = 0; row < 8 && !(await page.textContent('#screen-level .create-bonus'))?.endsWith(': 0'); row++) {
+    await rows.nth(row).focus();
+    for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowRight');
+  }
+  await page.click('#screen-level .option >> text="Done"');
+  await page.waitForTimeout(600);
 }
 
 /** The window's game engine, which development builds expose. */

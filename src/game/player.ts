@@ -89,6 +89,22 @@ export function playerBlocked(level: Level, x: number, y: number, z: number, ope
   return false;
 }
 
+/**
+ * After dropping into water or a pit, moves the player in from its edge if
+ * they hang over the floor beside it, which they couldn't then move from at
+ * all (the drop comes when most of them is over the hole, the walls feel
+ * all of them). Returns true when it moved them.
+ */
+export function keepInChasm(level: Level, p: PlayerState, openDoors: Set<number>): boolean {
+  if (!inChasm(level, p) || !playerBlocked(level, p.x, p.y, p.z ?? 0, openDoors, true)) return false;
+  const r = PLAYER_RADIUS + EPSILON;
+  const cx = Math.floor(p.x);
+  const cy = Math.floor(p.y);
+  p.x = Math.min(Math.max(p.x, cx + r), cx + 1 - r);
+  p.y = Math.min(Math.max(p.y, cy + r), cy + 1 - r);
+  return true;
+}
+
 /** The floor under the player: the highest floor beneath any part of them that they can stand on from where they are. */
 export function groundUnder(level: Level, p: PlayerState): number {
   const z = p.z ?? 0;

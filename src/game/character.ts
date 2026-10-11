@@ -263,30 +263,38 @@ export interface AttributeRoll {
   attributes: number[];
   /** Points to share out on top. */
   bonus: number;
-  /** Health and gold to start with, rolled with the attributes. */
-  health: number;
+  /** The class's hit die, rolled for the health to start with (see startingHealth), and the gold, rolled with the attributes. */
+  healthRoll: number;
   gold: number;
 }
 
 /**
  * Rolls a character as Arena does: each attribute is the race's plus a roll
  * of 20 and one more, on Arena's scale; 25 is rolled for the bonus points;
- * health is 25 plus a roll of the class's hit die plus Endurance's bonus (at
- * least 1 for the roll and bonus); and gold is 50 to 199.
+ * the class's hit die for health; and gold is 50 to 199.
  */
 export function rollAttributes(race: number, gender: Gender, cls: ClassInfo, random: Random, table?: number[][]): AttributeRoll {
   const attributes = raceAttributes(race, gender, table).map((raw) => to100(Math.min(255, raw + to256(arenaRoll(ATTRIBUTE_ROLL, random) + 1))));
   return {
     attributes,
     bonus: arenaRoll(BONUS_ROLL, random),
-    health: startingHealth(cls, derivedAttributes(attributes).health, random),
+    healthRoll: arenaRoll(cls.healthDie, random),
     gold: 50 + below(150, random),
   };
 }
 
-/** 25 plus a roll of the class's hit die plus Endurance's health bonus, those two counting at least 1. */
-export function startingHealth(cls: ClassInfo, healthBonus: number, random: Random): number {
-  return 25 + Math.max(1, arenaRoll(cls.healthDie, random) + healthBonus);
+/**
+ * 25 plus the hit die's roll plus Endurance's health bonus, those two
+ * counting at least 1. Arena works it out once the bonus points are shared
+ * out (its program at 0x1446A), so with Endurance as it ends up.
+ */
+export function startingHealth(healthRoll: number, healthBonus: number): number {
+  return 25 + Math.max(1, healthRoll + healthBonus);
+}
+
+/** How many more points the attributes can take before every one is at 100: Arena gives no more bonus points than that. */
+export function attributeRoom(attributes: number[]): number {
+  return attributes.reduce((room, a) => room + Math.max(0, ATTRIBUTE_MAX - a), 0);
 }
 
 /** The values the character sheet shows beside the attributes. */
@@ -308,15 +316,16 @@ export interface DerivedAttributes {
 
 /**
  * The sheet's numbers, as the original shows them for every roll seen:
- * Strength's damage on Arena's own scale ((Strength - 122) / 13); the others
- * a step for every five points from 50 (Endurance: every ten from 45), each
- * cut toward zero. OpenTESArena's versions hold some of these at 0 or -1
- * below a point; the original doesn't.
+ * Strength's damage and Endurance's health on Arena's own scale, as its
+ * program works them out ((Strength - 122) / 13 and (Endurance - 116) / 25,
+ * at 0x14F61 and 0x14FD5); the others a step for every five points from 50,
+ * each cut toward zero. OpenTESArena's versions hold some of these at 0 or
+ * -1 below a point; the original doesn't.
  */
 export function derivedAttributes(a: number[]): DerivedAttributes {
   // Adding 0 turns -0 into 0.
   const step = (v: number, from: number, every: number) => Math.trunc((v - from) / every) + 0;
-  const health = step(a[ENDURANCE], 45, 10);
+  const health = step(to256(a[ENDURANCE]), 116, 25);
   return {
     damage: step(to256(a[STRENGTH]), 122, 13),
     maxKilos: a[STRENGTH] * 2,
@@ -387,41 +396,6 @@ export function classFromAnswers(paths: number[], data: CreationData): number {
   // Without the game's table, the path most answers took.
   const path = counts.indexOf(Math.max(...counts));
   return Math.max(0, data.classes.findIndex((c) => c.name === ['Warrior', 'Thief', 'Mage'][path]));
-}
-
-// ---- Names ----
-
-/**
- * How each race's names are put together from the groups of name pieces:
- * a piece from each numbered group in turn, with the words between.
- */
-const NAME_RULES: Array<Record<Gender, Array<number | string>>> = [
-  { male: [0, 1, ' ', 4, 5], female: [2, 3, ' ', 4, 5] },
-  { male: [6, 7, 8, 9], female: [6, 7, 8, 10] },
-  { male: [11, 12, ' ', 15, 16, 'sen'], female: [13, 14, ' ', 15, 16, 'sen'] },
-  { male: [17, 18, ' ', 21, 22], female: [19, 20, ' ', 21, 22] },
-  { male: [23, 24, ' ', 27, 28], female: [25, 26, ' ', 27, 28] },
-  { male: [29, 30, ' ', 33, 34], female: [31, 32, ' ', 33, 34] },
-  { male: [35, 36], female: [37, 38] },
-  { male: [47, 48, 49], female: [47, 48, 49] },
-];
-
-/** The remake's own syllables, for when the game's name pieces are missing. */
-const SYLLABLES = [
-  ['Al', 'Bran', 'Cor', 'Dar', 'El', 'Fen', 'Gar', 'Hal', 'Isk', 'Jor', 'Kel', 'Lor', 'Mar', 'Ner', 'Or', 'Rav', 'Sel', 'Tor', 'Ul', 'Vel'],
-  ['a', 'e', 'i', 'o', 'u', 'ae', 'ia'],
-  ['dric', 'mund', 'ric', 'vald', 'wen', 'th', 'ra', 'nor', 'mir', 'dan', 'lis', 'gar'],
-];
-
-/** A random name for the race and gender, from the game's name pieces when there are some. */
-export function randomName(race: number, gender: Gender, random: Random, names?: string[][]): string {
-  const pick = (list: string[]) => list[Math.floor(random() * list.length)] ?? '';
-  const rule = NAME_RULES[race]?.[gender];
-  if (names && rule && rule.every((part) => typeof part === 'string' || names[part]?.length)) {
-    const name = rule.map((part) => (typeof part === 'string' ? part : pick(names[part]))).join('');
-    return name.replace(/(^|\s)([a-z])/g, (_, space: string, c: string) => space + c.toUpperCase()).trim();
-  }
-  return pick(SYLLABLES[0]) + pick(SYLLABLES[1]) + pick(SYLLABLES[2]);
 }
 
 // ---- Keeping the character ----

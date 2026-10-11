@@ -14,9 +14,9 @@ import {
   heroFor,
   loadCharacter,
   pickQuestions,
-  randomName,
   rollAttributes,
   arenaRoll,
+  attributeRoom,
   startingHealth,
   to100,
   to256,
@@ -24,6 +24,7 @@ import {
   WILLPOWER,
   type Character,
 } from '../src/game/character';
+import { arenaName, loreName, randomName } from '../src/game/names';
 import { always } from './helpers/level';
 
 /** Returns the numbers given in turn, then the last one over and over. */
@@ -113,8 +114,14 @@ describe('character creation', () => {
 
   it('starts with 25 health plus the hit die and Endurance’s bonus, those at least 1', () => {
     // Tinker's die of 9 is two dice of 0 to 5, rolled again over 9.
-    expect(startingHealth(TINKER, 0, sequence(raw(4), raw(4)))).toBe(25 + 8);
-    expect(startingHealth(TINKER, -2, always(0))).toBe(26);
+    expect(rollAttributes(0, 'male', TINKER, sequence(...new Array(37).fill(0), raw(4), raw(4))).healthRoll).toBe(8);
+    expect(startingHealth(8, 0)).toBe(25 + 8);
+    expect(startingHealth(0, -2)).toBe(26);
+  });
+
+  it('counts the room left in the attributes, which caps the bonus points', () => {
+    expect(attributeRoom([100, 99, 40, 100, 100, 100, 100, 100])).toBe(61);
+    expect(attributeRoom(new Array(8).fill(100))).toBe(0);
   });
 
   it('works out the sheet’s numbers as the original shows them', () => {
@@ -124,6 +131,8 @@ describe('character creation', () => {
     expect([35, 36, 40, 41, 45, 46, 55].map((v) => sheet({ [AGILITY]: v }).toHit)).toEqual([-3, -2, -2, -1, -1, 0, 1]);
     expect([35, 41, 46].map((v) => sheet({ [WILLPOWER]: v }).magicDefence)).toEqual([-3, -1, 0]);
     expect([37, 54, 55, 64, 65].map((v) => sheet({ [ENDURANCE]: v }).health)).toEqual([0, 0, 1, 1, 2]);
+    // Endurance's on Arena's scale, as the program works it out: a step for every 25 from 116, here 94 and 6.
+    expect([6, 94].map((v) => sheet({ [ENDURANCE]: v }).health)).toEqual([-4, 5]);
     expect([45, 54, 55].map((v) => sheet({ [PERSONALITY]: v }).charisma)).toEqual([-1, 0, 1]);
     expect(sheet({ [STRENGTH]: 71 }).maxKilos).toBe(142);
   });
@@ -164,14 +173,33 @@ describe('character creation', () => {
     expect(pickQuestions(questions.slice(0, 3), 10, always(0))).toHaveLength(3);
   });
 
-  it('puts names together from the game’s pieces by race and gender', () => {
+  it('puts names together from the game’s pieces by race and gender, as Arena does', () => {
+    const names = Array.from({ length: 50 }, (_, g) => [`p${g}a`, `p${g}b`]);
+    expect(arenaName(0, 'male', always(0), names)).toBe('P0ap1a P4ap5a');
+    expect(arenaName(0, 'female', always(0.9), names)).toBe('P2bp3b P4bp5b');
+    expect(arenaName(2, 'male', always(0), names)).toBe('P11ap12a P15ap16asen');
+    expect(arenaName(1, 'female', always(0), names)).toBe('P6ap7ap8ap10a');
+    expect(arenaName(0, 'male', always(0))).toBeUndefined();
+  });
+
+  it('makes names by each race’s customs too, half the time when the game’s pieces are there', () => {
     const names = Array.from({ length: 50 }, (_, g) => [`p${g}a`, `p${g}b`]);
     expect(randomName(0, 'male', always(0), names)).toBe('P0ap1a P4ap5a');
-    expect(randomName(0, 'female', always(0.9), names)).toBe('P2bp3b P4bp5b');
-    expect(randomName(2, 'male', always(0), names)).toBe('P11ap12a P15ap16asen');
-    expect(randomName(1, 'female', always(0), names)).toBe('P6ap7ap8ap10a');
-    // Without the pieces, a name of the remake's own.
-    expect(randomName(0, 'male', always(0))).toMatch(/^[A-Z][a-z]+$/);
+    expect(randomName(0, 'male', always(0.9), names)).toBe(loreName(0, 'male', always(0.9)));
+    // Without the pieces, always by the customs.
+    expect(randomName(0, 'male', always(0))).toBe(loreName(0, 'male', always(0)));
+    const many = (race: number, gender: 'male' | 'female') => Array.from({ length: 200 }, (_, i) => loreName(race, gender, sequence(...Array.from({ length: 8 }, (_, k) => ((i * 37 + k * 11) % 100) / 100))));
+    // Nords: a father's name with -sen, or an epithet.
+    expect(many(2, 'female').every((n) => /^[A-Z][a-z]+ ([A-Z][a-z]+sen|[A-Z][a-z]+-[A-Z][a-z]+)$/.test(n))).toBe(true);
+    // Khajiit: a prefix of rank, or none.
+    expect(many(6, 'male').some((n) => /^[A-Z][a-z]*'[a-z]+$/.test(n))).toBe(true);
+    expect(many(6, 'male').some((n) => /^[A-Z][a-z]+$/.test(n))).toBe(true);
+    // Argonians: a Jel name, or one like Swims-in-Reeds.
+    expect(many(7, 'female').some((n) => /^[A-Z][a-z]+-[a-z]+-[A-Z][a-z]+$/.test(n))).toBe(true);
+    // Every name starts with a capital and fits the name box.
+    for (let race = 0; race < 8; race++) {
+      for (const gender of ['male', 'female'] as const) expect(many(race, gender).every((n) => /^[A-Z]/.test(n) && n.length <= 24)).toBe(true);
+    }
   });
 
   it('keeps the character for next time, and refuses one that does not fit the classes', () => {

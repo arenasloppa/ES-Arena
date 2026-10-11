@@ -21,11 +21,29 @@ export interface DoorGeometry {
   x: number;
   y: number;
   key: TextureKey;
+  /** Every face of the door that is not against a wall, in one batch. */
   batch: QuadBatch;
-  /** How it opens, and for sliding and swinging doors the way it goes: along x (true) or y. */
+  /** The same faces one by one, for a door that swings. */
+  panels: DoorPanel[];
+  /** How it opens, and for sliding doors the way it goes: along x (true) or y. */
   kind: DoorKind;
   alongX: boolean;
 }
+
+/**
+ * One face of a swinging door and the corner it turns on. As in Arena, each
+ * face is hinged at its left end as seen from outside and swings in, away
+ * from whoever opens it, until it lies along the side of the doorway.
+ */
+export interface DoorPanel {
+  batch: QuadBatch;
+  hinge: { x: number; z: number };
+  /** The way the face looks out of the door, shut: Arena draws a face only to someone on that side. */
+  normal: { x: number; z: number };
+}
+
+/** How far a swinging face's hinge sits from the corner, so the open face lies just off the wall instead of in it. */
+const HINGE_GAP = 0.01;
 
 export interface LevelGeometry {
   batches: Map<TextureKey, QuadBatch>;
@@ -70,8 +88,9 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
       if (c.kind === 'wall') {
         for (const s of SIDES) {
           const n = at(x + s.dx, y + s.dy);
-          // Beside water or a pit the wall goes on down to its surface or floor.
-          if (!solid(n)) sideFace(batch(wallKey), x, y, s.normal, n?.chasm ? chasmDepth(n, h) : 0, h, false, n?.chasm ? 1 - chasmDepth(n, h) / h : 1);
+          // Beside water or a pit the wall goes on down to its surface or floor, its texture lined up with the wall beside.
+          const down = n?.chasm ? chasmDepth(n, h) : 0;
+          if (!solid(n)) sideFace(batch(wallKey), x, y, s.normal, down, h, false, 1, false, down / h);
         }
         continue;
       }
@@ -82,9 +101,11 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
         const key = tex !== undefined ? `wall:${tex}` : `floor:${c.floorTex}`;
         const d = chasmDepth(c, h);
         horizontal(batch(c.chasm === 'dry' ? key : `liquid:${c.chasm}`), x, y, d, true);
+        // Its sides show the top of the chasm's wall texture, as deep as it is: Arena's water and lava
+        // textures are stone above the waterline and black below, a pit's the whole height of a room.
         for (const s of SIDES) {
           const n = at(x + s.dx, y + s.dy);
-          if (n && !n.chasm && n.kind !== 'wall') sideFace(batch(key), x, y, s.normal, d, 0, true);
+          if (n && !n.chasm && n.kind !== 'wall') sideFace(batch(key), x, y, s.normal, d, 0, true, 1, false, 1 + d / h);
         }
       } else if (c.kind !== 'raised') {
         horizontal(batch(`floor:${c.floorTex}`), x, y, 0, true);
@@ -120,10 +141,27 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
           break;
         case 'door': {
           const b: QuadBatch = { positions: [], uvs: [], indices: [] };
-          for (const s of SIDES) sideFace(b, x, y, s.normal, 0, h);
-          // A door slides or swings toward the walls beside it.
+          const panels: DoorPanel[] = [];
+          // Faces against a wall are never seen, and would flicker through a barred door.
+          for (const s of SIDES) {
+            if (solid(at(x + s.dx, y + s.dy))) continue;
+            sideFace(b, x, y, s.normal, 0, h);
+            const panel: QuadBatch = { positions: [], uvs: [], indices: [] };
+            const [nx, , nz] = s.normal;
+            // The face's left end seen from outside is its centre less half its rightward direction (nz, -nx).
+            const hx = x + 0.5 + nx * 0.5 - nz * 0.5;
+            const hz = y + 0.5 + nz * 0.5 + nx * 0.5;
+            const gap: V3 = [nz * HINGE_GAP, 0, -nx * HINGE_GAP];
+            sideFace(panel, x, y, s.normal, 0, h);
+            for (let k = 0; k < panel.positions.length; k += 3) {
+              panel.positions[k] += gap[0];
+              panel.positions[k + 2] += gap[2];
+            }
+            panels.push({ batch: panel, hinge: { x: hx + gap[0], z: hz + gap[2] }, normal: { x: nx, z: nz } });
+          }
+          // A sliding door goes into the walls beside it.
           const alongX = solid(at(x - 1, y)) || solid(at(x + 1, y));
-          doors.push({ cellIndex: i, x, y, key: c.seeThrough ? `glass:${c.wallTex}` : wallKey, batch: b, kind: c.door ?? 'raising', alongX });
+          doors.push({ cellIndex: i, x, y, key: c.seeThrough ? `glass:${c.wallTex}` : wallKey, batch: b, panels, kind: c.door ?? 'raising', alongX });
           break;
         }
         default:
@@ -145,9 +183,10 @@ function quad(b: QuadBatch, bl: V3, br: V3, tr: V3, tl: V3, uv: [number, number,
 /**
  * A vertical face on the side of cell (x, y) given by its outward normal,
  * spanning y0..y1 vertically. vTop < 1 shows only the lower part of the
- * tile, so short faces (platform sides) are not squashed.
+ * tile, so short faces (platform sides) are not squashed; vBottom > 0 only
+ * the upper part.
  */
-function sideFace(b: QuadBatch, x: number, y: number, n: V3, y0: number, y1: number, inward = false, vTop = 1, inset = false) {
+function sideFace(b: QuadBatch, x: number, y: number, n: V3, y0: number, y1: number, inward = false, vTop = 1, inset = false, vBottom = 0) {
   // An inset face sits just inside the cell's edge (fences), not on it.
   const out = inset ? 0.49 : 0.5;
   const cx = x + 0.5 + n[0] * out;
@@ -165,7 +204,7 @@ function sideFace(b: QuadBatch, x: number, y: number, n: V3, y0: number, y1: num
     [cx + rx * 0.5, y0, cz + rz * 0.5],
     [cx + rx * 0.5, y1, cz + rz * 0.5],
     [cx - rx * 0.5, y1, cz - rz * 0.5],
-    [0, 0, 1, vTop],
+    [0, vBottom, 1, vTop],
   );
 }
 

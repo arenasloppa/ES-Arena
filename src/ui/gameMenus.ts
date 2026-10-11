@@ -1,8 +1,8 @@
 /**
  * The menus over the game, after Skyrim's. Tab (B on a controller) opens the
  * menu of menus, Skyrim's separated plus: the character sheet above, magic to
- * the left, the items to the right and the map below, each opened by pushing
- * that way. The item menu lists what the character
+ * the left, the items to the right and the map below. Pushing a way lights
+ * that arm and its name, and letting go opens its menu. The item menu lists what the character
  * carries by kind, with a picture of the picked piece and its numbers, and
  * anything in it can be equipped, made a favourite or dropped. The magic
  * menu lists the spells the character knows, with what each does at their
@@ -44,6 +44,8 @@ export interface GameMenuHost {
 
 type TweenPick = 'character' | 'items' | 'magic' | 'map';
 const TWEEN: Record<Direction, TweenPick> = { up: 'character', left: 'magic', right: 'items', down: 'map' };
+/** How far the stick may still lean once let go of: under the half that picks a way, so a wavering aim doesn't open a menu. */
+const LET_GO = 0.25;
 const TWEEN_LABELS: Record<TweenPick, string> = { character: 'Character', items: 'Items', magic: 'Magic', map: 'Map' };
 
 interface Category {
@@ -72,6 +74,12 @@ interface Hint {
 export class GameMenus {
   private which: GameMenu | undefined;
   private tweenPick: TweenPick | undefined;
+  /** The plus menu's arm is being aimed at with the stick or D-pad: its menu opens when they are let go. */
+  private padAiming = false;
+  /** A stick or D-pad held as the plus menu opened, as from walking: it counts once it has been let go. */
+  private padHeld = false;
+  /** The key aiming at an arm of the plus menu: its menu opens when the key comes up. */
+  private aimKey: string | undefined;
   private category = ALL;
   private column: 'categories' | 'list' = 'list';
   private row = 0;
@@ -188,6 +196,7 @@ export class GameMenus {
       if (this.which === 'favourites' && e.target === root) this.host.resume();
     });
     window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
     input.onChange(() => this.which && this.render());
   }
 
@@ -208,7 +217,11 @@ export class GameMenus {
     for (const [name, panel] of Object.entries(this.panels)) panel.hidden = name !== which;
     // A stick or D-pad still held from walking, or from picking this menu, shouldn't move through it.
     this.repeater.hold(this.pad.connected ? this.pad.direction() : undefined);
-    if (which === 'tween') this.tweenPick = undefined;
+    if (which === 'tween') {
+      this.tweenPick = this.aimKey = undefined;
+      this.padAiming = false;
+      this.padHeld = this.pad.connected && this.pushed();
+    }
     if (which === 'items') this.column = this.shown().length ? 'list' : 'categories';
     if (which === 'favourites') this.favouriteRow = 0;
     this.showMessage('');
@@ -241,18 +254,43 @@ export class GameMenus {
       if (pad.take('LB')) this.moveCategory(-1);
       if (pad.take('RB')) this.moveCategory(1);
     }
+    if (this.which === 'tween') {
+      this.aimWithPad();
+      return;
+    }
     const direction = this.repeater.update(pad.direction(), now);
     if (direction && !(which === 'favourites' && (direction === 'left' || direction === 'right'))) this.go(direction);
   }
 
   // ---- Moving about ----
 
+  /**
+   * The plus menu with the stick or the D-pad: aiming lights an arm and its
+   * name, and letting go opens its menu, as in Skyrim.
+   */
+  private aimWithPad(): void {
+    const direction = this.pad.direction();
+    if (this.padHeld) {
+      this.padHeld = this.pushed();
+      return;
+    }
+    if (direction) {
+      this.padAiming = true;
+      if (TWEEN[direction] !== this.tweenPick) this.pickTween(TWEEN[direction]);
+    } else if (this.padAiming && !this.pushed()) {
+      this.padAiming = false;
+      if (this.tweenPick) this.openTween(this.tweenPick);
+    }
+  }
+
+  /** Whether the D-pad or the stick is still pushed any way. */
+  private pushed(): boolean {
+    const { x, y } = this.pad.move;
+    return this.pad.direction() !== undefined || Math.max(Math.abs(x), Math.abs(y)) >= LET_GO;
+  }
+
   private go(direction: Direction): void {
     switch (this.which) {
-      case 'tween':
-        // As in Skyrim, pushing a way opens its menu straight away.
-        this.openTween(TWEEN[direction]);
-        break;
       case 'items':
         if (direction === 'left') this.column = 'categories';
         else if (direction === 'right') {
@@ -784,8 +822,14 @@ export class GameMenus {
     if (direction) {
       handled();
       if (which === 'favourites' && (direction === 'left' || direction === 'right')) return;
-      // A key held from walking shouldn't open a menu from the menu of menus.
-      if (which === 'tween' && e.repeat) return;
+      if (which === 'tween') {
+        // The key lights its arm, and opens it when it comes up (onKeyUp). A key held from walking does neither.
+        if (!e.repeat) {
+          this.aimKey = code;
+          this.pickTween(TWEEN[direction]);
+        }
+        return;
+      }
       this.go(direction);
       return;
     }
@@ -809,6 +853,14 @@ export class GameMenus {
       handled();
       this.setHotkey(Number(digit[1]) - 1);
     }
+  };
+
+  /** The key that lit an arm of the plus menu comes up: its menu opens. */
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (this.which !== 'tween' || e.code !== this.aimKey) return;
+    e.preventDefault();
+    this.aimKey = undefined;
+    if (this.tweenPick) this.openTween(this.tweenPick);
   };
 }
 

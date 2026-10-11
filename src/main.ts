@@ -27,7 +27,7 @@ import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
-import { creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
+import { attributeRoom, creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
 import { Dungeon, type Vision } from './game/dungeon';
 import { buildLevel } from './game/level';
 import { Engine, type GameMenu } from './game/engine';
@@ -45,6 +45,7 @@ import { CharacterCreation } from './ui/creation';
 import { Cutscenes, deathVision, dreamVisions, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
 import { GameMenus } from './ui/gameMenus';
 import { Hud } from './ui/hud';
+import { LevelUp } from './ui/levelUp';
 import { MenuNav, type StepEvent } from './ui/menu';
 import { Minimap } from './ui/minimap';
 import { bindSettingRows, loadSettings } from './ui/settings';
@@ -100,19 +101,21 @@ const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'create' | 'controls' | 'wait' | 'dead' | 'escaped';
+type Screen = 'folder' | 'play' | 'create' | 'controls' | 'wait' | 'level' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
   create: $('screen-create'),
   controls: $('screen-controls'),
   wait: $('screen-wait'),
+  level: $('screen-level'),
   dead: $('screen-dead'),
   escaped: $('screen-escaped'),
 };
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
 const creator = new CharacterCreation(screens.create);
+const levelSheet = new LevelUp(screens.level);
 const cutscenes = new Cutscenes($('cutscene'), pad, () => data, () => sounds);
 input.onChange(() => input.render($('cutscene')));
 input.render($('cutscene'));
@@ -135,10 +138,12 @@ const nav = new MenuNav(menu, pad, input, {
   back: () => {
     if (screen === 'create') creator.back();
     else if (screen === 'controls') showScreen(screenBeforeControls);
+    else if (screen === 'level') levelSheet.back();
     else if (playing()) resume();
   },
   resume: () => {
-    if (playing()) resume();
+    if (screen === 'level') levelSheet.back();
+    else if (playing()) resume();
   },
 });
 
@@ -155,9 +160,10 @@ function showScreen(next: Screen) {
 
 /** The button hints along the bottom: Back steps back through character creation, closes the Controls screen, or returns to the game. */
 function updateHints() {
-  $('hint-back').hidden = screen !== 'controls' && screen !== 'create' && !playing();
+  // The level-up sheet has no way back: the points have to be shared out first.
+  $('hint-back').hidden = screen === 'level' || (screen !== 'controls' && screen !== 'create' && !playing());
   $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
-  $('hint-change').hidden = screen !== 'controls' && screen !== 'create' && screen !== 'wait';
+  $('hint-change').hidden = screen !== 'controls' && screen !== 'create' && screen !== 'wait' && screen !== 'level';
 }
 
 /**
@@ -374,6 +380,7 @@ async function startMap(name: string, character: Character) {
     next.onWait = openWait;
     next.onDream = (visions) => void dream(visions);
     next.onEscape = escaped;
+    next.onLevelUp = levelUp;
     next.onMap = (open) => {
       mapScreen.hidden = !open;
       hudEl.hidden = open;
@@ -509,6 +516,47 @@ function camp(hours: number | 'healed') {
 }
 $('wait-hours').addEventListener('click', () => camp(waitHours));
 $('wait-healed').addEventListener('click', () => camp('healed'));
+
+// ---- Levelling up, as in Arena ----
+
+/**
+ * A level gained: the game's words for it over the character sheet, where
+ * the bonus points are shared out among the attributes before the game goes
+ * on, as in Arena. With no room left for them (every attribute at 100),
+ * Arena heals the player instead.
+ */
+function levelUp(gained: { level: number; health: number; points: number }) {
+  if (!engine || !playing() || !runCharacter || !creationLoaded) return;
+  const d = engine.dungeon;
+  const made = creationLoaded;
+  const cls = made.classes[runCharacter.cls];
+  const before = { health: d.stats.maxHealth - gained.health, stamina: d.stats.maxStamina, magicka: d.stats.maxMagicka };
+  const apply = (character: Character, heal = false) => {
+    runCharacter = character;
+    d.applyAttributes(heroFor(character, cls), heal);
+    const s = d.stats;
+    const more = (name: string, n: number) => (n > 0 ? [`${name} +${n}`] : []);
+    const gains = [...more('Health', s.maxHealth - before.health), ...more('Stamina', s.maxStamina - before.stamina), ...more('Spell points', s.maxMagicka - before.magicka)];
+    hud.banner(`Level ${s.level}`, 'Level up', gains.join(' · ') || undefined);
+  };
+  if (Math.min(gained.points, attributeRoom(runCharacter.attributes)) <= 0) {
+    apply(runCharacter, true);
+    return;
+  }
+  const character = runCharacter;
+  levelSheet.open({
+    character,
+    data: made,
+    stats: d.stats,
+    points: d.stats.bonusPoints,
+    text: tables?.messages?.levelUp ?? 'Your experience has raised you a level.',
+    done: (attributes) => {
+      resume();
+      apply({ ...character, attributes });
+    },
+  });
+  showMenu('level');
+}
 
 /** Ria comes to the sleeping player: her visions play, then the rest goes on. */
 async function dream(visions: Vision[]) {
