@@ -83,20 +83,26 @@ export function indexGameFolder<T>(entries: Iterable<{ path: string; value: T }>
   return index;
 }
 
-/** Builds a source from <input type="file" webkitdirectory> results. */
-export function sourceFromFileList(files: Iterable<File>): FileSource {
-  // webkitRelativePath starts with the picked folder's own name; drop it.
-  const index = indexGameFolder(
-    [...files].map((f) => ({ path: relPath(f).split('/').slice(1).join('/') || f.name, value: f })),
-  );
+/** Indexes `entries` (see indexGameFolder) and reads each file through `read`. */
+function indexedSource<T>(entries: Iterable<{ path: string; value: T }>, read: (value: T) => Promise<Uint8Array>): FileSource {
+  const index = indexGameFolder(entries);
   return {
     names: () => [...index.keys()],
     read: async (name) => {
-      const f = index.get(name.toUpperCase());
-      if (!f) throw new Error(`${name} is not in the chosen folder`);
-      return new Uint8Array(await f.arrayBuffer());
+      const value = index.get(name.toUpperCase());
+      if (value === undefined) throw new Error(`${name} is not in the chosen folder`);
+      return read(value);
     },
   };
+}
+
+/** Builds a source from <input type="file" webkitdirectory> results. */
+export function sourceFromFileList(files: Iterable<File>): FileSource {
+  // webkitRelativePath starts with the picked folder's own name; drop it.
+  return indexedSource(
+    [...files].map((f) => ({ path: relPath(f).split('/').slice(1).join('/') || f.name, value: f })),
+    async (f) => new Uint8Array(await f.arrayBuffer()),
+  );
 }
 
 /** How many folder levels below the picked one are searched for GLOBAL.BSA. */
@@ -112,15 +118,15 @@ export async function sourceFromDirectoryHandle(dir: FileSystemDirectoryHandle):
     }
   };
   await walk(dir, '', 0);
-  const index = indexGameFolder(entries);
-  return {
-    names: () => [...index.keys()],
-    read: async (name) => {
-      const h = index.get(name.toUpperCase());
-      if (!h) throw new Error(`${name} is not in the chosen folder`);
-      return new Uint8Array(await (await h.getFile()).arrayBuffer());
-    },
-  };
+  return indexedSource(entries, async (h) => new Uint8Array(await (await h.getFile()).arrayBuffer()));
+}
+
+/**
+ * Builds a source from paths relative to the picked folder, read by `read`
+ * with the path as listed (the desktop app lists and reads files itself).
+ */
+export function sourceFromPaths(paths: Iterable<string>, read: (path: string) => Promise<Uint8Array>): FileSource {
+  return indexedSource([...paths].map((path) => ({ path, value: path })), read);
 }
 
 /** Game data: loose files first, then GLOBAL.BSA. */

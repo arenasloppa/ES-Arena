@@ -1,0 +1,82 @@
+# Builds the desktop app for Mac and Windows and publishes the zips on the
+# Releases page. Runs when a version tag such as v0.1.0 is pushed, or by hand
+# from the Actions tab, which tags the current commit with the version in
+# package.json.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            name: mac
+          - os: windows-latest
+            name: windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check the tag matches package.json
+        if: github.ref_type == 'tag'
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json ($version)"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      # The Mac app is ad-hoc signed (package.json sets the identity "-"), which Apple
+      # silicon needs to run it at all; there is no paid Apple certificate behind it.
+      - name: Package for Mac
+        if: runner.os == 'macOS'
+        run: |
+          npx electron-builder --mac --arm64 --publish never -c.artifactName='ES-Arena-${version}-Mac-Apple-silicon.${ext}'
+          npx electron-builder --mac --x64 --publish never -c.artifactName='ES-Arena-${version}-Mac-Intel.${ext}'
+      - name: Package for Windows
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win --x64 --publish never -c.artifactName='ES-Arena-${version}-Windows.${ext}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: release/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: zips
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          ls -l zips
+          sed "s/{version}/$version/g" .github/release-notes.md > notes.md
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" zips/*.zip --clobber
+          else
+            gh release create "$tag" zips/*.zip --target "$GITHUB_SHA" --title "ES Arena $version" --notes-file notes.md
+          fi

@@ -24,8 +24,11 @@ export class Engine {
   private running = false;
   private last = 0;
   private messageTimer = 0;
-  /** Set when the page may not capture the mouse (e.g. some embedded frames); we fall back to drag-to-look. */
-  private pointerLockFailed = !('requestPointerLock' in HTMLElement.prototype);
+  /**
+   * Failed mouse captures in a row. One can be a fluke (asking again right after Esc releases it); after two
+   * we take it that the page may not capture the mouse (e.g. some embedded frames) and stay with drag-to-look.
+   */
+  private pointerLockFailures = 'requestPointerLock' in HTMLElement.prototype ? 0 : 2;
   private dragging = false;
   private dragDistance = 0;
   onPause?: () => void;
@@ -195,11 +198,16 @@ export class Engine {
 
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
 
+  private get pointerLockFailed(): boolean {
+    return this.pointerLockFailures >= 2;
+  }
+
   private lockPointer(): void {
     if (this.pointerLockFailed) return;
     try {
       const result = this.canvas.requestPointerLock?.() as unknown;
-      if (result instanceof Promise) result.catch(this.onPointerLockError);
+      // A refusal also fires 'pointerlockerror', which does the counting.
+      if (result instanceof Promise) result.catch(() => {});
     } catch {
       this.onPointerLockError();
     }
@@ -240,12 +248,13 @@ export class Engine {
   };
 
   private onPointerLockError = () => {
-    this.pointerLockFailed = true;
+    this.pointerLockFailures++;
   };
 
   private onPointerLockChange = () => {
+    if (document.pointerLockElement === this.canvas) this.pointerLockFailures = 0;
     // Losing pointer lock (Esc) opens the menu, like pausing.
-    if (this.running && !this.autopilot && document.pointerLockElement !== this.canvas) this.onPause?.();
+    else if (this.running && !this.autopilot) this.onPause?.();
   };
 }
 

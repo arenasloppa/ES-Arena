@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameData, indexGameFolder, isRuntimeFile, sourceFromFileList, validateFolder } from '../src/data/files';
+import { GameData, indexGameFolder, isRuntimeFile, sourceFromFileList, sourceFromPaths, validateFolder } from '../src/data/files';
 import { makeBsa } from './helpers/encode';
 
 const REQUIRED = ['GLOBAL.BSA', 'ACD.EXE', 'PAL.COL', 'TEMPLATE.DAT', 'QUESTION.TXT', 'CITYDATA.65', 'SPELLSG.65', 'ARENAFNT.DAT'];
@@ -36,6 +36,20 @@ describe('sourceFromFileList', () => {
     ]);
     expect(src.names().sort()).toEqual(['GLOBAL.BSA', 'SPEECH/1294_00A.VOC']);
     expect([...(await src.read('global.bsa'))]).toEqual([7]);
+  });
+});
+
+describe('sourceFromPaths', () => {
+  it('reads each file by the path it was listed under', async () => {
+    const asked: string[] = [];
+    const src = sourceFromPaths(['ARENA/global.bsa', 'ARENA/Pal.Col', 'DOSBox/dosbox.conf'], async (path) => {
+      asked.push(path);
+      return new Uint8Array([path.length]);
+    });
+    expect(src.names().sort()).toEqual(['GLOBAL.BSA', 'PAL.COL']);
+    expect([...(await src.read('PAL.COL'))]).toEqual(['ARENA/Pal.Col'.length]);
+    expect(asked).toEqual(['ARENA/Pal.Col']);
+    await expect(src.read('dosbox.conf')).rejects.toThrow('not in the chosen folder');
   });
 });
 

@@ -1,5 +1,17 @@
+import '@fontsource/alegreya/latin-400.css';
+import '@fontsource/alegreya/latin-400-italic.css';
+import '@fontsource/alegreya/latin-600.css';
+import '@fontsource/im-fell-english-sc/latin-400.css';
 import * as THREE from 'three';
-import { GameData, sourceFromDirectoryHandle, sourceFromFileList, validateFolder, type FileSource } from './data/files';
+import { desktop, type DesktopFolder } from './data/desktop';
+import {
+  GameData,
+  sourceFromDirectoryHandle,
+  sourceFromFileList,
+  sourceFromPaths,
+  validateFolder,
+  type FileSource,
+} from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
 import { parseCol } from './formats/palette';
 import { parseImg } from './formats/img';
@@ -67,7 +79,8 @@ function showChecks(names: string[]) {
   return result.ok;
 }
 
-async function useSource(source: FileSource) {
+/** Checks and opens a folder; true when the game can be played from it. */
+async function useSource(source: FileSource): Promise<boolean> {
   folderError.hidden = true;
   const names = source.names();
   if (!showChecks(names)) {
@@ -75,7 +88,8 @@ async function useSource(source: FileSource) {
       ? 'Some required files are missing. Pick the ARENA folder, the one that contains GLOBAL.BSA.'
       : 'That folder is empty.';
     folderError.hidden = false;
-    return;
+    setStatus('');
+    return false;
   }
   setStatus('Reading GLOBAL.BSA…');
   try {
@@ -84,7 +98,7 @@ async function useSource(source: FileSource) {
     folderError.textContent = `Could not read the game data: ${(err as Error).message}`;
     folderError.hidden = false;
     setStatus('');
-    return;
+    return false;
   }
   await showTitle(data);
   const maps = data.mapNames();
@@ -99,6 +113,7 @@ async function useSource(source: FileSource) {
   stepFolder.hidden = true;
   stepPlay.hidden = false;
   setStatus(`Found ${data.bsa.entries.length} files in GLOBAL.BSA.`);
+  return true;
 }
 
 async function showTitle(d: GameData) {
@@ -182,10 +197,30 @@ async function useHandle(handle: FileSystemDirectoryHandle) {
   await useSource(await sourceFromDirectoryHandle(handle));
 }
 
+async function useDesktopFolder(opening: Promise<DesktopFolder | null>) {
+  let folder: DesktopFolder | null;
+  try {
+    folder = await opening;
+  } catch (err) {
+    // Electron prefixes errors from the main process with "Error invoking remote method '…': Error: ".
+    folderError.textContent = `Could not open that folder: ${(err as Error).message.replace(/^Error invoking remote method '[^']*': (Error: )?/, '')}`;
+    folderError.hidden = false;
+    return;
+  }
+  if (!folder || !desktop) return;
+  setStatus(`Scanning ${folder.path}…`);
+  if (await useSource(sourceFromPaths(folder.files, desktop.readFile))) await desktop.rememberFolder();
+}
+
 // Embedded pages (cross-origin frames) may not open the native folder picker, so use the upload-style one there.
 const embedded = window.self !== window.top;
 
-if (supportsDirectoryPicker() && !embedded) {
+if (desktop) {
+  // The desktop app reads the folder itself and opens the one from last time on launch.
+  const bridge = desktop;
+  pickButton.addEventListener('click', () => useDesktopFolder(bridge.chooseFolder()));
+  void useDesktopFolder(bridge.reopenFolder());
+} else if (supportsDirectoryPicker() && !embedded) {
   pickButton.addEventListener('click', async () => {
     try {
       const handle = await pickDirectory();
