@@ -17,9 +17,10 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 | | |
 |---|---|
 | ![Choosing a race on Arena's map of Tamriel, with Skyrim picked and the provinces listed beside the map](docs/screenshots/race.png)<br>Choosing a race on the map of Tamriel | ![Sharing out bonus points among the attributes, beside the paper doll of a Nord warrior](docs/screenshots/attributes.png)<br>Sharing out bonus points |
-| ![The item menu, with an iron plate cuirass picked, its picture from the game and its armour, weight and value](docs/screenshots/items.png)<br>The item menu | ![The character sheet, with the paper doll beside the attributes, health, damage and experience](docs/screenshots/character.png)<br>The character sheet |
+| ![The item menu, with the broadsword the character starts with picked, its picture from the game and its damage, weight and value](docs/screenshots/items.png)<br>The item menu | ![The character sheet, with the paper doll beside the attributes, health, damage and experience](docs/screenshots/character.png)<br>The character sheet |
 | ![The cell where the game begins, with the dungeon's name across the top and the first objective in the corner](docs/screenshots/cell.png)<br>Arriving in the cell where Arena begins | ![Sneaking up behind a rat, with the eye that shows how close it is to noticing](docs/screenshots/sneak.png)<br>Sneaking up on a rat |
 | ![The 3D map of the Imperial Dungeons, showing the parts explored so far](docs/screenshots/map.png)<br>The map fills in as you explore | ![The main menu, over a hall the remake draws itself](docs/screenshots/menu.png)<br>The main menu |
+| ![The wait menu, with Arena's time and date over the hours to rest and Arena's two ways to camp](docs/screenshots/wait.png)<br>Waiting, with the date and time in Arena | |
 
 The screenshots are taken from the game as it stands with `npm run screenshots` and retaken for every release.
 They show Arena's own art, which the remake reads from a copy of the game. The [gallery](docs/gallery.md) keeps the

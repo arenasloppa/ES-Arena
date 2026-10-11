@@ -3,7 +3,7 @@
 Every release of ES Arena, newest first. Each one is on the
 [Releases page](https://github.com/arenasloppa/ES-Arena/releases) with its downloads.
 
-## 0.5.0 (2026-10-11)
+## 0.4.2 (2026-10-11)
 
 Magic, Arena's music and cutscenes, its dungeons built as it builds them, camping, and character creation checked against the original game itself.
 

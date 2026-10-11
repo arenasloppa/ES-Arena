@@ -82,8 +82,18 @@ try {
     localStorage.removeItem(key);
     return character;
   }, SAVED_CHARACTER);
-  if (await page.isVisible('#screen-play')) await page.click('#change-folder');
+  // The folder screen, from Settings when the app opens a folder it remembers.
+  if (await page.isVisible('#screen-play')) {
+    await page.click('#screen-play [data-screen="controls"]:visible');
+    await page.click('#change-folder');
+  }
   await page.click('#pick-folder');
+  // The opening plays the first time a folder is opened.
+  await page.waitForSelector('#cutscene:not([hidden]), #screen-play:not([hidden])', { timeout: 60_000 });
+  while (await page.isVisible('#cutscene')) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+  }
   await page.waitForSelector('#screen-play:not([hidden])', { timeout: 60_000 });
   await page.waitForTimeout(2500);
   await shot(page, 'menu');
