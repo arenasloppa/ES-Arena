@@ -10,7 +10,6 @@ import {
   magickaCost,
   magnitude,
   magnitudeRange,
-  nextSpell,
   ROUND,
   startingMagicka,
   startingSpells,
@@ -92,10 +91,22 @@ describe('spell rules', () => {
     expect(startingMagicka({ name: 'Battlemage', spellcaster: true }, 50)).toBe(87);
   });
 
-  it('starts a caster with the cheapest healing and offensive spells, and teaches the next cheapest', () => {
-    const all = [bolt, mend, lift, spark];
-    expect(startingSpells(all).map((s: SpellRecord) => s.name)).toEqual(['Mend', 'Spark']);
-    expect(nextSpell(all, startingSpells(all))?.name).toBe('Bolt');
+  it('starts a caster with the two spells in the places Arena gives them, or else the cheapest healing and offensive ones', () => {
+    const blank = Array.from({ length: 61 }, () => new Uint8Array(SPELL_SIZE));
+    const guild = parseSpells(
+      file(
+        record({ name: 'Cheap Mend', target: 0, effects: [12], subs: [1], cost: 5 }),
+        ...blank.slice(1),
+        record({ name: 'Sting', params: [[1, 3, 1, 1, 1, 0]], cost: 90 }),
+        record({ name: 'Soothe', target: 0, effects: [12], subs: [1], cost: 70 }),
+      ),
+    );
+    expect(startingSpells(guild).map((s: SpellRecord) => [s.index, s.name])).toEqual([
+      [61, 'Sting'],
+      [62, 'Soothe'],
+    ]);
+    // A list without castable spells in those places.
+    expect(startingSpells([bolt, mend, lift, spark]).map((s: SpellRecord) => s.name)).toEqual(['Mend', 'Spark']);
   });
 
   it('keeps spell points the same from level to level, without refilling them', () => {

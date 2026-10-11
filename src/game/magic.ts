@@ -17,13 +17,13 @@
  *   caster's level: Pitfalls, 600, costs a level 10 caster 60 spell points.
  * - Spell points are Intelligence times the class's multiplier; classes
  *   without one can't cast. Sorcerers never get spell points back.
- * - A new character starts with one healing spell and one offensive spell.
  * - Wildfire's continuous damage comes every 5 rounds.
  *
- * The remake's own rules, until there are cities, resting and a Mages
- * Guild: spell points come back slowly over time (except a Sorcerer's), and
- * each level gained teaches the cheapest spell from the guild's list not
- * yet known.
+ * As in Arena's program, a new spellcaster knows two spells, a healing one
+ * and an offensive one (see startingSpells), and levelling teaches no more:
+ * Arena sells the rest at the Mages Guild, which the remake doesn't have
+ * yet. The remake's own rule, until there are cities: spell points come
+ * back slowly over time (except a Sorcerer's).
  */
 import { EFFECT_NAMES, ELEMENTS, type SpellEffect, type SpellRecord, type SpellTarget } from '../formats/spells';
 import { roll, type Random } from './combat';
@@ -142,16 +142,20 @@ export function offensive(spell: SpellRecord): boolean {
 
 const byCost = (a: SpellRecord, b: SpellRecord) => a.cost - b.cost || a.index - b.index;
 
-/** The spells a new caster knows: the cheapest healing spell and the cheapest offensive spell the remake can cast. */
+/** The places in the guild's list, counting from 0, of the two spells Arena's program gives a new caster (at 0x144EE). */
+const ARENA_STARTING_SPELLS = [61, 62];
+
+/**
+ * The spells a new caster knows: the two Arena gives, by their places in the
+ * list (Fire Dart and Light Heal in the game's own), or, when the remake
+ * can't cast what is in those places, the cheapest healing spell and the
+ * cheapest offensive one it can.
+ */
 export function startingSpells(spells: SpellRecord[]): SpellRecord[] {
+  const arenas = ARENA_STARTING_SPELLS.map((i) => spells.find((s) => s.index === i));
+  if (arenas.every((s) => s && castable(s))) return arenas as SpellRecord[];
   const cheapest = (pick: (s: SpellRecord) => boolean) => spells.filter((s) => castable(s) && pick(s)).sort(byCost)[0];
   return [cheapest(heals), cheapest(offensive)].filter((s): s is SpellRecord => !!s);
-}
-
-/** The next spell a caster learns when they gain a level: the cheapest castable one they don't know. */
-export function nextSpell(spells: SpellRecord[], known: SpellRecord[]): SpellRecord | undefined {
-  const have = new Set(known.map((s) => s.index));
-  return spells.filter((s) => castable(s) && !have.has(s.index)).sort(byCost)[0];
 }
 
 /** "per %4 level(s)": how many times the per-level part counts at `level`; none when the number is 0. */
