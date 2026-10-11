@@ -162,6 +162,10 @@ The format details come from the community's research, mainly [UESP](https://en.
 and the [OpenTESArena](https://github.com/afritz1/OpenTESArena) project. Anything the code marks as a guess still needs
 checking against the original game.
 
+## Support
+
+If you enjoy it, you can buy arenasloppa a coffee on [Ko-fi](https://ko-fi.com/arenasloppa).
+
 ## Legal
 
 This is an unofficial fan project, not affiliated with or endorsed by Bethesda Softworks or ZeniMax Media.
