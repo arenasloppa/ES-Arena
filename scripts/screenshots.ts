@@ -247,7 +247,6 @@ async function menus(page: Page): Promise<void> {
   await page.waitForTimeout(300);
   await page.keyboard.press('Tab');
   await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('Enter');
   await page.waitForSelector("#game-menu[data-panel='character']:not([hidden])");
   await page.waitForTimeout(800);
   await shot(page, 'character');

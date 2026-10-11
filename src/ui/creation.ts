@@ -398,7 +398,8 @@ export class CharacterCreation {
     const marker = el('span', 'create-marker');
     marker.hidden = true;
     mapBox.append(canvas, marker);
-    mapBox.hidden = true;
+    // Its room is kept while the map loads, so nothing jumps when it appears.
+    mapBox.style.visibility = 'hidden';
     const side = el('div', 'create-race-list');
     const list = el('nav', 'options create-list');
     const gifts = el('p', 'create-gifts');
@@ -442,12 +443,18 @@ export class CharacterCreation {
       if (i === 'exit') this.back();
       else if (i !== undefined) this.pickRace(i);
     });
-    void this.host?.portraits?.map().then((image) => {
-      if (!image || this.step !== 'race') return;
+    const portraits = this.host?.portraits;
+    if (!portraits) mapBox.hidden = true;
+    void portraits?.map().then((image) => {
+      if (this.step !== 'race') return;
+      if (!image) {
+        mapBox.hidden = true;
+        return;
+      }
       canvas.width = image.width;
       canvas.height = image.height;
       canvas.getContext('2d')!.drawImage(image, 0, 0);
-      mapBox.hidden = false;
+      mapBox.style.visibility = '';
     });
     body.append(mapBox, side);
     this.root.append(body);

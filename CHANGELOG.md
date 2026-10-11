@@ -5,6 +5,13 @@ Every release of ES Arena, newest first. Each one is on the
 
 ## Unreleased
 
+## 0.4.1 (2026-10-11)
+
+Skyrim's plus-shaped menu, and a steady map in character creation.
+
+- The menu of menus (Tab, or B on a controller) is now Skyrim's separated plus instead of a ring, with magic to the left and your items to the right as in Skyrim. Pushing a way opens its menu straight away.
+- The map of Tamriel stays still while you move between provinces in character creation. Only the diamond moves.
+
 ## 0.4.0 (2026-10-11)
 
 Character creation as in Arena, and Skyrim's menus for your items, favourites and character.

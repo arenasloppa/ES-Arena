@@ -452,8 +452,9 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   animation: marker 1.6s ease-in-out infinite;
 }
 @keyframes marker { 50% { opacity: 0.55; } }
-.create-race-list { display: grid; gap: 12px; justify-items: center; }
-.create-gifts { max-width: 280px; min-height: 2.8em; margin: 0; color: var(--dim); font-size: 17px; }
+/* A fixed size beside the map, so the map stays put while the words under the list change. */
+.create-race-list { display: grid; gap: 12px; justify-items: center; width: 280px; }
+.create-gifts { width: 100%; height: 2.8em; margin: 0; color: var(--dim); font-size: 17px; line-height: 1.4; }
 .create-sheet { align-items: center; }
 .create-attributes { display: grid; gap: 8px; justify-items: center; width: min(460px, 100%); }
 .create-attributes .settings, .create-face { width: min(460px, 100%); }
@@ -484,31 +485,27 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 #game-menu .rule { width: min(440px, 100%); }
 #game-menu button { font: inherit; color: inherit; text-shadow: inherit; background: none; border: 0; }
 
-/* The menu of menus: four ways round a ring, as Skyrim's. */
-.gm-tween { --ring: min(300px, 40vh); --at: 46%; }
-.tween-ring {
-  position: absolute; left: 50%; top: var(--at); width: var(--ring); aspect-ratio: 1; transform: translate(-50%, -50%);
-  border-radius: 50%; border: 1px solid var(--line-strong);
-  background: radial-gradient(circle, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.05) 70%);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), inset 0 0 40px rgba(0, 0, 0, 0.6), 0 0 60px rgba(0, 0, 0, 0.6);
-}
-.tween-ring::before {
-  content: ''; position: absolute; inset: 14%; border-radius: 50%; border: 1px solid var(--line);
-}
-.tween-ring::after {
-  content: ''; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px;
-  border: 1px solid var(--line-strong); background: var(--night); transform: translate(-50%, -50%) rotate(45deg);
-}
+/* The menu of menus: Skyrim's separated plus, with a menu at the end of each arm. */
+.gm-tween { --at: 45%; --gap: clamp(20px, 3.4vh, 34px); --arm-x: min(210px, 16vw); --arm-y: min(130px, 14vh); --label-gap: 8px; }
+.tween-arm { position: absolute; pointer-events: none; opacity: 0.5; transition: opacity 0.12s, filter 0.12s; }
+.tween-arm-up, .tween-arm-down { left: 50%; width: 1px; height: var(--arm-y); margin-left: -0.5px; }
+.tween-arm-left, .tween-arm-right { top: var(--at); width: var(--arm-x); height: 1px; margin-top: -0.5px; }
+/* Each arm fades out toward the middle, so the four never meet. */
+.tween-arm-up { top: calc(var(--at) - var(--gap) - var(--arm-y)); background: linear-gradient(0deg, transparent, var(--ink) 70%); }
+.tween-arm-down { top: calc(var(--at) + var(--gap)); background: linear-gradient(180deg, transparent, var(--ink) 70%); }
+.tween-arm-left { left: calc(50% - var(--gap) - var(--arm-x)); background: linear-gradient(270deg, transparent, var(--ink) 70%); }
+.tween-arm-right { left: calc(50% + var(--gap)); background: linear-gradient(90deg, transparent, var(--ink) 70%); }
+.tween-arm.picked { opacity: 1; filter: drop-shadow(0 0 5px var(--glow)); }
 .tween-option {
-  position: absolute; transform: translate(-50%, -50%); padding: 10px 18px; cursor: pointer;
-  font: 500 clamp(24px, 3vw, 34px)/1 var(--font-title) !important; letter-spacing: 0.2em; text-transform: uppercase;
+  position: absolute; padding: 8px calc(14px - 0.22em) 8px 14px; cursor: pointer; white-space: nowrap;
+  font: 400 clamp(26px, 3.2vw, 38px)/1 var(--font-ui) !important; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--dim) !important; transition: color 0.12s, text-shadow 0.12s;
 }
 .tween-option.picked { color: var(--ink) !important; text-shadow: 0 0 18px var(--glow), 0 1px 3px rgba(0, 0, 0, 0.95) !important; }
-.tween-character { left: 50%; top: calc(var(--at) - var(--ring) / 2 - 42px); }
-.tween-map { left: 50%; top: calc(var(--at) + var(--ring) / 2 + 42px); }
-.tween-items { left: calc(50% - var(--ring) / 2 - 120px); top: var(--at); }
-.tween-magic { left: calc(50% + var(--ring) / 2 + 120px); top: var(--at); }
+.tween-up { left: 50%; top: calc(var(--at) - var(--gap) - var(--arm-y) - var(--label-gap)); transform: translate(-50%, -100%); }
+.tween-down { left: 50%; top: calc(var(--at) + var(--gap) + var(--arm-y) + var(--label-gap)); transform: translateX(-50%); }
+.tween-left { right: calc(50% + var(--gap) + var(--arm-x) + var(--label-gap)); top: var(--at); transform: translateY(-50%); }
+.tween-right { left: calc(50% + var(--gap) + var(--arm-x) + var(--label-gap)); top: var(--at); transform: translateY(-50%); }
 
 /* Along the bottom: the character's level, or what they carry, then the button hints. */
 .gm-bar {
@@ -638,8 +635,6 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 
 @media (max-width: 720px) {
   #tips { display: none !important; }
-  .tween-items { left: 22%; top: calc(var(--at) + var(--ring) / 2 + 92px); }
-  .tween-magic { left: 78%; top: calc(var(--at) + var(--ring) / 2 + 92px); }
   .gm-categories { top: 10vh; }
   .gm-items .gm-list { left: calc(var(--left) + var(--kinds) + 8px); width: auto; right: 16px; }
   .gm-right { display: none; }

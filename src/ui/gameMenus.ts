@@ -1,7 +1,8 @@
 /**
  * The menus over the game, after Skyrim's. Tab (B on a controller) opens the
- * menu of menus: the character sheet above, the items to the left, magic to
- * the right and the map below. The item menu lists what the character
+ * menu of menus, Skyrim's separated plus: the character sheet above, magic to
+ * the left, the items to the right and the map below, each opened by pushing
+ * that way. The item menu lists what the character
  * carries by kind, with a picture of the picked piece and its numbers, and
  * anything in it can be equipped, made a favourite or dropped. The
  * favourites (Q, or up or down on the D-pad) list down the left of the game,
@@ -38,7 +39,8 @@ export interface GameMenuHost {
 }
 
 type TweenPick = 'character' | 'items' | 'magic' | 'map';
-const TWEEN: Record<Direction, TweenPick> = { up: 'character', left: 'items', right: 'magic', down: 'map' };
+const TWEEN: Record<Direction, TweenPick> = { up: 'character', left: 'magic', right: 'items', down: 'map' };
+const TWEEN_LABELS: Record<TweenPick, string> = { character: 'Character', items: 'Items', magic: 'Magic', map: 'Map' };
 
 interface Category {
   name: string;
@@ -77,6 +79,7 @@ export class GameMenus {
 
   private readonly panels: Record<GameMenu, HTMLElement>;
   private readonly tweenOptions: Record<TweenPick, HTMLButtonElement>;
+  private readonly tweenArms: Record<TweenPick, HTMLElement>;
   private readonly categoryList: HTMLElement;
   private readonly itemList: HTMLElement;
   private readonly card: HTMLElement;
@@ -101,21 +104,18 @@ export class GameMenus {
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-modal', 'true');
 
-    // The menu of menus.
+    // The menu of menus: an arm of the plus each way, with its menu at the end.
     const tween = el('section', 'gm-tween');
-    tween.append(el('div', 'tween-ring'));
     this.tweenOptions = {} as Record<TweenPick, HTMLButtonElement>;
-    for (const [pick, label] of [
-      ['character', 'Character'],
-      ['items', 'Items'],
-      ['magic', 'Magic'],
-      ['map', 'Map'],
-    ] as Array<[TweenPick, string]>) {
-      const b = el('button', `tween-option tween-${pick}`, label);
+    this.tweenArms = {} as Record<TweenPick, HTMLElement>;
+    for (const [direction, pick] of Object.entries(TWEEN) as Array<[Direction, TweenPick]>) {
+      const arm = el('span', `tween-arm tween-arm-${direction}`);
+      const b = el('button', `tween-option tween-${direction}`, TWEEN_LABELS[pick]);
       b.addEventListener('mouseenter', () => this.pickTween(pick));
       b.addEventListener('click', () => this.openTween(pick));
       this.tweenOptions[pick] = b;
-      tween.append(b);
+      this.tweenArms[pick] = arm;
+      tween.append(arm, b);
     }
 
     // Items: kinds, the list, and a card for the picked one.
@@ -228,7 +228,8 @@ export class GameMenus {
   private go(direction: Direction): void {
     switch (this.which) {
       case 'tween':
-        this.pickTween(TWEEN[direction]);
+        // As in Skyrim, pushing a way opens its menu straight away.
+        this.openTween(TWEEN[direction]);
         break;
       case 'items':
         if (direction === 'left') this.column = 'categories';
@@ -361,6 +362,7 @@ export class GameMenus {
     switch (this.which) {
       case 'tween':
         for (const [pick, b] of Object.entries(this.tweenOptions)) b.classList.toggle('picked', pick === this.tweenPick);
+        for (const [pick, arm] of Object.entries(this.tweenArms)) arm.classList.toggle('picked', pick === this.tweenPick);
         this.renderBar(run, true);
         this.setHints([
           { action: 'use', label: 'Open', run: () => this.choose() },
@@ -670,6 +672,8 @@ export class GameMenus {
     if (direction) {
       handled();
       if (which === 'favourites' && (direction === 'left' || direction === 'right')) return;
+      // A key held from walking shouldn't open a menu from the menu of menus.
+      if (which === 'tween' && e.repeat) return;
       this.go(direction);
       return;
     }
