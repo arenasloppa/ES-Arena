@@ -12,6 +12,8 @@ Pick the zip for your computer. The "Source code" files below are for programmer
 
 Not sure which Mac you have? Choose About This Mac from the Apple menu: it lists a "Chip" for Apple and a "Processor" for Intel.
 
+The app needs macOS 13 (Ventura) or newer, or Windows 10 or newer.
+
 ## Opening it
 
 **Mac:** double-click the zip to unzip it, then double-click ES Arena (you can move it into Applications first). The first time, macOS says it could not verify the app, because it isn't signed with a paid Apple developer certificate. Click Done, open System Settings, go to Privacy & Security, scroll down to the message about ES Arena and click Open Anyway.

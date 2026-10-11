@@ -33,6 +33,7 @@ You need your own copy of Arena; it's free on Steam.
 
 Get the zip for your computer from the [Releases page](https://github.com/arenasloppa/ES-Arena/releases/latest).
 The "Source code" downloads there are for programmers and won't open by double-clicking.
+The app needs macOS 13 (Ventura) or newer, or Windows 10 or newer.
 
 | Your computer | Download |
 |---|---|
