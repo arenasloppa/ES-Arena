@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { GameData, sourceFromDirectoryHandle, sourceFromFileList, validateFolder, type FileSource } from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
 import { parseCol } from './formats/palette';
@@ -8,6 +9,7 @@ import { buildLevel } from './game/level';
 import { Engine } from './game/engine';
 import { TextureCache, toTexture } from './render/textures';
 import { buildLevelScene } from './render/levelScene';
+import { backdropLevel } from './render/backdrop';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const menu = $('menu');
@@ -22,9 +24,28 @@ const playButton = $<HTMLButtonElement>('play');
 const canvas = $<HTMLCanvasElement>('view');
 
 const DEFAULT_MAP = 'START.MIF';
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const messageEl = $('message');
 let data: GameData | undefined;
 let engine: Engine | undefined;
 let engineMap: string | undefined;
+
+/** Stops the running engine (map or backdrop) and makes `next` the current one. */
+function setEngine(next?: Engine, map?: string) {
+  engine?.dispose();
+  engine = next;
+  engineMap = map;
+}
+
+/** Shows the generated hall behind the menu until a real map is loaded. */
+async function showBackdrop() {
+  const { level, textures } = backdropLevel();
+  const scene = await buildLevelScene(level, textures);
+  if (engine) return; // a map started while the backdrop was building
+  setEngine(new Engine(renderer, level, scene, messageEl, { autopilot: true }));
+  engine!.start();
+}
 
 function setStatus(text: string) {
   status.textContent = text;
@@ -106,8 +127,7 @@ async function startMap(name: string) {
     resume();
     return;
   }
-  engine?.dispose();
-  engine = undefined;
+  setEngine(undefined);
   playButton.disabled = true;
   try {
     setStatus(`Loading ${name}…`);
@@ -118,10 +138,10 @@ async function startMap(name: string) {
     const level = buildLevel(mif, levelIndex, inf);
     const palette = parseCol(await data.read('PAL.COL'));
     const scene = await buildLevelScene(level, new TextureCache(data, palette));
-    engine = new Engine(canvas, level, scene, $('message'));
-    engine.onPause = pause;
-    if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = engine;
-    engineMap = name;
+    const next = new Engine(renderer, level, scene, messageEl);
+    next.onPause = pause;
+    setEngine(next, name);
+    if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
     if (scene.skippedFlats.length) {
       console.info(`Not drawn yet (animated sprites and creatures): ${[...new Set(scene.skippedFlats)].join(', ')}`);
     }
@@ -130,6 +150,7 @@ async function startMap(name: string) {
   } catch (err) {
     console.error(err);
     setStatus(`Could not load ${name}: ${(err as Error).message}`);
+    void showBackdrop();
   } finally {
     playButton.disabled = false;
   }
@@ -161,14 +182,21 @@ async function useHandle(handle: FileSystemDirectoryHandle) {
   await useSource(await sourceFromDirectoryHandle(handle));
 }
 
-if (supportsDirectoryPicker()) {
+// Embedded pages (cross-origin frames) may not open the native folder picker, so use the upload-style one there.
+const embedded = window.self !== window.top;
+
+if (supportsDirectoryPicker() && !embedded) {
   pickButton.addEventListener('click', async () => {
     try {
       const handle = await pickDirectory();
       await saveFolderHandle(handle);
       await useHandle(handle);
     } catch (err) {
-      if ((err as DOMException).name !== 'AbortError') setStatus(`Could not open folder: ${(err as Error).message}`);
+      if ((err as DOMException).name === 'AbortError') return;
+      // Some embedded pages block the folder picker; the upload-style picker still works there.
+      pickButton.hidden = true;
+      fallbackLabel.hidden = false;
+      setStatus('This page cannot open the folder picker, so use the button again to choose the folder.');
     }
   });
   loadFolderHandle().then((handle) => {
@@ -190,9 +218,8 @@ folderInput.addEventListener('change', async () => {
 });
 
 $('change-folder').addEventListener('click', () => {
-  engine?.dispose();
-  engine = undefined;
-  engineMap = undefined;
+  setEngine(undefined);
+  void showBackdrop();
   data = undefined;
   playButton.textContent = 'Enter the dungeon';
   stepPlay.hidden = true;
@@ -204,3 +231,5 @@ playButton.addEventListener('click', () => startMap(mapSelect.value));
 mapSelect.addEventListener('change', () => {
   playButton.textContent = mapSelect.value === engineMap ? 'Resume' : 'Enter the dungeon';
 });
+
+void showBackdrop();

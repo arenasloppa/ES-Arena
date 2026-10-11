@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ES Arena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,600;1,400&family=IM+Fell+English+SC&display=swap" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -12,18 +15,19 @@
     <div id="hud" hidden>
       <div id="crosshair">+</div>
       <div id="message" hidden></div>
-      <div id="help">WASD move · Mouse look · Shift run · E or click open doors · Esc menu</div>
+      <div id="help">WASD move · Mouse or drag to look · Shift run · E or click opens doors · Esc menu</div>
     </div>
 
     <section id="menu" class="panel">
       <canvas id="title-art" width="320" height="200" hidden></canvas>
       <h1>The Elder Scrolls: Arena</h1>
-      <p class="sub">A Three.js remake. Bring your own copy of the game.</p>
+      <p class="sub">An unofficial fan remake in Three.js. Bring your own copy of the game.</p>
 
       <div id="step-folder">
         <p>
           This remake ships none of Bethesda's files. Choose the Arena folder from your own copy
           (the one that contains <code>GLOBAL.BSA</code>). Arena is free from Bethesda if you need it.
+          Your files are read in this browser only and are never uploaded.
         </p>
         <div class="buttons">
           <button id="reuse-folder" hidden>Use my Arena folder again</button>

@@ -1,33 +1,65 @@
+/* Layout: a full-window 3D view with one framed menu panel centred over it, like Arena's in-game scrolls.
+   Single dark theme by choice: the dungeon view is always dark. */
 :root {
-  --bg: #0d0b09;
-  --panel: rgba(20, 16, 12, 0.92);
-  --text: #e8dcc0;
-  --muted: #a8977a;
-  --accent: #c9a24a;
-  --error: #e0705a;
-  --ok: #8fc27a;
+  --night: #0b0a08; /* page and fog colour */
+  --panel: rgba(22, 18, 13, 0.94);
+  --frame: #5c4831; /* carved-wood border */
+  --gilt: #c9a24a; /* headings, focus, accents */
+  --ink: #eadfc6; /* body text */
+  --ash: #a8987c; /* secondary text */
+  --button: #6a4e2b;
+  --button-hover: #85623a;
+  --field: #1c1712;
+  --ok: #93c47d;
+  --error: #e3735c;
+  --shadow: rgba(0, 0, 0, 0.75);
+  --crosshair: rgba(255, 240, 200, 0.6);
+  --font-display: 'IM Fell English SC', 'Iowan Old Style', Georgia, serif;
+  --font-body: 'Alegreya', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 16px/1.5 Georgia, 'Times New Roman', serif; overflow: hidden; }
-#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
-.panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; background: var(--panel); border: 2px solid #5a4630; padding: 24px; box-shadow: 0 10px 40px #000; }
-h1 { margin: 0; color: var(--accent); font-size: 28px; }
-.sub { margin-top: 4px; color: var(--muted); }
-code { color: var(--accent); }
-#title-art { width: 100%; image-rendering: pixelated; border: 1px solid #5a4630; margin-bottom: 12px; }
-.buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-button, .button { font: inherit; background: #6b4f2a; color: var(--text); border: 1px solid var(--accent); padding: 8px 14px; cursor: pointer; }
-button:hover, .button:hover { background: #87643a; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink); font: 17px/1.5 var(--font-body); overflow: hidden; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.panel {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px)); max-height: calc(100% - 32px); overflow: auto;
+  background: var(--panel); border: 2px solid var(--frame);
+  box-shadow: inset 0 0 0 4px var(--panel), inset 0 0 0 5px var(--gilt), 0 12px 48px var(--shadow);
+  padding: 28px;
+  display: grid; gap: 12px;
+}
+.panel > * { margin: 0; min-width: 0; }
+#step-folder, #step-play { display: grid; gap: 12px; }
+#step-folder > *, #step-play > * { margin: 0; }
+h1 { color: var(--gilt); font: 400 34px/1.1 var(--font-display); text-wrap: balance; }
+.sub { color: var(--ash); font-style: italic; }
+code { color: var(--gilt); font-size: 0.9em; }
+#title-art { width: 100%; max-width: 100%; image-rendering: pixelated; border: 1px solid var(--frame); }
+.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+button, .button {
+  font: 600 16px/1.2 var(--font-body); background: var(--button); color: var(--ink);
+  border: 1px solid var(--gilt); padding: 9px 16px; cursor: pointer;
+}
+button:hover, .button:hover { background: var(--button-hover); }
+button:focus-visible, .button:focus-within, select:focus-visible { outline: 2px solid var(--gilt); outline-offset: 2px; }
+button:disabled { opacity: 0.6; cursor: progress; }
 button.secondary { background: transparent; }
-select { font: inherit; background: #1c1712; color: var(--text); border: 1px solid #5a4630; padding: 4px; margin-left: 8px; }
-#checks { list-style: none; padding: 0; margin: 8px 0; font-size: 14px; }
+label { color: var(--ash); }
+select { font: inherit; background: var(--field); color: var(--ink); border: 1px solid var(--frame); padding: 4px 6px; margin-left: 8px; max-width: 100%; }
+#checks { list-style: none; padding: 0; font-size: 15px; display: grid; gap: 2px; }
+#checks:empty { display: none; }
 #checks li::before { content: '✗ '; color: var(--error); }
 #checks li.found::before { content: '✓ '; color: var(--ok); }
-#checks li span { color: var(--muted); }
+#checks li span { color: var(--ash); }
 .error { color: var(--error); }
-#status { color: var(--muted); font-size: 14px; min-height: 1.5em; margin: 0; }
+#status { color: var(--ash); font-size: 15px; min-height: 1.5em; }
 #hud { position: fixed; inset: 0; pointer-events: none; }
-#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: rgba(255, 240, 200, 0.6); font: 20px monospace; }
-#message { position: absolute; top: 12%; left: 50%; transform: translateX(-50%); max-width: min(640px, 90vw); background: var(--panel); border: 1px solid #5a4630; padding: 12px 16px; white-space: pre-line; text-align: center; }
-#help { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; color: var(--muted); font-size: 13px; text-shadow: 0 1px 2px #000; }
+#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--crosshair); font: 20px monospace; }
+#message {
+  position: absolute; top: 12%; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(640px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--frame); padding: 12px 18px; white-space: pre-line; text-align: center;
+}
+#help { position: absolute; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: 16px; right: 16px; text-align: center; color: var(--ash); font-size: 14px; text-shadow: 0 1px 2px var(--shadow); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }

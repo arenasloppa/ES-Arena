@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GameData, sourceFromFileList, validateFolder } from '../src/data/files';
+import { GameData, indexGameFolder, isRuntimeFile, sourceFromFileList, validateFolder } from '../src/data/files';
 import { makeBsa } from './helpers/encode';
 
 const REQUIRED = ['GLOBAL.BSA', 'ACD.EXE', 'PAL.COL', 'TEMPLATE.DAT', 'QUESTION.TXT', 'CITYDATA.65', 'SPELLSG.65', 'ARENAFNT.DAT'];
@@ -36,6 +36,55 @@ describe('sourceFromFileList', () => {
     ]);
     expect(src.names().sort()).toEqual(['GLOBAL.BSA', 'SPEECH/1294_00A.VOC']);
     expect([...(await src.read('global.bsa'))]).toEqual([7]);
+  });
+});
+
+describe('indexGameFolder', () => {
+  const index = (paths: string[]) => [...indexGameFolder(paths.map((path) => ({ path, value: path }))).keys()].sort();
+
+  it('finds the Steam layout and matches names case-insensitively', () => {
+    expect(index(['ARENA/global.bsa', 'ARENA/Pal.Col', 'DOSBOX/dosbox.conf', 'ARENA/SPEECH/1294_00a.voc'])).toEqual([
+      'GLOBAL.BSA',
+      'PAL.COL',
+      'SPEECH/1294_00A.VOC',
+    ]);
+  });
+
+  it('finds the Mac wrapper layout three folders down', () => {
+    expect(index(['game/Resources/arena/GLOBAL.BSA', 'game/Resources/arena/ACD.EXE', 'README.txt'])).toEqual(['ACD.EXE', 'GLOBAL.BSA']);
+  });
+
+  it('prefers the shallowest copy when the folder holds several', () => {
+    const idx = indexGameFolder([
+      { path: 'Mac/game/Resources/arena/GLOBAL.BSA', value: 'mac' },
+      { path: 'Windows/arena/GLOBAL.BSA', value: 'windows' },
+    ]);
+    expect(idx.get('GLOBAL.BSA')).toBe('windows');
+  });
+
+  it('leaves out saves and runtime files but keeps new-game templates', () => {
+    const kept = index([
+      'ARENA/GLOBAL.BSA',
+      'ARENA/CITYDATA.65',
+      'ARENA/SPELLSG.65',
+      'ARENA/WILD001.RMD',
+      'ARENA/SAVEGAME.00',
+      'ARENA/SAVEENGN.64',
+      'ARENA/CITYDATA.00',
+      'ARENA/WILD001.03',
+      'ARENA/AUTOMAP.01',
+      'ARENA/TEMPSAVE.$$$',
+      'ARENA/SCREENSV.$$2',
+      'ARENA/SOUND.CFG',
+      'ARENA/VISION.EMS',
+    ]);
+    expect(kept).toEqual(['CITYDATA.65', 'GLOBAL.BSA', 'SPELLSG.65', 'WILD001.RMD']);
+  });
+
+  it('classifies runtime files', () => {
+    expect(isRuntimeFile('savegame.05')).toBe(true);
+    expect(isRuntimeFile('STATES.65')).toBe(false);
+    expect(isRuntimeFile('GLOBAL.BSA')).toBe(false);
   });
 });
 

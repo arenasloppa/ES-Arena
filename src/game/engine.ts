@@ -8,9 +8,13 @@ const MOUSE_SENSITIVITY = 0.0022;
 const TURN_SPEED = 2.4; // radians per second for arrow keys
 const DOOR_SPEED = 1.6; // fraction per second
 
+export interface EngineOptions {
+  /** Slowly turns the camera with no input; used for the backdrop behind the menu. */
+  autopilot?: boolean;
+}
+
 /** Runs one level: input, movement, doors, triggers and rendering. */
 export class Engine {
-  readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(70, 1, 0.02, 100);
   private readonly keys = new Set<string>();
@@ -20,16 +24,26 @@ export class Engine {
   private running = false;
   private last = 0;
   private messageTimer = 0;
+  /** Set when the page may not capture the mouse (e.g. some embedded frames); we fall back to drag-to-look. */
+  private pointerLockFailed = !('requestPointerLock' in HTMLElement.prototype);
+  private dragging = false;
+  private dragDistance = 0;
   onPause?: () => void;
 
+  private readonly canvas: HTMLCanvasElement;
+  private readonly autopilot: boolean;
+
+  /** The renderer is shared and outlives the engine; one engine runs at a time. */
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    private readonly renderer: THREE.WebGLRenderer,
     private readonly level: Level,
     private readonly levelScene: LevelScene,
     private readonly messageEl: HTMLElement,
+    options: EngineOptions = {},
   ) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.canvas = renderer.domElement;
+    this.autopilot = options.autopilot ?? false;
+    const canvas = this.canvas;
     this.scene.background = new THREE.Color(0x000000);
     // Arena's dungeons fade to black a few voxels away.
     this.scene.fog = new THREE.Fog(0x000000, 1.5, 9);
@@ -42,13 +56,15 @@ export class Engine {
     window.addEventListener('keyup', this.onKeyUp);
     document.addEventListener('mousemove', this.onMouseMove);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    document.addEventListener('pointerlockerror', this.onPointerLockError);
     canvas.addEventListener('mousedown', this.onMouseDown);
+    window.addEventListener('mouseup', this.onMouseUp);
   }
 
   start(): void {
     this.running = true;
     this.last = performance.now();
-    this.canvas.requestPointerLock?.();
+    if (!this.autopilot) this.lockPointer();
     requestAnimationFrame(this.frame);
   }
 
@@ -64,7 +80,9 @@ export class Engine {
     window.removeEventListener('keyup', this.onKeyUp);
     document.removeEventListener('mousemove', this.onMouseMove);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    document.removeEventListener('pointerlockerror', this.onPointerLockError);
     this.canvas.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mouseup', this.onMouseUp);
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.geometry.dispose();
@@ -75,7 +93,6 @@ export class Engine {
         }
       }
     });
-    this.renderer.dispose();
   }
 
   private frame = (now: number) => {
@@ -89,6 +106,10 @@ export class Engine {
   };
 
   private update(dt: number): void {
+    if (this.autopilot) {
+      this.player.yaw += 0.12 * dt;
+      return;
+    }
     const k = this.keys;
     if (k.has('ArrowLeft')) this.player.yaw -= TURN_SPEED * dt;
     if (k.has('ArrowRight')) this.player.yaw += TURN_SPEED * dt;
@@ -166,7 +187,7 @@ export class Engine {
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (!this.running) return;
+    if (!this.running || this.autopilot) return;
     this.keys.add(e.code);
     if (e.code === 'KeyE' || e.code === 'Space') this.useDoor();
     if (e.code === 'Escape') this.onPause?.();
@@ -174,21 +195,57 @@ export class Engine {
 
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
 
+  private lockPointer(): void {
+    if (this.pointerLockFailed) return;
+    try {
+      const result = this.canvas.requestPointerLock?.() as unknown;
+      if (result instanceof Promise) result.catch(this.onPointerLockError);
+    } catch {
+      this.onPointerLockError();
+    }
+  }
+
+  private look(dx: number, dy: number): void {
+    this.player.yaw += dx * MOUSE_SENSITIVITY;
+    this.player.pitch = Math.max(-1.2, Math.min(1.2, this.player.pitch - dy * MOUSE_SENSITIVITY));
+  }
+
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.running || document.pointerLockElement !== this.canvas) return;
-    this.player.yaw += e.movementX * MOUSE_SENSITIVITY;
-    this.player.pitch = Math.max(-1.2, Math.min(1.2, this.player.pitch - e.movementY * MOUSE_SENSITIVITY));
+    if (!this.running) return;
+    if (document.pointerLockElement === this.canvas) this.look(e.movementX, e.movementY);
+    else if (this.dragging) {
+      // Drag-to-look when the mouse can't be captured.
+      this.look(e.movementX, e.movementY);
+      this.dragDistance += Math.abs(e.movementX) + Math.abs(e.movementY);
+    }
   };
 
   private onMouseDown = () => {
-    if (!this.running) return;
-    if (document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock?.();
-    else this.useDoor();
+    if (!this.running || this.autopilot) return;
+    if (document.pointerLockElement === this.canvas) {
+      this.useDoor();
+      return;
+    }
+    this.dragging = true;
+    this.dragDistance = 0;
+  };
+
+  private onMouseUp = () => {
+    if (!this.dragging) return;
+    this.dragging = false;
+    if (!this.running || this.dragDistance > 4) return;
+    // A plain click: capture the mouse if we can, otherwise treat it as "use".
+    if (this.pointerLockFailed) this.useDoor();
+    else this.lockPointer();
+  };
+
+  private onPointerLockError = () => {
+    this.pointerLockFailed = true;
   };
 
   private onPointerLockChange = () => {
     // Losing pointer lock (Esc) opens the menu, like pausing.
-    if (this.running && document.pointerLockElement !== this.canvas) this.onPause?.();
+    if (this.running && !this.autopilot && document.pointerLockElement !== this.canvas) this.onPause?.();
   };
 }
 

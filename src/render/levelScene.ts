@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import type { Level } from '../game/level';
 import { buildLevelGeometry, type QuadBatch } from './levelGeometry';
-import type { TextureCache } from './textures';
+
+/** Where level textures come from: the player's game files (TextureCache) or the built-in backdrop. */
+export interface TextureProvider {
+  tile(file: string, frame?: number): Promise<THREE.DataTexture | undefined>;
+  sprite(file: string): Promise<THREE.DataTexture | undefined>;
+  liquid(file: string): Promise<THREE.DataTexture[]>;
+}
 
 export interface DoorMesh {
   mesh: THREE.Mesh;
@@ -29,7 +35,7 @@ function toGeometry(b: QuadBatch): THREE.BufferGeometry {
   return g;
 }
 
-export async function buildLevelScene(level: Level, textures: TextureCache): Promise<LevelScene> {
+export async function buildLevelScene(level: Level, textures: TextureProvider): Promise<LevelScene> {
   const group = new THREE.Group();
   const geo = buildLevelGeometry(level);
   const materials = new Map<string, THREE.Material>();

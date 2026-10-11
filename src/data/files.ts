@@ -42,52 +42,81 @@ export function validateFolder(names: Iterable<string>): ValidationResult {
   return { ok: checks.every((c) => c.found), checks };
 }
 
+/**
+ * Save-slot and runtime files a played copy carries. They are never game
+ * data, so they are left out of the index: save slots and their per-slot
+ * copies use two-digit extensions (".65" is the new-game template and is
+ * kept), temp files use "$" extensions, plus DOSBox/driver state.
+ */
+export function isRuntimeFile(baseName: string): boolean {
+  const upper = baseName.toUpperCase();
+  const ext = upper.includes('.') ? upper.slice(upper.lastIndexOf('.') + 1) : '';
+  if (/^\d\d$/.test(ext) && ext !== '65') return true;
+  if (ext.startsWith('$')) return true;
+  return upper === 'SOUND.CFG' || upper === 'VISION.EMS';
+}
+
+/**
+ * Indexes the files of a picked folder by upper-case path relative to the
+ * folder that holds GLOBAL.BSA. The data sits at different depths in each
+ * release (Steam: <root>/ARENA, GamesNostalgia Windows: <root>/arena,
+ * Mac: <root>/game/Resources/arena) and name case varies, so the player can
+ * pick any folder above it. When several copies are present, the shallowest
+ * GLOBAL.BSA wins.
+ */
+export function indexGameFolder<T>(entries: Iterable<{ path: string; value: T }>): Map<string, T> {
+  const all = [...entries].map((e) => ({ path: e.path.replace(/\\/g, '/').toUpperCase(), value: e.value }));
+  let root: string | undefined;
+  for (const e of all) {
+    if (e.path !== 'GLOBAL.BSA' && !e.path.endsWith('/GLOBAL.BSA')) continue;
+    const dir = e.path.slice(0, e.path.length - 'GLOBAL.BSA'.length);
+    if (root === undefined || dir.split('/').length < root.split('/').length) root = dir;
+  }
+  const index = new Map<string, T>();
+  for (const e of all) {
+    if (root !== undefined && !e.path.startsWith(root)) continue;
+    const key = root !== undefined ? e.path.slice(root.length) : e.path;
+    const base = key.slice(key.lastIndexOf('/') + 1);
+    if (isRuntimeFile(base) || index.has(key)) continue;
+    index.set(key, e.value);
+  }
+  return index;
+}
+
 /** Builds a source from <input type="file" webkitdirectory> results. */
 export function sourceFromFileList(files: Iterable<File>): FileSource {
-  const all = [...files];
-  // The player may pick a parent folder (e.g. the GamesNostalgia wrapper);
-  // use the directory that actually contains GLOBAL.BSA.
-  const bsa = all.find((f) => baseName(f).toUpperCase() === 'GLOBAL.BSA');
-  const root = bsa ? dirName(relPath(bsa)) : undefined;
-  const byName = new Map<string, File>();
-  for (const f of all) {
-    const dir = dirName(relPath(f));
-    if (root !== undefined && dir !== root && !dir.startsWith(root + '/')) continue;
-    const key = (dir === root ? '' : dir.slice((root ?? '').length).replace(/^\//, '') + '/') + baseName(f);
-    const upper = key.toUpperCase();
-    if (!byName.has(upper)) byName.set(upper, f);
-  }
+  // webkitRelativePath starts with the picked folder's own name; drop it.
+  const index = indexGameFolder(
+    [...files].map((f) => ({ path: relPath(f).split('/').slice(1).join('/') || f.name, value: f })),
+  );
   return {
-    names: () => [...byName.keys()],
+    names: () => [...index.keys()],
     read: async (name) => {
-      const f = byName.get(name.toUpperCase());
+      const f = index.get(name.toUpperCase());
       if (!f) throw new Error(`${name} is not in the chosen folder`);
       return new Uint8Array(await f.arrayBuffer());
     },
   };
 }
 
+/** How many folder levels below the picked one are searched for GLOBAL.BSA. */
+const MAX_DEPTH = 4;
+
 /** Builds a source from a File System Access API directory handle (Chromium). */
 export async function sourceFromDirectoryHandle(dir: FileSystemDirectoryHandle): Promise<FileSource> {
-  const byName = new Map<string, FileSystemFileHandle>();
+  const entries: Array<{ path: string; value: FileSystemFileHandle }> = [];
   const walk = async (d: FileSystemDirectoryHandle, prefix: string, depth: number) => {
     for await (const [name, handle] of d.entries()) {
-      if (handle.kind === 'file') byName.set((prefix + name).toUpperCase(), handle as FileSystemFileHandle);
-      else if (depth < 4) await walk(handle as FileSystemDirectoryHandle, prefix + name + '/', depth + 1);
+      if (handle.kind === 'file') entries.push({ path: prefix + name, value: handle as FileSystemFileHandle });
+      else if (depth < MAX_DEPTH) await walk(handle as FileSystemDirectoryHandle, prefix + name + '/', depth + 1);
     }
   };
   await walk(dir, '', 0);
-
-  // Re-root at the folder holding GLOBAL.BSA if the player picked a parent.
-  const bsaKey = [...byName.keys()].find((k) => k === 'GLOBAL.BSA' || k.endsWith('/GLOBAL.BSA'));
-  const root = bsaKey ? bsaKey.slice(0, bsaKey.length - 'GLOBAL.BSA'.length) : '';
-  const rooted = new Map<string, FileSystemFileHandle>();
-  for (const [k, h] of byName) if (k.startsWith(root)) rooted.set(k.slice(root.length), h);
-
+  const index = indexGameFolder(entries);
   return {
-    names: () => [...rooted.keys()],
+    names: () => [...index.keys()],
     read: async (name) => {
-      const h = rooted.get(name.toUpperCase());
+      const h = index.get(name.toUpperCase());
       if (!h) throw new Error(`${name} is not in the chosen folder`);
       return new Uint8Array(await (await h.getFile()).arrayBuffer());
     },
@@ -131,11 +160,4 @@ export class GameData {
 
 function relPath(f: File): string {
   return (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-}
-function baseName(f: File): string {
-  return f.name;
-}
-function dirName(path: string): string {
-  const i = path.lastIndexOf('/');
-  return i < 0 ? '' : path.slice(0, i);
 }

@@ -61,12 +61,16 @@ export class TextureCache {
 
 export function toTexture(img: IndexedImage, palette: Palette, repeat: boolean, transparentZero = false): THREE.DataTexture {
   const pal = img.palette ? parseCol(img.palette) : palette;
-  const rgba = indicesToRgba(img.pixels, pal, transparentZero);
+  return rgbaTexture(indicesToRgba(img.pixels, pal, transparentZero), img.width, img.height, repeat);
+}
+
+/** Wraps top-row-first RGBA pixels in a nearest-filtered texture. */
+export function rgbaTexture(rgba: Uint8Array, width: number, height: number, repeat: boolean): THREE.DataTexture {
   // Arena images are stored top row first; WebGL wants the bottom row first.
   const flipped = new Uint8Array(rgba.length);
-  const row = img.width * 4;
-  for (let y = 0; y < img.height; y++) flipped.set(rgba.subarray(y * row, (y + 1) * row), (img.height - 1 - y) * row);
-  const tex = new THREE.DataTexture(flipped, img.width, img.height, THREE.RGBAFormat);
+  const row = width * 4;
+  for (let y = 0; y < height; y++) flipped.set(rgba.subarray(y * row, (y + 1) * row), (height - 1 - y) * row);
+  const tex = new THREE.DataTexture(flipped, width, height, THREE.RGBAFormat);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
