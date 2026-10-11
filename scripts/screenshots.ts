@@ -46,6 +46,7 @@ const CAPTIONS: Record<string, string> = {
   items: 'The item menu',
   character: 'The character sheet',
   map: 'The map fills in as you explore',
+  wait: 'Waiting, with the date and time in Arena',
 };
 
 archive();
@@ -87,7 +88,13 @@ try {
   await page.waitForTimeout(2500);
   await shot(page, 'menu');
 
-  await page.click('#play');
+  await page.click('#new-character');
+  // The story of how the Emperor was betrayed comes first.
+  await page.waitForSelector('#cutscene:not([hidden]), #screen-create:not([hidden])');
+  while (await page.isVisible('#cutscene')) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+  }
   await makeCharacter(page);
   await page.waitForSelector('#menu[hidden]', { state: 'attached', timeout: 60_000 });
   await page.evaluate(() => (document.getElementById('tips')!.hidden = true));
@@ -118,6 +125,7 @@ try {
   await page.waitForTimeout(600);
 
   await menus(page);
+  await wait(page);
   writeFileSync(versionFile, `${version}\n`);
   writeGallery();
   console.log(`Saved the screenshots in ${out}. Run "npm run build" for a normal build again.`);
@@ -197,11 +205,11 @@ async function makeCharacter(page: Page): Promise<void> {
   if ((await page.getAttribute('#screen-create', 'data-step')) === 'method') await pick('Choose from the list');
   await step('classes');
   await pick('Warrior');
-  await step('gender');
-  await pick('Male');
   await step('name');
   await page.fill('.create-name', 'Brin Tallow');
   await page.keyboard.press('Enter');
+  await step('gender');
+  await pick('Male');
   await step('race');
   await page.waitForSelector('.create-map:not([hidden])');
   // Skyrim, the third province.
@@ -211,8 +219,11 @@ async function makeCharacter(page: Page): Promise<void> {
   await page.keyboard.press('Enter');
   await step('home');
   await pick('Yes');
-  await step('knownAs');
-  await pick('Continue');
+  // Arena's words after the race: who you are, your people, what your class needs, and farewell.
+  for (const name of ['knownAs', 'lore', 'needs', 'farewell']) {
+    await step(name);
+    await pick('Continue');
+  }
   await step('attributes');
   // Some points on strength and endurance, then a shot with the rest still to share out.
   const rows = page.locator('#screen-create .option-row');
@@ -222,15 +233,31 @@ async function makeCharacter(page: Page): Promise<void> {
   }
   await page.waitForTimeout(600);
   await shot(page, 'attributes');
-  for (let row = 0; row < 8 && (await page.isDisabled('#screen-create .option >> text="Continue"')); row++) {
+  // The rest of the points, then Arena's choice: keep the attributes.
+  for (let row = 0; row < 8 && !(await page.textContent('.create-bonus'))?.endsWith(': 0'); row++) {
     await rows.nth(row).focus();
     for (let i = 0; i < 20; i++) await page.keyboard.press('ArrowRight');
   }
-  await pick('Continue');
-  await step('face');
   await pick('Done');
-  await step('farewell');
-  await page.click('#screen-create .option');
+  await page.click('#screen-create .create-choice .option >> nth=0');
+  await step('face');
+  await page.click('#screen-create .create-face .option >> nth=1');
+  // Ria's vision after making a character.
+  await page.waitForSelector('#cutscene:not([hidden])', { timeout: 20_000 }).catch(() => undefined);
+  while (await page.isVisible('#cutscene')) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+  }
+}
+
+/** The wait menu, with Arena's date and time over the hours to rest. */
+async function wait(page: Page): Promise<void> {
+  await page.keyboard.press('KeyT');
+  await page.waitForSelector('#screen-wait:not([hidden])');
+  await page.waitForTimeout(800);
+  await shot(page, 'wait');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(600);
 }
 
 /** The item menu with a piece of armour picked, and the character sheet. */

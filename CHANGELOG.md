@@ -3,13 +3,15 @@
 Every release of ES Arena, newest first. Each one is on the
 [Releases page](https://github.com/arenasloppa/ES-Arena/releases) with its downloads.
 
-## Unreleased
+## 0.5.0 (2026-10-11)
+
+Magic, Arena's music and cutscenes, its dungeons built as it builds them, camping, and character creation checked against the original game itself.
 
 Magic, with Arena's own spells.
 
 - The spells come from your copy of Arena (SPELLSG.65), and do what the game's own spellmaker says of them: damage and healing that grow with your level, chances to paralyze or poison, shields, sanctuary, invisibility, light, opening locks and regeneration, lasting as many rounds as the game gives (a round is five seconds). 30 of the 64 can be cast so far; the rest need things the remake doesn't have yet, such as levitating, curing and resistances.
-- Spellcasting classes have spell points as in Arena: Intelligence times their class's multiplier (three for a Sorcerer, two for a Mage or Healer, and so on). A spell costs its cost divided by your level, so spells get cheaper as you rise. Spell points come back slowly over time, except a Sorcerer's, until there is resting.
-- You start as Arena starts you, with a healing spell and an offensive one: Light Heal and Fire Dart. Until there is a Mages Guild, each level you gain teaches you the next spell on its list.
+- Spellcasting classes have spell points as in Arena: Intelligence times their class's multiplier (three for a Sorcerer, two for a Mage or Healer, and so on). A spell costs its cost divided by your level, so spells get cheaper as you rise. Spell points come back slowly over time and with rest, except a Sorcerer's.
+- You start as Arena starts you, with a healing spell and an offensive one: Light Heal and Fire Dart. As in Arena, more are bought at the Mages Guild, not learnt by levelling.
 - The magic menu (P, or left from Tab's menu) lists your spells with what each does at your level, its cost, target and element. Ready one and cast it with the block button (right mouse button or LT), as with a spell in Skyrim's left hand. Spells can be favourites and go on number keys and the D-pad.
 - Bolts fly glowing in their element's colour and burst where they land; Fireball and the like catch everything near the burst, and touch spells work on the creature in reach.
 - A magicka bar at the bottom left, as in Skyrim, with the readied spell and its cost above it and the spells working on you, such as a shield's points left.

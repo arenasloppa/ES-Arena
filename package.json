@@ -1,7 +1,7 @@
 {
   "name": "es-arena",
   "productName": "ES Arena",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "A Three.js remake of The Elder Scrolls: Arena that loads the player's own game files.",
   "author": "arenasloppa",
