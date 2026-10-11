@@ -35,7 +35,7 @@ Character creation by Arena's rules.
 - Attributes start from your race and gender's own values in the game, plus 4d5 each, with 5d5 bonus points to share out, all rolled as Arena rolls them. Health is 25 plus a roll of your class's hit die, and you start with 50 to 199 gold.
 - The steps come in Arena's order, in its words: after your race is confirmed, "Know ye this also:" and your race's description from the game, what your class needs, and "Go ye now in peace" before the attributes.
 - The attribute sheet shows what Arena's does: Damage and Max Kilos beside Strength, Spell Pts beside Intelligence, Magic Def beside Willpower, To Hit and To Defend beside Agility, Health and Heal Mod beside Endurance, Charisma beside Personality, and your health, fatigue, gold, experience and level, worked out with Arena's formulas. Done asks Arena's "Which dost thou choose?": Save stats or Reroll stats, and won't go on until all bonus points are shared out.
-- Luck does what UESP says, out of sight as in Arena (its row on the sheet is blank there; the remake says what it does): a little toward dodging blows, picking locks, landing critical hits and the gold you find. Its exact sums in the original aren't known.
+- Luck does what UESP says, out of sight as in Arena (its row on the sheet is blank there; the remake borrows Oblivion's words: it has an effect on everything you do): a little toward dodging blows, picking locks, landing critical hits and the gold you find. Its exact sums in the original aren't known.
 - In play, fatigue (stamina) is Strength plus Endurance, Strength's damage bonus and Max Kilos are Arena's, and Speed sets your pace by Arena's formula.
 
 ## 0.4.1 (2026-10-11)

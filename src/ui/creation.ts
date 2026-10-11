@@ -584,11 +584,11 @@ export class CharacterCreation {
           ['Heal Mod', signed(v.healMod)],
         ],
         [['Charisma', signed(v.charisma)]],
-        // Arena shows nothing for Luck: what it does is hidden.
+        // Arena shows nothing for Luck; the remake says what Oblivion's description does.
         [],
       ];
       subs.forEach((sub, i) => (sub.textContent = beside[i].map(([k, x]) => `${k} ${x}`).join('  ·  ')));
-      subs[LUCK].textContent = 'Hidden: a little in fights, locks, gold found';
+      subs[LUCK].textContent = 'Has an effect on everything you do';
       const fatigue = maxFatigue(a);
       const lines: Array<[string, string]> = [
         ['Health', `${d.health}/${d.health}`],
