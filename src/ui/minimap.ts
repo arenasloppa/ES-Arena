@@ -92,17 +92,6 @@ export class Minimap {
     ctx.lineWidth = 1.5 * dpr;
     ctx.stroke();
     ctx.fill();
-
-    // North, on the rim.
-    const n = turn - Math.PI / 2;
-    const nx = r + Math.cos(n) * (r - 11 * dpr);
-    const ny = r + Math.sin(n) * (r - 11 * dpr);
-    ctx.font = `600 ${12 * dpr}px 'Barlow Condensed', sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3 * dpr;
-    ctx.strokeText('N', nx, ny);
-    ctx.fillText('N', nx, ny);
   }
 
   /** Draws every explored cell once onto the chart, which draw() then turns and crops. */

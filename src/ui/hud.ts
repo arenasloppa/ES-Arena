@@ -121,6 +121,8 @@ export class Hud implements EngineHud {
     this.bannerEl = $('banner');
     this.eye = $('sneak-eye');
     this.fader = document.getElementById('fade');
+    // Hiding the HUD (for the map or the menu) and showing it again would play a finished animation over.
+    this.hurtEl.addEventListener('animationend', () => this.hurtEl.classList.remove('flash'));
     // Marks for three turns, so the strip never runs out whichever way the player faces.
     for (let deg = -360; deg < 720; deg += MARK_STEP) {
       const mark = document.createElement('span');
@@ -189,6 +191,7 @@ export class Hud implements EngineHud {
     const note = document.createElement('p');
     note.className = 'note';
     note.textContent = text;
+    note.addEventListener('animationend', () => note.classList.add('settled'), { once: true });
     this.notes.append(note);
     while (this.notes.children.length > MAX_NOTES) this.notes.firstElementChild?.remove();
     setTimeout(() => note.classList.add('gone'), NOTE_MS);
@@ -224,6 +227,8 @@ export class Hud implements EngineHud {
     const next = this.banners.shift();
     if (!next) {
       this.bannerTimer = undefined;
+      // Done: or it would show again each time the HUD comes back from behind the map or the menu.
+      this.bannerEl.classList.remove('shown');
       return;
     }
     const [title, kicker, sub] = next;
@@ -244,6 +249,7 @@ export class Hud implements EngineHud {
   objective(text: string, done: boolean): void {
     const note = document.createElement('p');
     note.className = done ? 'note objective done' : 'note objective';
+    note.addEventListener('animationend', () => note.classList.add('settled'), { once: true });
     const box = document.createElement('span');
     box.className = 'box';
     box.setAttribute('aria-hidden', 'true');

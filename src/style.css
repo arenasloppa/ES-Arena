@@ -154,6 +154,22 @@ h2 {
 .bindings td:first-child { text-transform: uppercase; letter-spacing: 0.12em; }
 .bindings [data-glyph] { margin-right: 0; }
 
+/* The Ko-fi link in the main menu's top corner. */
+#kofi {
+  position: fixed; top: calc(18px + env(safe-area-inset-top, 0px)); right: 20px;
+  display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px;
+  font: 400 15px/1 var(--font-ui); letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim); text-decoration: none; border: 1px solid transparent; border-radius: 999px;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+#kofi:hover, #kofi:focus-visible { color: var(--ink); outline: none; border-color: var(--line); background: rgba(0, 0, 0, 0.45); }
+#kofi svg { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.8)); }
+.kofi-disc { fill: #29abe0; }
+.kofi-cup { fill: #fff; }
+.kofi-handle { fill: none; stroke: #fff; stroke-width: 2; }
+.kofi-heart { fill: #ff5e5b; }
+#menu:not([data-screen='folder']):not([data-screen='play']) #kofi { display: none; }
+
 /* Button hints along the bottom of the menu. */
 .hints {
   position: fixed; left: 0; right: 0; bottom: 0;
@@ -238,19 +254,14 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #enemy .bar { position: relative; }
 #enemy .bar-fill { background: linear-gradient(#d4584b, #8e2519); transform-origin: center; }
 
-/* The minimap sits in a ring with a diamond at each quarter, like the compass's caps, clear of the screen's edges. */
+/* The minimap: one plain circle, clear of the screen's edges. */
 #minimap-frame {
   position: absolute; top: calc(44px + env(safe-area-inset-top, 0px)); right: max(44px, 4vw);
   width: clamp(132px, 13.5vw, 188px); aspect-ratio: 1; border-radius: 50%;
-  box-shadow: 0 0 26px rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(243, 240, 232, 0.7);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 26px rgba(0, 0, 0, 0.75);
 }
-#minimap { position: absolute; inset: 5.5%; width: 89%; height: 89%; border-radius: 50%; }
-.minimap-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.minimap-ring .bezel { fill: none; stroke: rgba(8, 7, 6, 0.72); stroke-width: 4.5; }
-.minimap-ring .ring { fill: none; stroke: rgba(243, 240, 232, 0.5); stroke-width: 1px; vector-effect: non-scaling-stroke; }
-.minimap-ring .ring.inner { stroke: rgba(243, 240, 232, 0.8); }
-.minimap-ring .stud { fill: #0b0a09; stroke: rgba(243, 240, 232, 0.75); stroke-width: 1px; vector-effect: non-scaling-stroke; }
-.minimap-ring .stud.ahead { fill: rgba(243, 240, 232, 0.85); }
+#minimap { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; }
 
 #corner {
   position: absolute; top: calc(24px + env(safe-area-inset-top, 0px)); left: 24px;
@@ -262,6 +273,7 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
   animation: note-in 0.3s ease-out; transition: opacity 0.8s;
 }
 .note.gone { opacity: 0; }
+.note.settled { animation: none; }
 /* Quest objectives, with a box that is ticked once done. */
 .note.objective { display: flex; align-items: center; gap: 10px; font-size: 20px; letter-spacing: 0.06em; }
 .note.objective.done { color: var(--dim); }
@@ -395,6 +407,8 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 
 @media (max-width: 720px) {
   #tips { display: none !important; }
+  #kofi { top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; font-size: 13px; }
+  #kofi span { display: none; }
   #minimap-frame { width: 112px; top: calc(52px + env(safe-area-inset-top, 0px)); right: 16px; }
   #banner { top: calc(12vh + env(safe-area-inset-top, 0px)); }
   #stamina { width: 22vw; }

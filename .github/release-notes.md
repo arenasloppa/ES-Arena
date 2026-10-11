@@ -1,4 +1,4 @@
-ES Arena as a desktop app: The Elder Scrolls: Arena (1994), remade by an AI in Three.js. You play it with the game files from your own copy of Arena, which is free on Steam.
+ES Arena as a desktop app: The Elder Scrolls: Arena (1994), remade by AI in Three.js. You play it with the game files from your own copy of Arena, which is free on Steam.
 
 ## What's new in {version}
 

@@ -230,6 +230,11 @@ describe('creatures', () => {
     expect(view(-Math.PI / 2)).toEqual({ file: 2, mirror: false });
     expect(view((3 * Math.PI) / 4)).toEqual({ file: 1, mirror: true });
   });
+
+  it('do not flip from side to side when they come straight at the viewer, or go straight away', () => {
+    const view = (facing: number) => viewAngle(5, 0, facing, 0, 0);
+    for (const facing of [Math.PI - 0.01, Math.PI + 0.01, 0.01, -0.01]) expect(view(facing).mirror).toBe(false);
+  });
 });
 
 describe('exploration', () => {

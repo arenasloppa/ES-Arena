@@ -353,13 +353,16 @@ export function creatureFrame(c: Creature, attackFrames: number): { death: boole
 
 /**
  * Which of the five view files shows a creature facing `facing` to a viewer
- * looking from (vx, vy): 0 front, 1 front-side, 2 side, 3 back-side, 4 back,
- * mirrored when it faces the viewer's right.
+ * looking from (vx, vy): 0 front, 1 front-side, 2 side, 3 back-side, 4 back.
+ * The views between are mirrored when the creature faces the viewer's right.
+ * The front and back views never are: a creature coming straight at the
+ * viewer is a hair to one side or the other from one moment to the next,
+ * and would flip back and forth.
  */
 export function viewAngle(cx: number, cy: number, facing: number, vx: number, vy: number): { file: number; mirror: boolean } {
   const toViewer = Math.atan2(vy - cy, vx - cx);
   let rel = facing - toViewer;
   rel = Math.atan2(Math.sin(rel), Math.cos(rel)); // -PI..PI; 0 = facing the viewer
   const sector = Math.round(Math.abs(rel) / (Math.PI / 4)); // 0..4
-  return { file: sector, mirror: rel < 0 };
+  return { file: sector, mirror: sector > 0 && sector < 4 && rel < 0 };
 }

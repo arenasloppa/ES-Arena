@@ -5,6 +5,16 @@ Every release of ES Arena, newest first. Each one is on the
 
 ## Unreleased
 
+## 0.3.1 (2026-10-11)
+
+Fixes for the first dungeon, a plainer minimap and a Ko-fi button.
+
+- Rats and goblins coming straight at you no longer flick from side to side.
+- Coming back from the map or the menu no longer shows the last title across the top again, such as your level.
+- Closing the map or the menu with Esc now waits for the key to come back up before taking the mouse again, so the browser doesn't let go of it and bring the menu back.
+- The minimap is now one plain circle with the map in it, without the compass letter.
+- A Ko-fi button in the top corner of the main menu, for anyone who would like to support the project.
+
 ## 0.3.0 (2026-10-11)
 
 The first dungeon, playable from your cell to the Shift Gate, with monsters, combat and sound.

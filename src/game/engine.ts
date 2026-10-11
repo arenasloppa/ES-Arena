@@ -135,6 +135,13 @@ export class Engine {
   private padAttackHeld = false;
   private mapOpen = false;
   private mapDrag: number | undefined;
+  /**
+   * Esc is down. Browsers let go of a captured mouse when Esc comes back up,
+   * even one captured while it was down (closing the map or the menu with
+   * Esc), so capturing waits for it.
+   */
+  private escapeHeld = false;
+  private lockOnEscapeUp = false;
   private diedAt: number | undefined;
   private deathShown = false;
   private deathFaded = false;
@@ -170,6 +177,8 @@ export class Engine {
     window.addEventListener('resize', this.resize);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('keydown', this.onEscapeDown, true);
+    window.addEventListener('keyup', this.onEscapeUp, true);
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('mousemove', this.onMouseMove);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
@@ -202,6 +211,8 @@ export class Engine {
     window.removeEventListener('resize', this.resize);
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('keydown', this.onEscapeDown, true);
+    window.removeEventListener('keyup', this.onEscapeUp, true);
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('mousemove', this.onMouseMove);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
@@ -565,9 +576,22 @@ export class Engine {
 
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
 
+  private onEscapeDown = (e: KeyboardEvent) => {
+    if (e.code === 'Escape') this.escapeHeld = true;
+  };
+
+  private onEscapeUp = (e: KeyboardEvent) => {
+    if (e.code !== 'Escape') return;
+    this.escapeHeld = false;
+    if (!this.lockOnEscapeUp) return;
+    this.lockOnEscapeUp = false;
+    if (this.running && !this.autopilot && !this.mapOpen && !this.dungeon.outcome) this.lockPointer();
+  };
+
   /** Keys held while the window loses focus never send keyup, so forget them. */
   private onBlur = () => {
     this.keys.clear();
+    this.escapeHeld = this.lockOnEscapeUp = false;
     if (this.mouseHeld) this.attackReleased = true;
     this.mouseHeld = false;
     this.blockHeld = false;
@@ -579,6 +603,10 @@ export class Engine {
 
   private lockPointer(): void {
     if (this.pointerLockFailed) return;
+    if (this.escapeHeld) {
+      this.lockOnEscapeUp = true;
+      return;
+    }
     // Capturing the mouse needs a click or key press; a controller button doesn't count, so don't ask.
     const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
     if (activation && !activation.isActive) return;
