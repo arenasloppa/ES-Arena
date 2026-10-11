@@ -5,7 +5,7 @@
 **The Elder Scrolls: Arena (1994), remade by AI in Three.js.**
 
 ES Arena is an unofficial remake of Bethesda's first Elder Scrolls game. It runs as a desktop app on Mac and Windows,
-or in a web browser. It is written in TypeScript with Three.js by AI: Claude, made by Anthropic, and soon ChatGPT, made
+or in a web browser. It is written in TypeScript with Three.js by AI: Claude, made by Anthropic and ChatGPT, made
 by OpenAI.
 You play it with your own copy of Arena: the game reads the original maps, textures, creatures, sounds and text from your
 `ARENA` folder while it runs, so none of Bethesda's files are in this repository.
