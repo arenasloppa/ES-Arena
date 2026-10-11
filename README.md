@@ -30,10 +30,12 @@ screenshots of earlier versions.
 ## What works so far
 
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
-- Make your character as in Arena, in the game's own words: answer ten questions or choose from the eighteen classes,
-  pick a name (or a random one in any race's style, Arena's own or by the race's customs in the lore), choose your race
-  on the map of Tamriel, share out bonus points among attributes rolled by Arena's rules on a sheet that shows what the
-  original's does, and pick a face. Your class and attributes count in play: they set
+- Make your character in Skyrim's order, in Arena's own words: choose your gender, race and face together, with your
+  race's province marked on Arena's map of Tamriel; pick a name (or a random one in your race's style, Arena's own or by
+  the race's customs in the lore); answer ten questions or choose from the eighteen classes; and share out bonus points
+  among attributes rolled by Arena's rules on a sheet that shows what the original's does. Arena's paper doll shows you
+  as you are so far beside every step, and tries on each class's clothes and gear as you look through them. Your class
+  and attributes count in play: they set
   your health, fatigue, damage, pace and how much you can carry, which armour and weapons you can use, and whether you
   can pick locks.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
@@ -185,7 +187,7 @@ files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`,
 | `src/audio/` | Arena's sound effects, played through the Web Audio API so each comes from where it happens, and its music: an emulated AdLib FM chip, a sound driver that plays the songs on it as the game's did, and a player that makes each song into sound in the background and loops it. |
 | `src/input/` | Controllers, read through the browser's Gamepad API. |
 | `src/ui/` | The Skyrim-style menu and HUD: moving through the menu, character creation, the menus over the game, the compass, the minimap, button prompts and the settings. |
-| `src/render/` | Turning a level into Three.js meshes and textures, the creatures, the weapon in hand, the 3D map, the paper doll and item pictures, and the stand-in hall shown behind the menu, whose textures the remake draws itself. |
+| `src/render/` | Turning a level into Three.js meshes and textures, the creatures, the weapon in hand, the 3D map, the paper doll and item pictures, the film of the first dungeon behind the main menu, and the stand-in hall shown there without the game, whose textures the remake draws itself. |
 | `electron/` | The desktop app: a window that shows the built game and can read the `ARENA` folder you pick, and nothing else on your computer. |
 | `scripts/` | Tools for working on the remake: redrawing the app icon, saving the game's images as PNGs, and taking the screenshots. |
 | `tests/` | Unit tests. `tests/helpers/encode.ts` builds fake archives, maps and compressed data, so the tests never need the real game files. |

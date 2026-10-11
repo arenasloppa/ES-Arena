@@ -1,11 +1,15 @@
 /**
- * Character creation, as in Arena: a class chosen from the list or by
- * answering ten questions, with what the class needs beside it; a name and
- * a gender; a race chosen by its province on the map of Tamriel, with the
- * game's words on that race as you say yes to it; then bonus points shared
- * out among the rolled attributes on a sheet like Arena's, and a face. Each step shows the game's own words, read
- * from the player's copy, and is worked like the rest of the menu with the
- * keyboard, the mouse or a controller.
+ * Character creation, in Skyrim's order with Arena's pieces: gender, race and
+ * face together, as Skyrim's race menu has them, with the race's province
+ * marked on Arena's map of Tamriel and the game's words on that race; then a
+ * name, in the race's style; then a class, chosen from the list or by
+ * answering ten questions, with what the class needs beside it; then bonus
+ * points shared out among the rolled attributes on a sheet like Arena's; and
+ * last Arena's farewell. The paper doll shows the character as made so far
+ * beside every step, in the gear of the class picked or being looked at.
+ * Each step shows the game's own words, read from the player's copy, and is
+ * worked like the rest of the menu with the keyboard, the mouse or a
+ * controller.
  */
 import type { ClassInfo } from '../formats/classes';
 import type { Question } from '../formats/creation';
@@ -54,7 +58,7 @@ const MAP_WIDTH = 320;
 const MAP_HEIGHT = 200;
 const ARMOUR_ALLOWED = ['Any', 'Chain, leather', 'Leather', 'None'];
 
-type Step = 'method' | 'question' | 'result' | 'classes' | 'gender' | 'name' | 'race' | 'home' | 'knownAs' | 'attributes' | 'face';
+type Step = 'look' | 'name' | 'method' | 'question' | 'result' | 'classes' | 'attributes' | 'farewell';
 
 export interface CreationHost {
   data: CreationData;
@@ -72,9 +76,9 @@ export interface CreationHost {
 
 interface Draft {
   cls?: number;
-  gender?: Gender;
+  gender: Gender;
   name: string;
-  race?: number;
+  race: number;
   /** The attributes as rolled, and the bonus points added to each. */
   rolled?: number[];
   added: number[];
@@ -85,7 +89,7 @@ interface Draft {
   /** The race, gender and class the attributes were rolled for. */
   rolledFor?: string;
   face: number;
-  /** The style of name Random name makes: 0 for any race, then each race's men and women in turn. */
+  /** The style of name Random name makes: 0 for any race, then each race's men and women in turn; it follows the race and gender chosen. */
   nameStyle: number;
   questions: Question[];
   /** The path each answer so far counts toward. */
@@ -94,15 +98,21 @@ interface Draft {
 
 export class CharacterCreation {
   private host: CreationHost | undefined;
-  private step: Step = 'method';
+  private step: Step = 'look';
   private history: Step[] = [];
   private draft: Draft = newDraft();
   private readonly doll = document.createElement('canvas');
+  /** The step's own part of the screen, and the doll's beside it. */
+  private body: HTMLElement;
+  private side: HTMLElement;
+  /** Shows the step's values again once one has changed, on steps that show them. */
+  private changed: (() => void) | undefined;
 
   constructor(private readonly root: HTMLElement) {
+    this.body = root;
+    this.side = root;
     this.doll.className = 'create-doll';
-    this.doll.title = 'Click to change the face';
-    this.doll.addEventListener('click', () => this.step === 'face' && this.changeFace(1));
+    this.doll.addEventListener('click', () => this.step === 'look' && this.changeFace(1));
     // Arena's keys for the answers.
     window.addEventListener('keydown', (e) => {
       if (this.step !== 'question' || this.root.hidden || e.defaultPrevented || e.repeat) return;
@@ -118,7 +128,7 @@ export class CharacterCreation {
     this.host = host;
     this.draft = newDraft();
     this.history = [];
-    this.go(host.data.questions.length ? 'method' : 'classes', false);
+    this.go('look', false);
   }
 
   /** Esc or B: one step back, or out of character creation from the first. */
@@ -159,11 +169,73 @@ export class CharacterCreation {
     const t = this.data.texts;
     const d = this.draft;
     const clsName = this.cls?.name ?? '';
-    const race = d.race === undefined ? undefined : this.data.races[d.race];
+    const race = this.data.races[d.race];
     let focus: HTMLElement | undefined;
     switch (this.step) {
+      case 'look': {
+        // Only the first words: the last tell how Arena's own screen ends.
+        this.frame('New character', 'Appearance', sentences(t.appearance, 2));
+        focus = this.renderLook();
+        break;
+      }
+      case 'name': {
+        // Arena asks it of the class, chosen before the name there; here the race is what is known.
+        this.frame(race?.name ?? '', 'Name', fillText(t.name, [race?.name ?? ''], d.gender));
+        const nav = el('nav', 'options create-choices');
+        const box = el('input', 'option create-name');
+        box.type = 'text';
+        box.maxLength = NAME_LENGTH;
+        box.value = d.name;
+        box.placeholder = 'Your name';
+        box.spellcheck = false;
+        box.autocomplete = 'off';
+        box.setAttribute('aria-label', 'Name');
+        const next = el('button', 'option', 'Continue');
+        const update = () => {
+          d.name = box.value.replace(/\s+/g, ' ').trimStart();
+          next.disabled = !d.name.trim();
+        };
+        box.addEventListener('input', update);
+        box.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          if (!next.disabled) next.click();
+        });
+        // The style of name follows the race and gender chosen, and can be changed: another race's men or women, or any.
+        const style = settingRow('Name style', '');
+        const styles = this.data.races.length * 2 + 1;
+        const showStyle = () => {
+          const n = d.nameStyle;
+          const race = this.data.races[(n - 1) >> 1]?.name;
+          style.querySelector('.value')!.textContent = n && race ? `${race} ${n % 2 ? 'man' : 'woman'}` : 'Any';
+        };
+        const changeStyle = (delta: number) => {
+          d.nameStyle = (d.nameStyle + Math.sign(delta) + styles) % styles;
+          showStyle();
+        };
+        style.addEventListener('step', (e) => changeStyle((e as StepEvent).detail.delta));
+        style.addEventListener('click', () => changeStyle(1));
+        showStyle();
+        const random = el('button', 'option', 'Random name');
+        random.addEventListener('click', () => {
+          const n = d.nameStyle;
+          const race = n ? (n - 1) >> 1 : Math.floor(this.random() * this.data.races.length);
+          const gender = n ? (n % 2 ? 'male' : 'female') : this.random() < 0.5 ? 'male' : 'female';
+          box.value = randomName(race, gender, () => this.random(), this.data.names).slice(0, NAME_LENGTH);
+          update();
+        });
+        next.addEventListener('click', () => {
+          d.name = d.name.trim();
+          if (d.name) this.go(this.data.questions.length ? 'method' : 'classes');
+        });
+        update();
+        nav.append(box, style, random, next);
+        this.body.append(nav);
+        focus = box;
+        break;
+      }
       case 'method': {
-        this.frame('New character', 'Class', t.method);
+        this.frame(d.name, 'Class', t.method);
         this.options(
           [
             ['Answer ten questions', () => this.beginQuestions()],
@@ -186,17 +258,15 @@ export class CharacterCreation {
         );
         list.querySelectorAll('.option').forEach((b, i) => b.prepend(el('span', 'letter', 'ABC'[i])));
         list.before(question);
-        this.root.append(el('p', 'create-hint', 'A, B or C answers'));
+        this.body.append(el('p', 'create-hint', 'A, B or C answers'));
         break;
       }
       case 'result': {
         this.frame('Your answers', clsName, fillText(t.classResult, [clsName]));
-        const body = el('div', 'create-columns');
-        body.append(this.classDetails(this.cls!));
-        this.root.append(body);
+        this.body.append(this.classDetails(this.cls!));
         this.options(
           [
-            ['Accept', () => this.go('name')],
+            ['Accept', () => this.go('attributes')],
             ['Choose another', () => this.go('classes')],
           ],
           'create-choices',
@@ -204,7 +274,7 @@ export class CharacterCreation {
         break;
       }
       case 'classes': {
-        this.frame('New character', 'Class');
+        this.frame(d.name, 'Class');
         const body = el('div', 'create-columns');
         const list = el('nav', 'options create-list');
         const details = el('div', 'create-details-slot');
@@ -212,111 +282,20 @@ export class CharacterCreation {
           const b = el('button', 'option', c.name);
           b.addEventListener('click', () => {
             d.cls = i;
-            this.go('name');
+            this.go('attributes');
           });
-          b.addEventListener('focus', () => details.replaceChildren(this.classDetails(c)));
+          // The doll tries on the class's clothes and gear as it is looked at.
+          b.addEventListener('focus', () => {
+            details.replaceChildren(this.classDetails(c));
+            this.drawDoll(c);
+          });
           list.append(b);
           if (i === (d.cls ?? 0)) focus = b;
         });
         details.append(this.classDetails(this.data.classes[d.cls ?? 0]));
         body.append(list, details);
-        this.root.append(body);
+        this.body.append(body);
         showMore(list);
-        break;
-      }
-      case 'gender': {
-        this.frame(clsName, 'Gender', t.gender);
-        const list = this.options(
-          [
-            ['Male', () => this.setGender('male')],
-            ['Female', () => this.setGender('female')],
-          ],
-          'create-choices',
-        );
-        // Picked first: the gender chosen before, else the one the name's style was for.
-        if ((d.gender ?? (d.nameStyle && d.nameStyle % 2 === 0 ? 'female' : 'male')) === 'female') focus = list.children[1] as HTMLElement;
-        break;
-      }
-      case 'name': {
-        this.frame(clsName, 'Name', fillText(t.name, [clsName], d.gender));
-        const nav = el('nav', 'options create-choices');
-        const box = el('input', 'option create-name');
-        box.type = 'text';
-        box.maxLength = NAME_LENGTH;
-        box.value = d.name;
-        box.placeholder = 'Your name';
-        box.spellcheck = false;
-        box.autocomplete = 'off';
-        box.setAttribute('aria-label', 'Name');
-        const next = el('button', 'option', 'Continue');
-        const update = () => {
-          d.name = box.value.replace(/\s+/g, ' ').trimStart();
-          next.disabled = !d.name.trim();
-        };
-        box.addEventListener('input', update);
-        box.addEventListener('keydown', (e) => {
-          if (e.key !== 'Enter') return;
-          e.preventDefault();
-          if (!next.disabled) next.click();
-        });
-        // The race and gender come later, as in Arena, so the style of name is picked here: a race's men or women, or any.
-        const style = settingRow('Name style', '');
-        const styles = this.data.races.length * 2 + 1;
-        const showStyle = () => {
-          const n = d.nameStyle;
-          const race = this.data.races[(n - 1) >> 1]?.name;
-          style.querySelector('.value')!.textContent = n && race ? `${race} ${n % 2 ? 'man' : 'woman'}` : 'Any';
-        };
-        const changeStyle = (delta: number) => {
-          d.nameStyle = (d.nameStyle + Math.sign(delta) + styles) % styles;
-          showStyle();
-        };
-        style.addEventListener('step', (e) => changeStyle((e as StepEvent).detail.delta));
-        style.addEventListener('click', () => changeStyle(1));
-        showStyle();
-        const random = el('button', 'option', 'Random name');
-        random.addEventListener('click', () => {
-          const n = d.nameStyle;
-          const race = n ? (n - 1) >> 1 : (d.race ?? Math.floor(this.random() * this.data.races.length));
-          const gender = n ? (n % 2 ? 'male' : 'female') : (d.gender ?? (this.random() < 0.5 ? 'male' : 'female'));
-          box.value = randomName(race, gender, () => this.random(), this.data.names).slice(0, NAME_LENGTH);
-          update();
-        });
-        next.addEventListener('click', () => {
-          d.name = d.name.trim();
-          if (d.name) this.go('gender');
-        });
-        update();
-        nav.append(box, style, random, next);
-        this.root.append(nav);
-        focus = box;
-        break;
-      }
-      case 'race': {
-        this.frame(d.name, 'Race', fillText(t.race, [d.name, clsName], d.gender));
-        focus = this.renderMap();
-        break;
-      }
-      case 'home': {
-        // Arena tells of the race after the choice ("Know ye this also:", from TEMPLATE.DAT);
-        // here it comes with the question, so it can still change the answer.
-        this.frame(d.name, race?.province ?? '', fillText(t.home, [race?.province ?? '', race?.plural ?? ''], d.gender));
-        const lore = this.data.raceLore?.[d.race ?? 0]?.replace(/\s*\n\s*/g, ' ').trim();
-        if (lore) this.root.append(el('p', 'create-text create-lore', `${this.data.sheet.knowYe} ${lore}`));
-        this.options(
-          [
-            ['Yes', () => this.go('knownAs')],
-            ['No', () => this.back()],
-          ],
-          'create-choices',
-        );
-        break;
-      }
-      case 'knownAs': {
-        // Who the character is, and Arena's farewell, together; what the class needs was beside the class list.
-        this.frame(`${race?.name ?? ''} ${clsName}`, d.name, fillText(t.knownAs, [clsName, d.name, race?.province ?? '', race?.plural ?? ''], d.gender));
-        this.root.append(el('p', 'create-text', t.farewell));
-        this.options([['Continue', () => this.go('attributes')]], 'create-choices');
         break;
       }
       case 'attributes': {
@@ -326,19 +305,11 @@ export class CharacterCreation {
         focus = this.renderAttributes();
         break;
       }
-      case 'face': {
-        this.frame(d.name, 'Appearance', t.appearance);
-        const body = el('div', 'create-columns create-sheet');
-        const nav = el('nav', 'options settings create-face');
-        const row = settingRow('Face', `${d.face + 1} of ${FACES}`);
-        row.addEventListener('step', (e) => this.changeFace((e as StepEvent).detail.delta));
-        row.addEventListener('click', () => this.changeFace(1));
-        const done = el('button', 'option', this.host!.finish);
-        done.addEventListener('click', () => this.finish());
-        nav.append(row, done);
-        body.append(nav, this.dollFrame());
-        this.root.append(body);
-        focus = row;
+      case 'farewell': {
+        // Who the character is, and Arena's farewell, together; what the class needs was beside the class list.
+        this.frame(`${race?.name ?? ''} ${clsName}`, d.name, fillText(t.knownAs, [clsName, d.name, race?.province ?? '', race?.plural ?? ''], d.gender));
+        this.body.append(el('p', 'create-text', t.farewell));
+        this.options([[this.host!.finish, () => this.finish()]], 'create-choices');
         break;
       }
     }
@@ -347,13 +318,22 @@ export class CharacterCreation {
     (focus ?? this.root.querySelector<HTMLElement>('.option:not(:disabled)'))?.focus();
   }
 
-  /** Clears the screen and puts up the step's heading and the game's words for it. */
+  /**
+   * Clears the screen and puts up the step's heading, the game's words for
+   * it, and the doll beside the step's own part of the screen.
+   */
   private frame(kicker: string, title: string, text?: string): void {
     const head = el('header', 'create-head');
     head.append(el('p', 'create-kicker', kicker), el('h2', '', title), el('div', 'rule'));
-    this.root.replaceChildren(head);
+    const stage = el('div', 'create-stage');
+    this.body = el('div', 'create-body');
+    this.side = el('aside', 'create-side');
+    stage.append(this.body, this.side);
+    this.root.replaceChildren(head, stage);
     this.root.dataset.step = this.step;
-    if (text) this.root.append(el('p', 'create-text', text));
+    this.changed = undefined;
+    if (text) this.body.append(el('p', 'create-text', text));
+    this.side.append(this.dollFrame());
   }
 
   private options(choices: Array<[string, () => void]>, className: string): HTMLElement {
@@ -363,8 +343,75 @@ export class CharacterCreation {
       b.addEventListener('click', act);
       nav.append(b);
     }
-    this.root.append(nav);
+    this.body.append(nav);
     return nav;
+  }
+
+  /**
+   * Gender, race and face together, as in Skyrim's race menu: each a row
+   * stepped with left and right, with the doll changing beside them, the
+   * game's words on the race under them, and Arena's map of Tamriel with the
+   * race's province marked, which picks the race whose province is clicked.
+   * Returns the first row.
+   */
+  private renderLook(): HTMLElement {
+    const d = this.draft;
+    const races = this.data.races;
+    const columns = el('div', 'create-columns create-look');
+    const left = el('div', 'create-sheet create-look-rows');
+    const nav = el('nav', 'options settings');
+    const gender = settingRow('Gender', '');
+    const race = settingRow('Race', '');
+    const face = settingRow('Face', '');
+    const next = el('button', 'option', 'Continue');
+    const lore = el('p', 'create-text create-lore');
+    const home = el('p', 'create-text create-home');
+    const map = this.renderMap((i) => {
+      d.race = i;
+      show();
+    });
+    const value = (row: HTMLElement) => row.querySelector('.value')!;
+    const show = () => {
+      const r = races[d.race];
+      value(gender).textContent = d.gender === 'female' ? 'Female' : 'Male';
+      value(race).textContent = r.name;
+      value(face).textContent = `${d.face + 1} of ${FACES}`;
+      map.mark(d.race);
+      // Only the first words: the last ask whether to keep the race, which Continue does here.
+      home.textContent = firstSentence(fillText(this.data.texts.home, [r.province, r.plural], d.gender));
+      const words = this.data.raceLore?.[d.race]?.replace(/\s*\n\s*/g, ' ').trim();
+      lore.textContent = words ? `${this.data.sheet.knowYe} ${words}` : '';
+      lore.hidden = !words;
+      this.drawDoll();
+    };
+    this.changed = show;
+    const toggle = () => {
+      d.gender = d.gender === 'female' ? 'male' : 'female';
+      show();
+    };
+    gender.addEventListener('step', toggle);
+    gender.addEventListener('click', toggle);
+    const stepRace = (delta: number) => {
+      d.race = (d.race + Math.sign(delta) + races.length) % races.length;
+      show();
+    };
+    race.addEventListener('step', (e) => stepRace((e as StepEvent).detail.delta));
+    race.addEventListener('click', () => stepRace(1));
+    face.addEventListener('step', (e) => this.changeFace((e as StepEvent).detail.delta));
+    face.addEventListener('click', () => this.changeFace(1));
+    next.addEventListener('click', () => {
+      // The style of names to offer follows the race and gender, as the name comes next.
+      d.nameStyle = 1 + d.race * 2 + (d.gender === 'female' ? 1 : 0);
+      this.go('name');
+    });
+    nav.append(gender, race, face, next);
+    left.append(nav, lore);
+    const right = el('div', 'create-look-map');
+    right.append(map.box, home);
+    columns.append(left, right);
+    this.body.append(columns);
+    show();
+    return gender;
   }
 
   /** What a class is like, from the game's tables. */
@@ -410,40 +457,21 @@ export class CharacterCreation {
     this.go('result');
   }
 
-  private setGender(gender: Gender): void {
-    this.draft.gender = gender;
-    this.go('race');
-  }
-
   // ---- The map ----
 
-  /** The map of Tamriel with the provinces listed beside it; returns the option to pick first. */
-  private renderMap(): HTMLElement | undefined {
-    const d = this.draft;
-    const body = el('div', 'create-columns create-race');
-    const mapBox = el('div', 'create-map');
+  /**
+   * The map of Tamriel, with a diamond on the province of the race `mark`
+   * is given; a click picks the race whose province is nearest.
+   */
+  private renderMap(pick: (race: number) => void): { box: HTMLElement; mark: (race: number) => void } {
+    const box = el('div', 'create-map');
     const canvas = el('canvas');
     const marker = el('span', 'create-marker');
     marker.hidden = true;
-    mapBox.append(canvas, marker);
+    box.append(canvas, marker);
     // Its room is kept while the map loads, so nothing jumps when it appears.
-    mapBox.style.visibility = 'hidden';
-    const side = el('div', 'create-race-list');
-    const list = el('nav', 'options create-list');
-    const buttons = this.data.races.map((r, i) => {
-      const b = el('button', 'option');
-      b.append(el('span', '', r.province), el('span', 'create-sub', r.plural));
-      b.addEventListener('click', () => this.pickRace(i));
-      b.addEventListener('focus', () => {
-        const at = PROVINCE_AT[i];
-        marker.hidden = !at;
-        if (at) marker.style.cssText = `left:${(at[0] / MAP_WIDTH) * 100}%;top:${(at[1] / MAP_HEIGHT) * 100}%`;
-      });
-      list.append(b);
-      return b;
-    });
-    side.append(list);
-    // Arena hides the map's Exit while a character is being made; Esc or B goes back instead.
+    box.style.visibility = 'hidden';
+    const races = this.data.races.length;
     const near = (e: MouseEvent): number | undefined => {
       const rect = canvas.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * MAP_WIDTH;
@@ -455,23 +483,19 @@ export class CharacterCreation {
         const dist = Math.hypot(x - sx, (y - sy) * PIXEL_ASPECT);
         if (dist < bestDist) [best, bestDist] = [i, dist];
       });
-      return best >= 0 && best < buttons.length ? best : undefined;
+      return best >= 0 && best < races ? best : undefined;
     };
-    canvas.addEventListener('mousemove', (e) => {
-      const i = near(e);
-      canvas.style.cursor = i === undefined ? 'default' : 'pointer';
-      if (typeof i === 'number' && document.activeElement !== buttons[i]) buttons[i].focus({ preventScroll: true });
-    });
+    canvas.addEventListener('mousemove', (e) => (canvas.style.cursor = near(e) === undefined ? 'default' : 'pointer'));
     canvas.addEventListener('click', (e) => {
       const i = near(e);
-      if (i !== undefined) this.pickRace(i);
+      if (i !== undefined) pick(i);
     });
     const portraits = this.host?.portraits;
-    if (!portraits) mapBox.hidden = true;
+    if (!portraits) box.hidden = true;
     void Promise.all([portraits?.map(), portraits?.noExit()]).then(([image, noExit]) => {
-      if (this.step !== 'race') return;
+      if (!canvas.isConnected) return;
       if (!image) {
-        mapBox.hidden = true;
+        box.hidden = true;
         return;
       }
       canvas.width = image.width;
@@ -480,17 +504,14 @@ export class CharacterCreation {
       ctx.drawImage(image, 0, 0);
       // Arena hides the map's Exit while a character is being made, under its own piece of map.
       if (noExit) ctx.drawImage(noExit.image, noExit.x, noExit.y);
-      mapBox.style.visibility = '';
+      box.style.visibility = '';
     });
-    body.append(mapBox, side);
-    this.root.append(body);
-    // Picked first: the race chosen before, else the one the name's style was for.
-    return buttons[d.race ?? (d.nameStyle ? (d.nameStyle - 1) >> 1 : 0)];
-  }
-
-  private pickRace(i: number): void {
-    this.draft.race = i;
-    this.go('home');
+    const mark = (race: number) => {
+      const at = PROVINCE_AT[race];
+      marker.hidden = !at;
+      if (at) marker.style.cssText = `left:${(at[0] / MAP_WIDTH) * 100}%;top:${(at[1] / MAP_HEIGHT) * 100}%`;
+    };
+    return { box, mark };
   }
 
   // ---- Attributes and face ----
@@ -498,7 +519,7 @@ export class CharacterCreation {
   /** Rolls the attributes, bonus points, health and gold again, as Arena's "Reroll stats" does. */
   private reroll(): void {
     const d = this.draft;
-    const roll = rollAttributes(d.race ?? 0, d.gender ?? 'male', this.cls!, () => this.random(), this.data.raceAttributes);
+    const roll = rollAttributes(d.race, d.gender, this.cls!, () => this.random(), this.data.raceAttributes);
     d.rolled = roll.attributes;
     d.added = new Array(ATTRIBUTE_COUNT).fill(0);
     d.bonus = roll.bonus;
@@ -521,8 +542,7 @@ export class CharacterCreation {
   private renderAttributes(): HTMLElement {
     const d = this.draft;
     const sheet = this.data.sheet;
-    const body = el('div', 'create-columns create-sheet');
-    const column = el('div', 'create-attributes');
+    const column = el('div', 'create-sheet create-attributes');
     const nav = el('nav', 'options settings');
     const left = el('p', 'create-bonus');
     const status = el('dl', 'create-status');
@@ -555,7 +575,7 @@ export class CharacterCreation {
     done.addEventListener('click', () => choosing(true));
     save.addEventListener('click', () => {
       if (this.bonusLeft === 0) {
-        this.go('face');
+        this.go('farewell');
         return;
       }
       choosing(false);
@@ -596,10 +616,8 @@ export class CharacterCreation {
     };
     show();
     column.append(left, nav, choice);
-    const side = el('div', 'create-sheet-side');
-    side.append(this.dollFrame(), status);
-    body.append(column, side);
-    this.root.append(body);
+    this.body.append(column);
+    this.side.append(status);
     return rows[0];
   }
 
@@ -613,33 +631,34 @@ export class CharacterCreation {
 
   private changeFace(delta: number): void {
     this.draft.face = (this.draft.face + Math.sign(delta) + FACES) % FACES;
-    const value = this.root.querySelector('.create-face .value');
-    if (value) value.textContent = `${this.draft.face + 1} of ${FACES}`;
-    this.drawDoll();
+    this.changed?.();
   }
 
-  /** The doll, as the character will look with their starting gear. */
+  /** The doll, as the character will look so far. */
   private dollFrame(): HTMLElement {
     const frame = el('div', 'create-doll-frame');
     frame.style.setProperty('--doll-aspect', `${DOLL_WIDTH} / ${DOLL_HEIGHT * PIXEL_ASPECT}`);
     frame.append(this.doll);
     frame.hidden = !this.host?.portraits;
+    this.doll.title = this.step === 'look' ? 'Click to change the face' : '';
     this.drawDoll();
     return frame;
   }
 
-  private drawDoll(): void {
+  /** Draws the doll in the clothes and starting gear of `cls`; in a shirt and trousers before there is a class. */
+  private drawDoll(cls = this.cls): void {
     const portraits = this.host?.portraits;
-    const cls = this.cls;
-    if (!portraits || !cls) return;
-    const inventory = new Inventory(cls);
-    for (const gear of startingGear(this.host!.weapons, cls)) inventory.equip(inventory.add(gear));
+    if (!portraits) return;
     const d = this.draft;
-    void portraits
-      .drawDoll(this.doll, { race: d.race ?? 0, gender: d.gender ?? 'male', face: d.face, robe: cls.spellcaster, equipment: inventory.pictureFrames() })
-      .then((drawn) => {
-        if (drawn !== undefined && this.doll.parentElement) this.doll.parentElement.hidden = !drawn;
-      });
+    let equipment: number[] = [];
+    if (cls) {
+      const inventory = new Inventory(cls);
+      for (const gear of startingGear(this.host!.weapons, cls)) inventory.equip(inventory.add(gear));
+      equipment = inventory.pictureFrames();
+    }
+    void portraits.drawDoll(this.doll, { race: d.race, gender: d.gender, face: d.face, robe: !!cls?.spellcaster, equipment }).then((drawn) => {
+      if (drawn !== undefined && this.doll.parentElement) this.doll.parentElement.hidden = !drawn;
+    });
   }
 
   private character(): Character {
@@ -647,8 +666,8 @@ export class CharacterCreation {
     const attributes = (d.rolled ?? new Array(ATTRIBUTE_COUNT).fill(50)).map((v, i) => v + (d.added[i] ?? 0));
     return {
       name: d.name.trim(),
-      gender: d.gender ?? 'male',
-      race: d.race ?? 0,
+      gender: d.gender,
+      race: d.race,
       cls: d.cls ?? 0,
       attributes,
       face: d.face,
@@ -664,7 +683,19 @@ export class CharacterCreation {
 }
 
 function newDraft(): Draft {
-  return { name: '', added: new Array(ATTRIBUTE_COUNT).fill(0), bonus: 0, healthRoll: 0, gold: 0, face: 0, nameStyle: 0, questions: [], answers: [] };
+  return {
+    gender: 'male',
+    name: '',
+    race: 0,
+    added: new Array(ATTRIBUTE_COUNT).fill(0),
+    bonus: 0,
+    healthRoll: 0,
+    gold: 0,
+    face: 0,
+    nameStyle: 0,
+    questions: [],
+    answers: [],
+  };
 }
 
 /** Marks a list that scrolls with whether there is more of it above and below, for its fades. */
@@ -679,6 +710,11 @@ function showMore(list: HTMLElement): void {
 
 /** The first sentence of a text. */
 function firstSentence(text: string): string {
-  const m = /^.*?[.!?](?=\s|$)/.exec(text);
+  return sentences(text, 1);
+}
+
+/** The first `n` sentences of a text. */
+function sentences(text: string, n: number): string {
+  const m = new RegExp(`^(?:.*?[.!?](?=\\s|$)){1,${n}}`).exec(text);
   return m ? m[0] : text;
 }

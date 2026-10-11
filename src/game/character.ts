@@ -146,12 +146,12 @@ export const FALLBACK_TEXTS: CreationTexts = {
   gender: 'Is your character a man or a woman?',
   race: 'Where was %s the %s born?',
   classResult: 'Your answers suit the %s best.',
-  home: 'Born in %s, among the %s?',
+  home: 'You come from %s, among the %s. Is that your home?',
   knownAs: 'So be it: the %s %s of %s, kin to the %s.',
   needs: 'To do well you must be %s, as every %s is.',
   farewell: 'Your story begins in a cell beneath the Imperial City. Find a way out.',
   distribute: 'Share out your bonus points among your attributes.',
-  appearance: 'Choose a face.',
+  appearance: 'Choose how you look. Click your face to change it.',
 };
 
 const FALLBACK_CANNOT_EQUIP = 'A %s cannot use that.';

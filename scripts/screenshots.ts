@@ -38,7 +38,7 @@ const SAVED_CHARACTER = 'es-arena.character';
 /** What each shot shows, in the order the gallery lists them. */
 const CAPTIONS: Record<string, string> = {
   menu: 'The main menu',
-  race: 'Choosing a race on the map of Tamriel',
+  race: 'Choosing gender, race and face, with the map of Tamriel',
   attributes: 'Sharing out bonus points, beside the paper doll',
   cell: 'Arriving in the cell where Arena begins',
   goblin: 'A goblin raises its axe',
@@ -214,27 +214,21 @@ function compareVersions(a: string, b: string): number {
 async function makeCharacter(page: Page): Promise<void> {
   const step = (name: string) => page.waitForSelector(`#screen-create[data-step='${name}']`);
   const pick = (text: string) => page.click(`#screen-create .option >> text="${text}"`);
-  await page.waitForSelector('#screen-create[data-step]:not([hidden])');
-  if ((await page.getAttribute('#screen-create', 'data-step')) === 'method') await pick('Choose from the list');
-  await step('classes');
-  await pick('Warrior');
+  // Gender, race and face together: a man of Skyrim, the third race.
+  await step('look');
+  await page.waitForSelector('.create-map:not([hidden])');
+  await page.focus('#screen-create .option-row >> nth=1');
+  for (let i = 0; i < 2; i++) await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(300);
+  await shot(page, 'race');
+  await pick('Continue');
   await step('name');
   await page.fill('.create-name', 'Brin Tallow');
   await page.keyboard.press('Enter');
-  await step('gender');
-  await pick('Male');
-  await step('race');
-  await page.waitForSelector('.create-map:not([hidden])');
-  // Skyrim, the third province.
-  await page.focus('#screen-create .create-list .option >> nth=2');
-  await page.waitForTimeout(300);
-  await shot(page, 'race');
-  await page.keyboard.press('Enter');
-  await step('home');
-  await pick('Yes');
-  // Arena's words on who you are, and its farewell.
-  await step('knownAs');
-  await pick('Continue');
+  await page.waitForSelector("#screen-create:is([data-step='method'], [data-step='classes'])");
+  if ((await page.getAttribute('#screen-create', 'data-step')) === 'method') await pick('Choose from the list');
+  await step('classes');
+  await pick('Warrior');
   await step('attributes');
   // Some points on strength and endurance, then a shot with the rest still to share out.
   const rows = page.locator('#screen-create .option-row');
@@ -251,8 +245,9 @@ async function makeCharacter(page: Page): Promise<void> {
   }
   await pick('Done');
   await page.click('#screen-create .create-choice .option >> nth=0');
-  await step('face');
-  await page.click('#screen-create .create-face .option >> nth=1');
+  // Arena's words on who you are, and its farewell.
+  await step('farewell');
+  await page.click('#screen-create .create-choices .option');
   // Ria's vision after making a character.
   await page.waitForSelector('#cutscene:not([hidden])', { timeout: 20_000 }).catch(() => undefined);
   while (await page.isVisible('#cutscene')) {

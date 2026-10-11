@@ -93,7 +93,7 @@ h2 {
 #menu:is([data-screen='controls'], [data-screen='create'], [data-screen='level'], [data-screen='dead'], [data-screen='escaped']) #status { display: none; }
 /* Who plays, above the main menu's options. */
 .who { margin: 0; font: 300 17px/1.3 var(--font-ui); letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
-#screen-create:not([hidden]):not([data-step='name'], [data-step='attributes'], [data-step='face']) ~ .hints #hint-change { display: none; }
+#screen-create:not([hidden]):not([data-step='look'], [data-step='name'], [data-step='attributes']) ~ .hints #hint-change { display: none; }
 #screen-dead h2 { color: #e9d9d2; text-shadow: 0 0 24px rgba(160, 20, 10, 0.8); }
 #screen-dead, #screen-escaped { animation: fade-in 1.2s ease-out; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -426,7 +426,11 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 .tip { display: contents; }
 
 /* ---- Character creation ---- */
-.create { width: min(1080px, 100%); gap: 16px; }
+.create { width: min(1180px, 100%); gap: 16px; }
+/* Each step's own part, with the doll beside it all the way through. */
+.create-stage { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 24px 48px; width: 100%; }
+.create-body { display: grid; justify-items: center; align-content: start; gap: 16px; flex: 1 1 520px; min-width: 0; max-width: 860px; }
+.create-side { display: grid; gap: 14px; justify-items: center; flex: none; }
 .create-head { display: grid; gap: 8px; justify-items: center; }
 .create-kicker {
   margin: 0; min-height: 1em; font: 400 15px/1 var(--font-ui);
@@ -477,8 +481,16 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   background: rgba(0, 0, 0, 0.4); border-bottom: 1px solid var(--line-strong);
 }
 .create-name::placeholder { color: rgba(243, 240, 232, 0.3); }
-/* The map of Tamriel, in Arena's tall pixels, with a diamond on the province picked. */
-.create-map { position: relative; width: min(560px, 92vw, (100vh - 340px) * 4 / 3); aspect-ratio: 4 / 3; }
+/* Gender, race and face, with the game's words on the race under them and the map beside them. */
+.create-look { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 420px); justify-content: center; gap: 24px 32px; }
+.create-look-rows { display: grid; gap: 14px; justify-items: center; width: 100%; }
+.create-look-rows .settings { width: 100%; }
+.create-look-rows .value { min-width: 6.5em; }
+.create-look-rows .create-lore { text-align: left; font-size: clamp(15px, 1.5vw, 17px); }
+.create-look-map { display: grid; gap: 10px; justify-items: center; width: 100%; }
+.create-text.create-home { color: var(--dim); font-size: clamp(16px, 1.6vw, 18px); }
+/* The map of Tamriel, in Arena's tall pixels, with a diamond on the race's province. */
+.create-map { position: relative; width: min(420px, 100%, (100vh - 340px) * 4 / 3); aspect-ratio: 4 / 3; }
 /* The parchment's edges are torn and see-through, so the shadow follows its shape rather than the canvas's box. */
 .create-map canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; filter: drop-shadow(0 0 18px rgba(0, 0, 0, 0.85)); }
 .create-marker {
@@ -488,11 +500,9 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   animation: marker 1.6s ease-in-out infinite;
 }
 @keyframes marker { 50% { opacity: 0.55; } }
-/* A fixed size beside the map, so the map stays put while the words under the list change. */
-.create-race-list { display: grid; gap: 12px; justify-items: center; width: 280px; }
 .create-sheet { align-items: center; }
 .create-attributes { display: grid; gap: 8px; justify-items: center; width: min(460px, 100%); }
-.create-attributes .settings, .create-face { width: min(460px, 100%); }
+.create-attributes .settings { width: min(460px, 100%); }
 .create-sheet .option-row { padding: 2px 16px; font-size: clamp(18px, 2vw, 21px); }
 .create-sheet .option { padding-top: 4px; padding-bottom: 4px; }
 .create-bonus { margin: 0; font-size: 16px; letter-spacing: 0.16em; text-transform: uppercase; color: #ecc86a; }
@@ -504,7 +514,6 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 /* What each attribute gives, under its name, as Arena's sheet has it beside each. */
 .create-sheet .row-label { display: grid; text-align: left; }
 .create-sheet .row-label .create-sub { font-size: 14px; letter-spacing: 0.04em; color: var(--dim); text-transform: none; }
-.create-sheet-side { display: grid; gap: 14px; justify-items: center; }
 .create-status { display: grid; grid-template-columns: auto auto; gap: 2px 18px; margin: 0; font-size: 17px; }
 .create-status dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.12em; font-size: 14px; align-self: center; }
 .create-status dd { margin: 0; text-align: right; }
@@ -516,7 +525,7 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   border: 1px solid var(--line); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 40px rgba(0, 0, 0, 0.85);
 }
 .create-doll { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
-[data-step='face'] .create-doll { cursor: pointer; }
+[data-step='look'] .create-doll { cursor: pointer; }
 
 /* ---- Menus over the game: the menu of menus, items, magic, the character and the favourites ---- */
 #game-menu { position: fixed; inset: 0; font: 400 18px/1.3 var(--font-ui); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95); }
@@ -709,6 +718,10 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   .bindings th, .bindings td { padding-left: 6px; padding-right: 6px; }
   .option-row { padding-left: 12px; padding-right: 12px; gap: 12px; }
   .slider { width: 64px; }
+  /* On a phone the doll comes first, small, so a change shows above the rows that make it. */
+  .create-side { order: -1; }
+  .create-side .create-doll-frame { height: 220px; min-height: 0; }
+  .create-look { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-height: 820px) {
   #menu { gap: 14px; padding-top: 3vh; }
