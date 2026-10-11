@@ -72,7 +72,7 @@ async function useSource(source: FileSource) {
   const names = source.names();
   if (!showChecks(names)) {
     folderError.textContent = names.length
-      ? 'Some required files are missing. Pick the folder that contains GLOBAL.BSA.'
+      ? 'Some required files are missing. Pick the ARENA folder, the one that contains GLOBAL.BSA.'
       : 'That folder is empty.';
     folderError.hidden = false;
     return;

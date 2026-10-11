@@ -3,14 +3,14 @@
 A remake of *The Elder Scrolls: Arena* (Bethesda, 1994) in TypeScript and Three.js, for PC and Mac.
 
 **This repository contains no Bethesda game files.** You play with your own copy of Arena:
-the game asks for your Arena folder and reads everything (maps, textures, text) from it at runtime.
+the game asks for your ARENA folder and reads everything (maps, textures, text) from it at runtime.
 Arena is free from Bethesda; its license allows personal use only, so its files must never be committed here.
 
 ## Status
 
 First playable milestone:
 
-- Pick your Arena folder in the browser; the game checks the required files are there.
+- Pick your ARENA folder in the browser; the game checks the required files are there.
   In Chrome and Edge it can remember the folder between visits. Before a folder is picked, the menu sits over a
   stand-in hall whose textures the remake generates itself.
 - Walk around the starting dungeon (`START.MIF`) in first person, or any other map from the menu.
@@ -29,14 +29,11 @@ npm install
 npm run dev      # then open the printed localhost URL
 ```
 
-Click **Choose Arena folder…** and pick your Arena install. The game looks a few folders down for `GLOBAL.BSA`,
-so the top folder of any of these works:
-
-- the free Steam release (data in `ARENA/`),
-- the GamesNostalgia Windows download (`arena/`) or Mac download (`game/Resources/arena/`).
-
-File name case doesn't matter. Saves and other files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`,
-`*.$$$`, `SOUND.CFG`, `VISION.EMS`) are ignored.
+Click **Choose ARENA folder…** and pick the `ARENA` folder from your copy of the game, the one that holds `GLOBAL.BSA`.
+In the free Steam release it sits inside the game's install folder; the GamesNostalgia downloads call it `arena`
+(Windows) or `game/Resources/arena` (Mac). Picking a folder above it also works, since the game looks a few folders down,
+and file name case doesn't matter. Saves and other files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`,
+`AUTOMAP.0x`, `*.$$$`, `SOUND.CFG`, `VISION.EMS`) are ignored.
 
 Controls: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move, mouse to look (click the view to capture it, or drag where the mouse can't be captured),
 arrow keys turn, <kbd>Shift</kbd> runs, <kbd>E</kbd> / <kbd>Space</kbd> / click opens doors, <kbd>Esc</kbd> opens the menu.
