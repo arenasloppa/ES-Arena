@@ -460,7 +460,7 @@ export class CharacterCreation {
     });
     const portraits = this.host?.portraits;
     if (!portraits) mapBox.hidden = true;
-    void portraits?.map().then((image) => {
+    void Promise.all([portraits?.map(), portraits?.noExit()]).then(([image, noExit]) => {
       if (this.step !== 'race') return;
       if (!image) {
         mapBox.hidden = true;
@@ -470,8 +470,8 @@ export class CharacterCreation {
       canvas.height = image.height;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(image, 0, 0);
-      // Arena hides the map's Exit while a character is being made: the parchment edge beside it covers it.
-      if (image.width === MAP_WIDTH && image.height === MAP_HEIGHT) ctx.drawImage(canvas, 222, 178, 50, 22, 270, 178, 50, 22);
+      // Arena hides the map's Exit while a character is being made, under its own piece of map.
+      if (noExit) ctx.drawImage(noExit.image, noExit.x, noExit.y);
       mapBox.style.visibility = '';
     });
     body.append(mapBox, side);
