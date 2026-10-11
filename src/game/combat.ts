@@ -43,6 +43,9 @@ export interface PlayerStats {
   maxHealth: number;
   stamina: number;
   maxStamina: number;
+  /** None for characters who can't cast spells. */
+  magicka: number;
+  maxMagicka: number;
   gold: number;
   potions: number;
   /** Key numbers carried; each opens the locks of the same level. */
@@ -78,6 +81,8 @@ export interface Hero {
   fortune: number;
   /** Kilograms that can be carried before the player is too laden to run. */
   carry: number;
+  /** Magicka at level 1; 0 for classes that can't cast spells (see magic.ts). */
+  magicka: number;
 }
 
 /** The player without a character of their own: no class, and nothing added or taken away. */
@@ -95,7 +100,11 @@ export const DEFAULT_HERO: Hero = {
   lockpicking: 0,
   fortune: 1,
   carry: 200,
+  magicka: 0,
 };
+
+/** Each level adds this much magicka for those who have any; the remake's own, as for stamina. */
+export const MAGICKA_PER_LEVEL = 10;
 
 export const POTION_HEALS = 25;
 const STAMINA_REGEN = 22; // per second, after a short pause
@@ -111,6 +120,8 @@ export function newPlayerStats(weapon: Weapon, hero: Hero = DEFAULT_HERO): Playe
     maxHealth: hero.health,
     stamina: hero.stamina,
     maxStamina: hero.stamina,
+    magicka: hero.magicka,
+    maxMagicka: hero.magicka,
     gold: 0,
     potions: 0,
     keys: new Set(),
@@ -128,8 +139,8 @@ export function experienceFor(level: number, base = DEFAULT_HERO.experience): nu
 
 /**
  * Adds experience and raises the player's level as often as it allows;
- * returns how many levels were gained. Each level adds health and stamina
- * and refills both.
+ * returns how many levels were gained. Each level adds health, stamina and
+ * any magicka, and refills them.
  */
 export function gainExperience(p: PlayerStats, amount: number, random: Random, hero: Hero = DEFAULT_HERO): number {
   p.experience += amount;
@@ -139,8 +150,10 @@ export function gainExperience(p: PlayerStats, amount: number, random: Random, h
     gained++;
     p.maxHealth += Math.max(1, roll(random, 1, hero.healthDie) + hero.healthBonus);
     p.maxStamina += 10;
+    if (p.maxMagicka > 0) p.maxMagicka += MAGICKA_PER_LEVEL;
     p.health = p.maxHealth;
     p.stamina = p.maxStamina;
+    p.magicka = p.maxMagicka;
   }
   return gained;
 }

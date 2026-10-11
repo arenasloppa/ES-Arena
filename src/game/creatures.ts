@@ -52,6 +52,8 @@ export interface Creature {
   replan: number;
   /** How close a calm creature is to noticing a sneaking player, 0 to 1. */
   awareness: number;
+  /** Seconds it is still held by a paralysis spell. */
+  paralysed: number;
 }
 
 export interface CreatureWorld {
@@ -61,6 +63,8 @@ export interface CreatureWorld {
   player: { x: number; y: number; level: number; dodge?: number };
   /** Sneaking players are noticed from closer. */
   sneaking: boolean;
+  /** An invisible player can't be seen at all. */
+  invisible?: boolean;
   /** Seconds of game time. */
   now: number;
   random: () => number;
@@ -124,10 +128,25 @@ export function spawnCreature(id: number, info: CreatureInfo, x: number, y: numb
     hurt: Infinity,
     replan: 0,
     awareness: 0,
+    paralysed: 0,
   };
 }
 
 export const isAlive = (c: Creature) => c.state !== 'dying' && c.state !== 'dead';
+
+/**
+ * Holds a creature still for `seconds`, and makes it hunt the player once
+ * it can move again. A swing it had started does not land.
+ */
+export function paralyseCreature(c: Creature, seconds: number, w: CreatureWorld): void {
+  if (!isAlive(c)) return;
+  c.paralysed = Math.max(c.paralysed, seconds);
+  if (c.state === 'attack') {
+    setState(c, 'chase');
+    c.cooldown = Math.max(c.cooldown, 0.5);
+  } else if (c.state !== 'chase') alert(c, w);
+  c.unseen = 0;
+}
 
 /** Going about its business, unaware of the player. */
 export const isCalm = (c: Creature) => c.state === 'idle' || c.state === 'look' || c.state === 'wander';
@@ -145,6 +164,7 @@ function avoids(level: Level, cell: number): boolean {
 }
 
 function canSee(c: Creature, w: CreatureWorld, range: number): boolean {
+  if (w.invisible) return false;
   const d = Math.hypot(w.player.x - c.x, w.player.y - c.y);
   return d <= range && lineOfSight(w.level, c.x, c.y, w.player.x, w.player.y, w.openDoors);
 }
@@ -156,6 +176,12 @@ export function updateCreature(c: Creature, w: CreatureWorld, dt: number, events
   if (c.state === 'dead') return;
   if (c.state === 'dying') {
     if (c.time >= DYING_TIME) setState(c, 'dead');
+    return;
+  }
+  // Paralysed: frozen where it stands, in the middle of whatever it was doing.
+  if (c.paralysed > 0) {
+    c.paralysed = Math.max(0, c.paralysed - dt);
+    c.time -= dt;
     return;
   }
 
