@@ -37,7 +37,6 @@ export interface Vitals {
   maxHealth: number;
   stamina: number;
   maxStamina: number;
-  potions: number;
 }
 
 class Bar {
@@ -84,8 +83,6 @@ export class Hud implements EngineHud {
   private readonly enemyEl: HTMLElement;
   private readonly enemyName: HTMLElement;
   private readonly enemyBar: HTMLElement;
-  private readonly quick: HTMLElement;
-  private readonly quickCount: HTMLElement;
   private readonly health: Bar;
   private readonly stamina: Bar;
   private readonly marks: HTMLElement;
@@ -113,8 +110,6 @@ export class Hud implements EngineHud {
     this.enemyEl = $('enemy');
     this.enemyName = $('enemy-name');
     this.enemyBar = $('enemy-bar');
-    this.quick = $('quick');
-    this.quickCount = $('quick-count');
     this.health = new Bar($('health'));
     this.stamina = new Bar($('stamina'));
     this.marks = $('compass-marks');
@@ -181,8 +176,6 @@ export class Hud implements EngineHud {
     this.health.set(v.health, v.maxHealth, now);
     this.stamina.set(v.stamina, v.maxStamina, now);
     this.root.classList.toggle('low-health', v.health > 0 && v.health / v.maxHealth < 0.25);
-    this.quick.hidden = v.potions <= 0;
-    this.quickCount.textContent = String(v.potions);
     this.enemyEl.classList.toggle('faded', now > this.enemyUntil);
   }
 

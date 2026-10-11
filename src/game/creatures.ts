@@ -57,7 +57,8 @@ export interface Creature {
 export interface CreatureWorld {
   level: Level;
   openDoors: Set<number>;
-  player: { x: number; y: number; level: number };
+  /** `dodge` is taken off the chance of a blow landing on the player. */
+  player: { x: number; y: number; level: number; dodge?: number };
   /** Sneaking players are noticed from closer. */
   sneaking: boolean;
   /** Seconds of game time. */
@@ -218,7 +219,7 @@ export function updateCreature(c: Creature, w: CreatureWorld, dt: number, events
       c.facing = Math.atan2(w.player.y - c.y, w.player.x - c.x);
       if (!c.struck && c.time >= STRIKE_AT) {
         c.struck = true;
-        const lands = dist <= REACH + 0.35 && w.random() < creatureHitChance(c.info.level, w.player.level);
+        const lands = dist <= REACH + 0.35 && w.random() < creatureHitChance(c.info.level, w.player.level, w.player.dodge);
         events.strike?.(c, lands ? roll(w.random, c.info.damage[0], c.info.damage[1]) : 0);
       }
       if (c.time >= ATTACK_TIME) {

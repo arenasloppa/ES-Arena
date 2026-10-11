@@ -5,7 +5,7 @@
 **The Elder Scrolls: Arena (1994), remade by AI in Three.js.**
 
 ES Arena is an unofficial remake of Bethesda's first Elder Scrolls game. It runs as a desktop app on Mac and Windows,
-or in a web browser. It is written in TypeScript with Three.js by AI: Claude, made by Anthropic and ChatGPT, made
+or in a web browser. It is written in TypeScript with Three.js by AI: Claude, made by Anthropic, and ChatGPT, made
 by OpenAI.
 You play it with your own copy of Arena: the game reads the original maps, textures, creatures, sounds and text from your
 `ARENA` folder while it runs, so none of Bethesda's files are in this repository.
@@ -16,23 +16,33 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 
 | | |
 |---|---|
+| ![Choosing a race on Arena's map of Tamriel, with Skyrim picked and the provinces listed beside the map](docs/screenshots/race.png)<br>Choosing a race on the map of Tamriel | ![Sharing out bonus points among the attributes, beside the paper doll of a Nord warrior](docs/screenshots/attributes.png)<br>Sharing out bonus points |
+| ![The item menu, with an iron plate cuirass picked, its picture from the game and its armour, weight and value](docs/screenshots/items.png)<br>The item menu | ![The character sheet, with the paper doll beside the attributes, health, damage and experience](docs/screenshots/character.png)<br>The character sheet |
 | ![The cell where the game begins, with the dungeon's name across the top and the first objective in the corner](docs/screenshots/cell.png)<br>Arriving in the cell where Arena begins | ![Sneaking up behind a rat, with the eye that shows how close it is to noticing](docs/screenshots/sneak.png)<br>Sneaking up on a rat |
 | ![The 3D map of the Imperial Dungeons, showing the parts explored so far](docs/screenshots/map.png)<br>The map fills in as you explore | ![The main menu, over a hall the remake draws itself](docs/screenshots/menu.png)<br>The main menu |
 
 The screenshots are taken from the game as it stands with `npm run screenshots` and retaken for every release.
-They show Arena's own art, which the remake reads from a copy of the game.
+They show Arena's own art, which the remake reads from a copy of the game. The [gallery](docs/gallery.md) keeps the
+screenshots of earlier versions.
 
 ## What works so far
 
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
+- Make your character as in Arena, in the game's own words: answer ten questions or choose from the eighteen classes,
+  pick a name, choose your race on the map of Tamriel, share out bonus points among your attributes and pick a face.
+  Your class and attributes count in play: they set your health, damage, pace and how much you can carry, which
+  armour and weapons you can use, and whether you can pick locks.
 - Escape the Imperial Dungeons where Arena begins: get out of your locked cell, get past the rats and goblins, and
   find the Shift Gate. Or try any of the game's other maps from the menu.
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners
   and fight.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
   three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you.
-- Health, stamina, healing potions and levels. Search bodies and chests for gold, potions and better weapons, and open
-  locked doors with their key or break them down.
+- Health, stamina, healing potions and levels. Search bodies and chests for gold, potions, weapons and armour, and open
+  locked doors with their key, pick their locks or break them down.
+- Skyrim's menus: a menu of menus for your character, items, magic and the map; an item menu with the game's picture of
+  each piece, where you equip, drink, favourite and drop things; a character sheet with Arena's paper doll wearing
+  what you wear; and favourites you can put on number keys or the D-pad to use mid-fight.
 - A 3D map that fills in as you explore, a minimap, quest objectives, and markers on the compass for the next
   objective and the creatures nearby.
 - Arena's own sound effects, each coming from where it happens in the dungeon.
@@ -43,7 +53,7 @@ They show Arena's own art, which the remake reads from a copy of the game.
   that match your controller, jumping, sneaking and sprinting, the dungeon's name as you arrive, and a banner when you
   level up.
 
-Coming later: cities and the wilderness, character creation, spells, music and saving.
+Coming later: cities and the wilderness, spells, music and saving.
 
 ## Play it
 
@@ -99,37 +109,48 @@ controller, with the PlayStation button in brackets.
 | Jump | <kbd>Space</kbd> | Y (△) |
 | Sprint | <kbd>Shift</kbd> | LB (L1) |
 | Sneak | <kbd>C</kbd> | Click the left stick (L3) |
-| Drink a healing potion | <kbd>Q</kbd> | Up on the D-pad |
+| Favourites | <kbd>Q</kbd> | Up or down on the D-pad |
+| Use the favourite on a number key | <kbd>1</kbd> to <kbd>8</kbd> (the healing potion starts on <kbd>1</kbd>) | Left or right on the D-pad, for 1 and 2 |
+| Character, items, magic and map | <kbd>Tab</kbd> | B (○) |
+| Items, magic | <kbd>I</kbd>, <kbd>P</kbd> | |
 | Map | <kbd>M</kbd> | View (Share) |
-| Menu | <kbd>Esc</kbd> or <kbd>Tab</kbd> | B or Start (○ or Options) |
+| Pause menu | <kbd>Esc</kbd> | Start (Options) |
+
+In the item menu, pick a kind of item on the left (LB and RB also change it), then use or equip the picked one with
+<kbd>E</kbd> or A, make it a favourite with <kbd>F</kbd> or Y, and drop it with <kbd>R</kbd> or X. Pressing a number
+key puts it on that key. In the favourites, <kbd>1</kbd> to <kbd>8</kbd>, or left and right on the D-pad, do the same.
+<kbd>Esc</kbd> or B goes back, and <kbd>Tab</kbd> goes straight back to the game.
 
 On the map, move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the left stick, drag with the mouse or use
 the right stick to turn it, and zoom with the mouse wheel or the triggers.
 
-In the menus, move with the arrow keys, the D-pad or the left stick, choose with <kbd>Enter</kbd> or A, change a setting
-with left and right, and go back with <kbd>Esc</kbd> or B. LB and RB, or <kbd>Page Up</kbd> and <kbd>Page Down</kbd>,
-skip ten maps at a time. The Controls screen sets look speed, inverted look, sound volume and vibration.
+In the main menu and character creation, move with the arrow keys, the D-pad or the left stick, choose with
+<kbd>Enter</kbd> or A, change a setting with left and right, and go back with <kbd>Esc</kbd> or B. LB and RB, or
+<kbd>Page Up</kbd> and <kbd>Page Down</kbd>, skip ten maps at a time. The Controls screen sets look speed, inverted
+look, sound volume and vibration.
 
 ### Files it reads
 
 The game needs these files from your copy: `GLOBAL.BSA`, `ACD.EXE` (or the floppy version's `A.EXE`), `PAL.COL`,
 `TEMPLATE.DAT`, `QUESTION.TXT`, `CITYDATA.65`, `SPELLSG.65`, and a font (`ARENAFNT.DAT` or `FONT_A.DAT`).
 The monsters' and weapons' stats come from the game's program, `ACD.EXE` or `A.EXE`, which the remake unpacks in
-memory; the pictures, animations and sounds come from `GLOBAL.BSA`. Loose files take priority over the copies inside
-`GLOBAL.BSA`, as in the original. Saves and other files a played
-copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`, `SOUND.CFG`, `VISION.EMS`) are ignored.
+memory; the pictures, animations and sounds come from `GLOBAL.BSA`. Character creation reads its questions, classes,
+names and words from `QUESTION.TXT`, `CLASSES.DAT`, `NAMECHNK.DAT` and the game's program, the map of Tamriel from
+`TAMRIEL.MNU`, and the faces, clothes and armour of the paper doll from `GLOBAL.BSA`; without them it offers three
+classes of its own. Loose files take priority over the copies inside `GLOBAL.BSA`, as in the original. Saves and other
+files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`, `SOUND.CFG`, `VISION.EMS`) are ignored.
 
 ## How it works
 
 | Path | What it does |
 |---|---|
-| `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, CIF and CFA animations, VOC sounds, MIF maps, INF level definitions, the game's program (unpacking it and reading the creature and weapon tables), and the LZSS and LZHUF decompressors. No browser or Three.js code. |
+| `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, CIF and CFA animations, VOC sounds, MIF maps, INF level definitions, the game's program (unpacking it and reading the creature, weapon and class tables and the character creation words), the class questions and name pieces, and the LZSS and LZHUF decompressors. No browser or Three.js code. |
 | `src/data/` | Finding and reading the player's `ARENA` folder, and checking the required files. |
-| `src/game/` | The level model built from a MIF map and its INF file, movement and collision, the monsters, combat, items, the quest, what the player has explored, and the game loop. |
+| `src/game/` | The level model built from a MIF map and its INF file, movement and collision, the character and what their class and attributes do, the monsters, combat, the inventory, the quest, what the player has explored, and the game loop. |
 | `src/audio/` | Arena's sound effects, played through the Web Audio API so each comes from where it happens. |
 | `src/input/` | Controllers, read through the browser's Gamepad API. |
-| `src/ui/` | The Skyrim-style menu and HUD: moving through the menu, the compass, the minimap, button prompts and the settings. |
-| `src/render/` | Turning a level into Three.js meshes and textures, the creatures, the weapon in hand, the 3D map, and the stand-in hall shown behind the menu, whose textures the remake draws itself. |
+| `src/ui/` | The Skyrim-style menu and HUD: moving through the menu, character creation, the menus over the game, the compass, the minimap, button prompts and the settings. |
+| `src/render/` | Turning a level into Three.js meshes and textures, the creatures, the weapon in hand, the 3D map, the paper doll and item pictures, and the stand-in hall shown behind the menu, whose textures the remake draws itself. |
 | `electron/` | The desktop app: a window that shows the built game and can read the `ARENA` folder you pick, and nothing else on your computer. |
 | `scripts/` | Tools for working on the remake: redrawing the app icon, saving the game's images as PNGs, and taking the screenshots. |
 | `tests/` | Unit tests. `tests/helpers/encode.ts` builds fake archives, maps and compressed data, so the tests never need the real game files. |
@@ -142,7 +163,7 @@ npm run app         # build, then open the desktop app
 npm run dist        # build the desktop app for this computer into release/
 npx tsx scripts/icon.ts   # redraw the app icon, build/icon.png
 npx tsx scripts/inspect.ts <ARENA folder> <out dir> WALLA.SET TITLE.IMG   # save images as PNGs to check the decoders
-npm run screenshots -- <ARENA folder>   # retake the screenshots in docs/screenshots (then npm run build)
+npm run screenshots -- <ARENA folder>   # retake the screenshots in docs/screenshots, keeping the old ones for the gallery (then npm run build)
 ```
 
 Every release is logged in [CHANGELOG.md](CHANGELOG.md). Releases are built on GitHub by

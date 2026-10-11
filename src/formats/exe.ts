@@ -21,8 +21,16 @@
  *   -0x075 u8   damage, lowest and highest
  * Weapons: 18 names ("Staff", "Dagger", ...), then one byte each for one or
  * two hands; the damage pairs end right where "of Strength" (the first
- * enchantment name) begins.
+ * enchantment name) begins. In the CD version 72 bytes sit between the two:
+ * 18 u16 weights in 1/256 kg, 18 bytes of prices, 18 more (unused here) and
+ * 3 bytes; the weights and prices are read only when that is so.
+ *
+ * The character tables (classes, races, creation texts) are in classes.ts.
  */
+import { readCharacterTables, type CharacterTables } from './classes';
+import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
+
+export { ExeLayoutError };
 
 export interface CreatureInfo {
   /** e.g. "Goblin". */
@@ -52,12 +60,18 @@ export interface WeaponInfo {
   name: string;
   damage: [number, number];
   twoHanded: boolean;
+  /** Kilograms, when the program says. */
+  weight?: number;
+  /** The game's price, when the program says. */
+  price?: number;
 }
 
 export interface ExeData {
   /** Indexed like the levels' creature items: *ITEM 32 is creatures[0]. */
   creatures: CreatureInfo[];
   weapons: WeaponInfo[];
+  /** Classes, races and the words of character creation; missing when they could not be read. */
+  character?: CharacterTables;
 }
 
 /** Creatures that can appear in levels; the final boss is left out. */
@@ -65,10 +79,16 @@ const CREATURES = 23;
 const TABLE_ENTRIES = 24;
 const WEAPONS = 18;
 
-export class ExeLayoutError extends Error {}
-
 export function readExeData(image: Uint8Array): ExeData {
-  return { creatures: readCreatures(image), weapons: readWeapons(image) };
+  const data: ExeData = { creatures: readCreatures(image), weapons: readWeapons(image) };
+  try {
+    data.character = readCharacterTables(image);
+  } catch (err) {
+    // The dungeons don't need them: character creation falls back to the remake's own.
+    if (!(err instanceof ExeLayoutError)) throw err;
+    console.warn('Could not read the class tables:', err.message);
+  }
+  return data;
 }
 
 export function readCreatures(image: Uint8Array): CreatureInfo[] {
@@ -133,37 +153,25 @@ export function readWeapons(image: Uint8Array): WeaponInfo[] {
   const enchantment = find(image, 'of Strength\0', 'weapon damage', end);
   const damageStart = enchantment - WEAPONS * 2;
   if (damageStart < end + WEAPONS || enchantment - end > 512) throw new ExeLayoutError('weapon damage is missing');
-  return names.map((name, i) => {
+  // Weights and prices, where the CD version keeps them.
+  const extras = enchantment - end === WEAPONS * 7 + 3;
+  const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
+  const weapons = names.map((name, i): WeaponInfo => {
     const damage: [number, number] = [image[damageStart + i * 2], image[damageStart + i * 2 + 1]];
     const hands = image[end + i];
     if (damage[0] < 1 || damage[0] > damage[1] || (hands !== 1 && hands !== 2)) {
       throw new ExeLayoutError(`weapon ${i} (${name}) has implausible stats`);
     }
-    return { name, damage, twoHanded: hands === 2 };
+    const weapon: WeaponInfo = { name, damage, twoHanded: hands === 2 };
+    if (extras) {
+      weapon.weight = view.getUint16(end + WEAPONS + i * 2, true) / 256;
+      weapon.price = image[end + WEAPONS * 3 + i];
+    }
+    return weapon;
   });
-}
-
-function find(image: Uint8Array, text: string, what: string, from = 0): number {
-  const first = text.charCodeAt(0);
-  outer: for (let i = image.indexOf(first, from); i !== -1; i = image.indexOf(first, i + 1)) {
-    for (let k = 1; k < text.length; k++) if (image[i + k] !== text.charCodeAt(k)) continue outer;
-    return i;
+  // Only trusted when every weight and price is believable.
+  if (extras && !weapons.every((w) => w.weight! > 0 && w.weight! <= 60 && w.price! > 0)) {
+    for (const w of weapons) delete w.weight, delete w.price;
   }
-  throw new ExeLayoutError(`could not find the ${what}`);
-}
-
-function cString(image: Uint8Array, p: number): string {
-  let s = '';
-  while (p < image.length && image[p] !== 0 && s.length < 256) s += String.fromCharCode(image[p++]);
-  return s;
-}
-
-function stringsAt(image: Uint8Array, p: number, count: number): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    const s = cString(image, p);
-    out.push(s);
-    p += s.length + 1;
-  }
-  return out;
+  return weapons;
 }

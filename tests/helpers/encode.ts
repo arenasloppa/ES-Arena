@@ -228,9 +228,25 @@ export interface FakeCreature {
   noCorpse?: boolean;
 }
 
-/** An unpacked-program image with creature and weapon tables laid out like the game's (made-up values). */
-export function makeExeImage(creatures: FakeCreature[], sounds: string[], weapons: Array<{ name: string; damage: [number, number]; hands: 1 | 2 }>): Uint8Array {
+export interface FakeWeapon {
+  name: string;
+  damage: [number, number];
+  hands: 1 | 2;
+  /** Kilograms and price, laid out as the CD version keeps them when every weapon has both. */
+  weight?: number;
+  price?: number;
+}
+
+/**
+ * An unpacked-program image with creature and weapon tables laid out like
+ * the game's (made-up values), followed by `more` (such as
+ * makeCharacterTables()).
+ */
+export function makeExeImage(creatures: FakeCreature[], sounds: string[], weapons: FakeWeapon[], more: number[] = []): Uint8Array {
   const zs = (list: string[]) => list.flatMap((s) => [...ascii(s), 0]);
+  const extras = weapons.every((w) => w.weight !== undefined && w.price !== undefined)
+    ? [...weapons.flatMap((w) => u16(Math.round(w.weight! * 256))), ...weapons.map((w) => w.price!), ...new Array(weapons.length).fill(0), 9, 9, 9]
+    : [9, 9, 9];
   const tables = new Array(0x20d).fill(0);
   const put = (back: number, bytes: number[]) => tables.splice(0x20d - back, bytes.length, ...bytes);
   const all = creatures.concat(new Array(24 - creatures.length).fill(creatures[creatures.length - 1]));
@@ -249,14 +265,91 @@ export function makeExeImage(creatures: FakeCreature[], sounds: string[], weapon
     ...zs(['Mage']),
     ...zs(weapons.map((w) => w.name)),
     ...weapons.map((w) => w.hands),
-    9, 9, 9,
+    ...extras,
     ...weapons.flatMap((w) => w.damage),
     ...zs(['of Strength']),
     ...tables,
     ...zs(all.map((c) => `${c.anim}@.cfa`)),
     ...zs(sounds),
     ...zs(['dither.img']),
+    ...more,
   ]);
+}
+
+export interface FakeClass {
+  name: string;
+  experience: number;
+  healthDie: number;
+  /** 0x20 spellcaster, 0x40 lands critical hits, 0x80 picks locks. */
+  flags: number;
+  /** Weapons it may use, by number; undefined for any. */
+  weapons?: number[];
+  /** Shields it may carry, 7 (buckler) to 10 (tower). */
+  shields: number[];
+  /** Heaviest armour: 0 plate, 1 chain, 2 leather, 3 none. */
+  armour: number;
+}
+
+export interface FakeCharacterTables {
+  /** Eighteen; the first two must be Mage and Spellsword, which the reader looks for. */
+  classes: FakeClass[];
+  attributes: string[];
+  /** Eight; the first two provinces must be High Rock and Hammerfell. */
+  races: Array<{ name: string; plural: string; province: string }>;
+  /** Twelve messages (the first starting "How do you wish"), a phrase per class and a closing question; left out when undefined. */
+  texts?: { messages: string[]; phrases: string[]; closing: string };
+  /** Leaves out the tables of what each class may use. */
+  noEquipment?: boolean;
+}
+
+/** Bytes laid out like the game's character tables (see src/formats/classes.ts), for makeExeImage's `more`. */
+export function makeCharacterTables(t: FakeCharacterTables): number[] {
+  const zs = (list: string[]) => list.flatMap((s) => [...ascii(s), 0]);
+  const names = t.classes.map((c) => c.name);
+  const out: number[] = [
+    ...zs(['filler']),
+    ...zs(names),
+    ...zs(['BattleMage']),
+    ...t.classes.flatMap((c) => u16(c.experience)),
+    ...zs(['filler']),
+    ...t.classes.map((c, i) => c.flags | i),
+    ...zs(names),
+    ...names.map((_, i) => (i * 5) % names.length),
+    ...zs(t.attributes),
+    ...zs(t.races.map((r) => r.plural)),
+    ...zs(t.races.map((r) => r.name)),
+    ...t.classes.map((c) => c.healthDie),
+    ...zs(['filler']),
+    ...zs(t.races.map((r) => r.province)),
+    ...zs(['filler']),
+  ];
+  if (!t.noEquipment) {
+    // u16 pointers to lists ending in 0xff, counted from a data segment that starts 0x100 bytes before these bytes.
+    const lists = (sets: Array<number[] | undefined>, at: number) => {
+      const pointers: number[] = [];
+      const bytes: number[] = [];
+      const shared = new Map<string, number>();
+      for (const set of sets) {
+        if (!set) {
+          pointers.push(0);
+          continue;
+        }
+        const key = set.join(',');
+        if (!shared.has(key)) {
+          shared.set(key, 0x100 + at + sets.length * 2 + bytes.length);
+          bytes.push(...set, 0xff);
+        }
+        pointers.push(shared.get(key)!);
+      }
+      return [...pointers.flatMap(u16), ...bytes];
+    };
+    out.push(...zs(['%ss cannot equip this item, sorry.', 'Another message.']));
+    out.push(...lists(t.classes.map((c) => c.weapons), out.length));
+    out.push(...lists(t.classes.map((c) => (c.shields.length ? c.shields : undefined)), out.length));
+    out.push(...t.classes.map((c) => c.armour), ...zs(['Green', 'Blue']));
+  }
+  if (t.texts) out.push(...zs([...t.texts.messages, ...t.texts.phrases, t.texts.closing]));
+  return out;
 }
 
 // ---- CFA, CIF and VOC ----

@@ -5,8 +5,10 @@
  * Damage, health and levels come from the game's own tables (see
  * formats/exe.ts). How often blows land is the remake's own rule, kept
  * simple in the spirit of Arena: the higher level side hits more often.
- * The player's swings always connect, as in Skyrim.
+ * The player's swings always connect, as in Skyrim. What the character's
+ * class and attributes add is worked out in character.ts.
  */
+import type { ClassInfo } from '../formats/classes';
 
 export type Random = () => number;
 
@@ -15,9 +17,9 @@ export function roll(random: Random, min: number, max: number): number {
   return min + Math.floor(random() * (max - min + 1));
 }
 
-/** Chance that a creature's blow lands on the player. */
-export function creatureHitChance(creatureLevel: number, playerLevel: number): number {
-  return Math.min(0.9, Math.max(0.2, 0.55 + 0.05 * (creatureLevel - playerLevel)));
+/** Chance that a creature's blow lands on the player, less the player's knack for dodging. */
+export function creatureHitChance(creatureLevel: number, playerLevel: number, dodge = 0): number {
+  return Math.min(0.9, Math.max(0.2, 0.55 + 0.05 * (creatureLevel - playerLevel) - dodge));
 }
 
 export interface Weapon {
@@ -48,19 +50,80 @@ export interface PlayerStats {
   weapon: Weapon;
 }
 
+/** What the player's character brings to a fight; see character.ts. */
+export interface Hero {
+  /** The class, for what it may use; none means anything goes. */
+  cls?: ClassInfo;
+  /** Health and stamina at level 1. */
+  health: number;
+  stamina: number;
+  /** Each level adds 1 to healthDie health, plus healthBonus (but always at least 1). */
+  healthDie: number;
+  healthBonus: number;
+  /** Experience needed for level 2; each level after needs twice as much again. */
+  experience: number;
+  /** Added to every blow. */
+  damageBonus: number;
+  /** Taken off creatures' chance to land a blow. */
+  dodge: number;
+  /** Multiplies walking and running speed. */
+  pace: number;
+  /** Multiplies how fast stamina comes back. */
+  recovery: number;
+  /** Chance that a blow is a critical hit, doing double damage. */
+  critical: number;
+  /** Chance to pick an easy lock; 0 for classes that can't. */
+  lockpicking: number;
+  /** Multiplies the gold found. */
+  fortune: number;
+  /** Kilograms that can be carried before the player is too laden to run. */
+  carry: number;
+}
+
+/** The player without a character of their own: no class, and nothing added or taken away. */
+export const DEFAULT_HERO: Hero = {
+  health: 30,
+  stamina: 100,
+  healthDie: 5,
+  healthBonus: 3,
+  experience: 1000,
+  damageBonus: 0,
+  dodge: 0,
+  pace: 1,
+  recovery: 1,
+  critical: 0,
+  lockpicking: 0,
+  fortune: 1,
+  carry: 200,
+};
+
 export const POTION_HEALS = 25;
 const STAMINA_REGEN = 22; // per second, after a short pause
 const STAMINA_PAUSE = 0.8;
 const HEALTH_REGEN = 0.25; // per second, out of a fight
 const HEALTH_PAUSE = 6;
 
-export function newPlayerStats(weapon: Weapon): PlayerStats {
-  return { level: 1, experience: 0, health: 30, maxHealth: 30, stamina: 100, maxStamina: 100, gold: 0, potions: 0, keys: new Set(), weapon };
+export function newPlayerStats(weapon: Weapon, hero: Hero = DEFAULT_HERO): PlayerStats {
+  return {
+    level: 1,
+    experience: 0,
+    health: hero.health,
+    maxHealth: hero.health,
+    stamina: hero.stamina,
+    maxStamina: hero.stamina,
+    gold: 0,
+    potions: 0,
+    keys: new Set(),
+    weapon,
+  };
 }
 
-/** Experience needed to reach a level: 1,000 for level 2, 3,000 for 3, 6,000 for 4 and so on. */
-export function experienceFor(level: number): number {
-  return level <= 1 ? 0 : 500 * level * (level - 1);
+/**
+ * Experience needed to reach a level, as in Arena each level needs twice
+ * the last: with 1,000 for level 2, 3,000 for 3, 7,000 for 4 and so on.
+ */
+export function experienceFor(level: number, base = DEFAULT_HERO.experience): number {
+  return level <= 1 ? 0 : base * (2 ** (level - 1) - 1);
 }
 
 /**
@@ -68,13 +131,13 @@ export function experienceFor(level: number): number {
  * returns how many levels were gained. Each level adds health and stamina
  * and refills both.
  */
-export function gainExperience(p: PlayerStats, amount: number, random: Random): number {
+export function gainExperience(p: PlayerStats, amount: number, random: Random, hero: Hero = DEFAULT_HERO): number {
   p.experience += amount;
   let gained = 0;
-  while (p.experience >= experienceFor(p.level + 1)) {
+  while (p.experience >= experienceFor(p.level + 1, hero.experience)) {
     p.level++;
     gained++;
-    p.maxHealth += roll(random, 4, 8);
+    p.maxHealth += Math.max(1, roll(random, 1, hero.healthDie) + hero.healthBonus);
     p.maxStamina += 10;
     p.health = p.maxHealth;
     p.stamina = p.maxStamina;
@@ -93,8 +156,8 @@ export function spendStamina(p: PlayerStats, amount: number): boolean {
  * Recovers stamina once the player has stopped using it for a moment, and
  * slowly heals when nothing has hurt them recently.
  */
-export function recover(p: PlayerStats, dt: number, sinceStaminaUse: number, sinceHurt: number): void {
-  if (sinceStaminaUse > STAMINA_PAUSE) p.stamina = Math.min(p.maxStamina, p.stamina + STAMINA_REGEN * dt);
+export function recover(p: PlayerStats, dt: number, sinceStaminaUse: number, sinceHurt: number, recovery = 1): void {
+  if (sinceStaminaUse > STAMINA_PAUSE) p.stamina = Math.min(p.maxStamina, p.stamina + STAMINA_REGEN * recovery * dt);
   if (sinceHurt > HEALTH_PAUSE && p.health > 0) p.health = Math.min(p.maxHealth, p.health + HEALTH_REGEN * dt);
 }
 

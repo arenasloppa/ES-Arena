@@ -5,6 +5,20 @@ Every release of ES Arena, newest first. Each one is on the
 
 ## Unreleased
 
+## 0.4.0 (2026-10-11)
+
+Character creation as in Arena, and Skyrim's menus for your items, favourites and character.
+
+- Make your character as Arena does, in its own words: answer ten questions or choose from the eighteen classes, pick a gender and a name (or a random one made from the game's names), choose your race by its province on the map of Tamriel, share out bonus points among your rolled attributes, and pick one of ten faces. The game remembers your character, and New character in the menu makes another.
+- Your class and attributes now count. The class sets your health each level, the experience you need, and which armour, shields and weapons you can use. Thieves can pick locks, and some classes land critical strikes. Strength adds to your blows and to what you can carry, Endurance to your health, Speed to your pace, Agility to dodging, Willpower to how fast your stamina comes back, and Luck to the gold you find.
+- You start with your class's own weapon and armour, and find armour and shields as well as weapons in chests and on bodies. The armour you wear takes blows down. Everything has a weight, and carrying more than your Strength allows stops you running.
+- Tab, or B on a controller, opens Skyrim's menu of menus: your character above, your items to the left, magic to the right and the map below.
+- The item menu lists what you carry by kind, with the game's picture of the picked piece and its armour or damage, weight and value. Equip it or take it off, drink a potion, make it a favourite, or drop it. I opens it straight away.
+- The character sheet shows Arena's paper doll wearing what you wear, beside your attributes, health, damage and experience.
+- Favourites, as in Skyrim: Q, or up or down on the D-pad, lists them down the left of the screen. Put any favourite on a number key from 1 to 8, or on the D-pad's left or right, to use it mid-fight. The healing potion starts on 1, so 1, or left on the D-pad, now drinks one.
+- The pause menu says who you are playing, and the menus fit on smaller windows such as 1280x720.
+- A [gallery](https://github.com/arenasloppa/ES-Arena/blob/main/docs/gallery.md) keeps the screenshots of earlier versions.
+
 ## 0.3.1 (2026-10-11)
 
 Fixes for the first dungeon, a plainer minimap and a Ko-fi button.

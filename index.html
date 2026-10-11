@@ -47,15 +47,15 @@
         <p class="tip"><span data-glyph="activate"></span><span>Use, take, open</span></p>
         <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
         <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
-        <p class="tip"><span data-glyph="potion"></span><span>Drink a healing potion</span></p>
-        <p class="tip"><span data-glyph="map"></span><span>Map</span></p>
-        <p class="tip"><span data-glyph="menu"></span><span>Menu</span></p>
+        <p class="tip"><span data-glyph="favourites"></span><span>Favourites</span></p>
+        <p class="tip"><span data-glyph="hotkey"></span><span>Use a hotkeyed favourite</span></p>
+        <p class="tip"><span data-glyph="tween"></span><span>Character, items, magic, map</span></p>
+        <p class="tip"><span data-glyph="menu"></span><span>Pause menu</span></p>
       </aside>
       <div id="corner">
         <div id="notes" role="status" aria-live="polite"></div>
       </div>
       <p id="message" role="status" aria-live="polite"></p>
-      <div id="quick" hidden><span data-glyph="potion"></span><span>Healing potions</span><span id="quick-count"></span></div>
       <div id="vitals" aria-hidden="true">
         <div class="bar" id="health"><div class="bar-fill"></div></div>
         <div class="bar" id="stamina"><div class="bar-fill"></div></div>
@@ -75,6 +75,8 @@
         <span class="hint"><span data-glyph="mapClose"></span>Close</span>
       </footer>
     </div>
+
+    <div id="game-menu" hidden></div>
 
     <div id="fade" aria-hidden="true"></div>
 
@@ -109,10 +111,12 @@
       </section>
 
       <section id="screen-play" class="screen" aria-label="Main menu" hidden>
+        <p id="who" class="who" hidden></p>
         <nav class="options">
           <button id="resume" class="option" hidden>Resume</button>
           <button id="open-map" class="option" hidden>Map</button>
           <button id="play" class="option">Enter the dungeon</button>
+          <button id="new-character" class="option" hidden>New character</button>
           <div class="option-row">
             <span class="row-label" id="map-label">Location</span>
             <span class="row-value">
@@ -126,6 +130,8 @@
           <button class="option quit" hidden>Quit</button>
         </nav>
       </section>
+
+      <section id="screen-create" class="screen create" aria-label="Make your character" hidden></section>
 
       <section id="screen-controls" class="screen" aria-label="Controls" hidden>
         <h2>Controls</h2>

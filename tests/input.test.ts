@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BUTTON, GamepadInput, Repeater, deadzone, padStyle, type ButtonName } from '../src/input/gamepad';
+import { BINDINGS, GAME_ACTIONS, type Action } from '../src/ui/controls';
 import { compassHeading } from '../src/ui/hud';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, stepSetting } from '../src/ui/settings';
 
@@ -185,5 +186,22 @@ describe('settings', () => {
     expect(stepSetting({ ...s, volume: 1 }, 'volume', 1, true)).toBe(0);
     expect(stepSetting(s, 'invertLook', 1, false)).toBe(true);
     expect(stepSetting(s, 'vibration', -1, false)).toBe(false);
+  });
+});
+
+describe('controls', () => {
+  const distinct = (actions: Action[]) => {
+    const keys = actions.flatMap((a) => BINDINGS[a].keys);
+    const buttons = actions.flatMap((a) => BINDINGS[a].pad);
+    return [new Set(keys).size === keys.length, new Set(buttons).size === buttons.length];
+  };
+
+  it('gives each action in the game its own key and its own button', () => {
+    expect(distinct(GAME_ACTIONS)).toEqual([true, true]);
+    expect(GAME_ACTIONS.filter((a) => !BINDINGS[a].keys.length)).toEqual([]);
+  });
+
+  it('gives each thing to do in the item menus its own key and its own button', () => {
+    expect(distinct(['use', 'favourite', 'drop', 'setHotkey', 'back'])).toEqual([true, true]);
   });
 });

@@ -9,20 +9,23 @@
  * and does double damage, and every swing hits whatever is in front within
  * reach. Blocking takes most of the sting out of blows from the front for
  * stamina, and attacking while blocking bashes. Striking a creature that
- * has not noticed the player sneaking does triple damage. Monster stats,
- * weapon damage and sounds come from the player's own game; the loot rules
- * are the remake's own.
+ * has not noticed the player sneaking does triple damage. Worn armour takes
+ * blows down, and the player's class and attributes (the Hero) change how
+ * hard they hit, how often they are hit, how fast they move and more.
+ * Monster stats, weapon damage and sounds come from the player's own game;
+ * the loot rules are the remake's own.
  */
-import type { ExeData } from '../formats/exe';
+import type { ExeData, WeaponInfo } from '../formats/exe';
 import {
   bashChance,
+  DEFAULT_HERO,
   drinkPotion,
   gainExperience,
   newPlayerStats,
   recover,
   roll,
   spendStamina,
-  weaponCif,
+  type Hero,
   type PlayerStats,
   type Random,
   type Weapon,
@@ -40,6 +43,7 @@ import {
   type CreatureWorld,
 } from './creatures';
 import { Exploration } from './explore';
+import { armourReduce, Inventory, itemKey, POTION, randomGear, startingGear, weaponOf, type Item, type NewItem } from './items';
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
 import type { Level, LevelItem } from './level';
@@ -75,6 +79,20 @@ export interface Swing {
 }
 
 export type TargetKind = 'door' | 'exit' | 'item' | 'body';
+
+/** One line in the item menus: a piece of gear, the healing potions, or the keys. */
+export interface MenuEntry {
+  /** What use(), favourite() and setHotkey() take. */
+  key: string;
+  name: string;
+  category: 'weapons' | 'apparel' | 'potions' | 'misc';
+  count: number;
+  item?: Item;
+  equipped: boolean;
+  favourite: boolean;
+  /** The number key it is on, 0 for 1. */
+  hotkey?: number;
+}
 
 /** Something in front of the player that they can use. */
 export interface Target {
@@ -160,14 +178,16 @@ const ITEM_REACH = 1.6;
 const ITEM_ARC = Math.PI / 6;
 const LOOK_EVERY = 0.15;
 const STRIDE = 1.1;
-/** Arena's dungeons have bows, but no way to shoot them here yet. */
-const BOWS = new Set(['Short Bow', 'Long Bow']);
+/** Seconds between tries at picking the same lock. */
+const PICK_TIME = 1.2;
 /**
- * The weapon to start with. Its damage comes from the game's weapon table;
- * this stand-in is only used when the table can't be read, and then the
- * dungeon has no monsters either.
+ * The weapon to fight with when the game's weapon table can't be read (and
+ * then the dungeon has no monsters either). Its numbers are the remake's own.
  */
 const DEFAULT_WEAPON: Weapon = { name: 'Shortsword', damage: [2, 6], cif: 'SWORD.CIF' };
+/** A character of their own starts with these, as well as their gear. */
+const START_POTIONS = 1;
+const START_GOLD = 25;
 
 export class Dungeon {
   readonly player: PlayerState;
@@ -194,9 +214,12 @@ export class Dungeon {
   running = false;
   /** Objectives toward the way out; undefined in a dungeon without one. */
   readonly quest?: Quest;
+  /** The gear the player carries and wears. */
+  readonly inventory: Inventory;
 
-  private readonly weapons: Weapon[];
+  private readonly weaponTable: WeaponInfo[];
   private readonly unlocked = new Set<number>();
+  private readonly pickedAt = new Map<number, number>();
   private readonly lockTried = new Set<number>();
   private readonly shownTexts = new Set<number>();
   private readonly searchedBodies = new Set<number>();
@@ -214,17 +237,25 @@ export class Dungeon {
   private lastSwingEnd = -Infinity;
   private moving = false;
   private cleared = false;
+  private sprintHeld = false;
 
+  /** `hero` is what the player's character brings; without one, the player has no class and plain numbers. */
   constructor(
     readonly level: Level,
     tables: ExeData | undefined,
     private readonly random: Random = Math.random,
+    readonly hero: Hero = DEFAULT_HERO,
   ) {
     this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0 };
-    this.weapons = (tables?.weapons ?? [])
-      .map((w, i) => ({ name: w.name, damage: w.damage, cif: weaponCif(i) ?? 'SWORD.CIF' }))
-      .filter((w) => !BOWS.has(w.name));
-    this.stats = newPlayerStats(this.weapons.find((w) => w.name === DEFAULT_WEAPON.name) ?? DEFAULT_WEAPON);
+    this.weaponTable = tables?.weapons ?? [];
+    this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
+    for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
+    const held = this.inventory.weapon;
+    this.stats = newPlayerStats(held ? weaponOf(held) : DEFAULT_WEAPON, hero);
+    if (hero.cls) {
+      this.stats.potions = START_POTIONS;
+      this.stats.gold = START_GOLD;
+    }
     this.items = level.items.map((item, id) => ({ ...item, id }));
     level.cells.forEach((c, i) => {
       if (c.kind === 'door') this.doors.set(i, { open: 0, target: 0 });
@@ -240,7 +271,7 @@ export class Dungeon {
     this.world = {
       level,
       openDoors: this.openDoors,
-      player: { x: this.player.x, y: this.player.y, level: this.stats.level },
+      player: { x: this.player.x, y: this.player.y, level: this.stats.level, dodge: hero.dodge },
       sneaking: false,
       now: 0,
       random,
@@ -259,7 +290,7 @@ export class Dungeon {
       this.updateCell();
       // A raised guard holds stamina from coming back.
       if (this.blocking) this.sinceStamina = 0;
-      recover(this.stats, dt, this.sinceStamina, this.sinceHurt);
+      recover(this.stats, dt, this.sinceStamina, this.sinceHurt, this.hero.recovery);
       this.sinceStamina += dt;
       this.sinceHurt += dt;
       this.lookTimer -= dt;
@@ -302,7 +333,11 @@ export class Dungeon {
     let forward = clamp(input.forward, -1, 1);
     let strafe = clamp(input.strafe, -1, 1);
     const moving = forward !== 0 || strafe !== 0;
-    let run = input.sprint && moving && this.stats.stamina > 0 && !this.blocking;
+    // Too laden to run, as in Skyrim.
+    const laden = this.inventory.weight(this.stats.potions) > this.hero.carry;
+    if (laden && input.sprint && moving && !this.sprintHeld) this.events.push({ type: 'notify', text: 'You are carrying too much to run' });
+    this.sprintHeld = input.sprint && moving;
+    let run = input.sprint && moving && this.stats.stamina > 0 && !this.blocking && !laden;
     if (run) {
       spendStamina(this.stats, SPRINT_STAMINA * dt);
       this.sinceStamina = 0;
@@ -319,7 +354,7 @@ export class Dungeon {
     const bodies: Body[] = this.creatures.filter(isAlive).map((c) => ({ x: c.x, y: c.y, r: CREATURE_RADIUS }));
     const x0 = p.x;
     const y0 = p.y;
-    step(this.level, p, { forward, strafe, run }, dt, this.openDoors, bodies);
+    step(this.level, p, { forward, strafe, run, pace: this.hero.pace }, dt, this.openDoors, bodies);
     const moved = Math.hypot(p.x - x0, p.y - y0);
     this.moving = moved > 0;
     this.running = run && this.moving;
@@ -398,6 +433,7 @@ export class Dungeon {
       this.events.push({ type: 'blocked', damage }, { type: 'sound', name: 'CLANK.VOC', volume: 0.8 });
       if (damage <= 0) return;
     }
+    damage = armourReduce(damage, this.inventory.armourRating());
     this.stats.health = Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
     this.events.push({ type: 'hurt', damage }, { type: 'sound', name: 'UHIT.VOC' });
@@ -481,7 +517,11 @@ export class Dungeon {
       return;
     }
     if (target) {
-      let damage = roll(this.random, ...this.stats.weapon.damage) * (s.power ? 2 : 1);
+      let damage = Math.max(1, roll(this.random, ...this.stats.weapon.damage) + this.hero.damageBonus) * (s.power ? 2 : 1);
+      if (this.hero.critical > 0 && this.random() < this.hero.critical) {
+        damage *= 2;
+        this.events.push({ type: 'notify', text: 'Critical strike!' });
+      }
       if (this.sneaking && isCalm(target)) {
         damage *= SNEAK_ATTACK;
         this.events.push({ type: 'notify', text: `Sneak attack for ${SNEAK_ATTACK}x damage!` });
@@ -508,7 +548,7 @@ export class Dungeon {
     this.events.push({ type: 'sound', name: 'BODYFALL.VOC', at: { x: c.x, y: c.y } });
     const s = this.stats;
     const before = { health: s.maxHealth, stamina: s.maxStamina };
-    if (gainExperience(s, c.info.experience + c.info.experiencePerHealth * c.maxHealth, this.random)) {
+    if (gainExperience(s, c.info.experience + c.info.experiencePerHealth * c.maxHealth, this.random, this.hero)) {
       this.events.push(
         { type: 'levelUp', level: s.level, health: s.maxHealth - before.health, stamina: s.maxStamina - before.stamina },
         { type: 'sound', name: 'FANFARE1.VOC' },
@@ -578,7 +618,15 @@ export class Dungeon {
     if (door.target === 1) return { kind: 'door', id: cell, name, verb: 'Close' };
     if (!this.locked(cell)) return { kind: 'door', id: cell, name, verb: 'Open' };
     if (this.stats.keys.has(this.level.locks.get(cell)!)) return { kind: 'door', id: cell, name, verb: 'Unlock' };
+    if (this.hero.lockpicking > 0) return { kind: 'door', id: cell, name, verb: 'Pick lock', note: 'Locked' };
     return { kind: 'door', id: cell, name, verb: 'Open', note: 'Locked' };
+  }
+
+  /** Chance of picking a lock: thieves get better with each level, and harder locks take more. */
+  pickChance(cell: number): number {
+    if (this.hero.lockpicking <= 0) return 0;
+    const chance = this.hero.lockpicking + 0.05 * (this.stats.level - 1) - (this.level.locks.get(cell) ?? 0) / 100;
+    return Math.min(0.95, Math.max(0.05, chance));
   }
 
   activate(): void {
@@ -611,7 +659,17 @@ export class Dungeon {
       return;
     }
     if (this.locked(cell)) {
-      if (!this.stats.keys.has(this.level.locks.get(cell)!)) {
+      if (!this.stats.keys.has(this.level.locks.get(cell)!) && this.hero.lockpicking > 0) {
+        if (this.time - (this.pickedAt.get(cell) ?? -Infinity) < PICK_TIME) return;
+        this.pickedAt.set(cell, this.time);
+        this.events.push({ type: 'sound', name: 'LOCK.VOC', at });
+        if (this.random() >= this.pickChance(cell)) {
+          this.events.push({ type: 'notify', text: 'You failed to pick the lock' });
+          return;
+        }
+        this.unlocked.add(cell);
+        this.events.push({ type: 'notify', text: 'You picked the lock' });
+      } else if (!this.stats.keys.has(this.level.locks.get(cell)!)) {
         this.events.push({ type: 'sound', name: 'LOCK.VOC', at });
         this.events.push({
           type: 'notify',
@@ -619,9 +677,10 @@ export class Dungeon {
         });
         this.lockTried.add(cell);
         return;
+      } else {
+        this.unlocked.add(cell);
+        this.events.push({ type: 'sound', name: 'LOCK.VOC', at }, { type: 'notify', text: 'Unlocked with the key' });
       }
-      this.unlocked.add(cell);
-      this.events.push({ type: 'sound', name: 'LOCK.VOC', at }, { type: 'notify', text: 'Unlocked with the key' });
     }
     this.openDoor(cell);
   }
@@ -648,12 +707,8 @@ export class Dungeon {
         return;
       case 'equipment': {
         item.taken = true;
-        const better = this.betterWeapon();
-        if (better && this.random() < 0.7) {
-          this.stats.weapon = better;
-          this.events.push({ type: 'sound', name: 'CLANK.VOC' });
-          notify(`${better.name} equipped`);
-        } else if (this.random() < 0.5) this.addPotion();
+        if (this.weaponTable.length && this.random() < 0.75) this.addGear(randomGear(this.weaponTable, this.stats.level, this.random));
+        else if (this.random() < 0.5) this.addPotion();
         else this.addGold(roll(this.random, 5, 25));
         return;
       }
@@ -666,6 +721,7 @@ export class Dungeon {
         item.searched = true;
         this.addGold(roll(this.random, 20, 80));
         if (this.random() < 0.4) this.addPotion();
+        if (this.weaponTable.length && this.random() < 0.3) this.addGear(randomGear(this.weaponTable, this.stats.level + 1, this.random));
         return;
     }
   }
@@ -678,6 +734,8 @@ export class Dungeon {
   }
 
   private addGold(n: number): void {
+    // Lucky characters find more.
+    n = Math.max(1, Math.round(n * this.hero.fortune));
     this.stats.gold += n;
     this.events.push({ type: 'notify', text: `${n} gold added` });
   }
@@ -687,24 +745,87 @@ export class Dungeon {
     this.events.push({ type: 'notify', text: 'Healing potion added' });
   }
 
-  /**
-   * A weapon a step or two better than the one in hand, by average damage,
-   * so the weapons found improve as the player goes.
-   */
-  private betterWeapon(): Weapon | undefined {
-    const average = (w: Weapon) => (w.damage[0] + w.damage[1]) / 2;
-    const now = average(this.stats.weapon);
-    const better = this.weapons.filter((w) => average(w) > now).sort((a, b) => average(a) - average(b));
-    return better.length ? better[Math.floor(this.random() * Math.min(3, better.length))] : undefined;
+  private addGear(gear: NewItem): void {
+    const item = this.inventory.add(gear);
+    this.events.push({ type: 'notify', text: `${item.name} added` }, { type: 'sound', name: 'CLANK.VOC', volume: 0.6 });
   }
 
-  /** Drinks a healing potion, if there is one and it would help. */
-  quaff(): void {
+  // ---- The item menus ----
+
+  /** Everything the player carries, as the item menus list it. */
+  entries(): MenuEntry[] {
+    const inv = this.inventory;
+    const entry = (key: string, name: string, category: MenuEntry['category'], count: number, item?: Item): MenuEntry => ({
+      key,
+      name,
+      category,
+      count,
+      item,
+      equipped: !!item && inv.isEquipped(item),
+      favourite: inv.isFavourite(key),
+      hotkey: inv.hotkeyOf(key),
+    });
+    const list = inv.items.map((item) => entry(itemKey(item), item.name, item.kind === 'weapon' ? 'weapons' : 'apparel', 1, item));
+    if (this.stats.potions > 0) list.push(entry(POTION, 'Healing Potion', 'potions', this.stats.potions));
+    if (this.stats.keys.size) list.push(entry('keys', 'Key', 'misc', this.stats.keys.size));
+    return list;
+  }
+
+  /**
+   * Uses an entry from the item menus: equips a piece of gear or takes it
+   * off, or drinks a healing potion. Returns what happened, to tell the
+   * player.
+   */
+  use(key: string): string | undefined {
+    if (this.outcome) return undefined;
+    if (key === POTION) {
+      if (this.stats.potions <= 0) return 'No healing potions';
+      if (this.stats.health >= this.stats.maxHealth) return 'Your health is full';
+      drinkPotion(this.stats);
+      return 'Healing potion drunk';
+    }
+    const item = this.inventory.byKey(key);
+    if (!item) return undefined;
+    const wasOn = this.inventory.isEquipped(item);
+    const result = this.inventory.toggle(item);
+    if (!result.ok) return result.message;
+    const held = this.inventory.weapon;
+    if (held) this.stats.weapon = weaponOf(held);
+    const done = wasOn ? `${item.name} removed` : `${item.name} equipped`;
+    return result.message ? `${done}. ${result.message}` : done;
+  }
+
+  /**
+   * Leaves a piece of gear behind for good, to carry less: there is no
+   * putting things down in the dungeon to pick up again yet. Returns what
+   * happened, to tell the player.
+   */
+  drop(key: string): string | undefined {
+    if (this.outcome) return undefined;
+    const item = this.inventory.byKey(key);
+    if (!item) return undefined;
+    if (item === this.inventory.weapon) return 'Equip another weapon before you drop this one';
+    this.inventory.remove(item);
+    return `${item.name} dropped`;
+  }
+
+  /** Adds the entry to the favourites or takes it off; true when it is one now. Only gear and potions can be. */
+  favourite(key: string): boolean {
+    if (key !== POTION && !this.inventory.byKey(key)) return false;
+    return this.inventory.toggleFavourite(key);
+  }
+
+  /** Puts a favourite on number key n + 1 (0 for 1). */
+  setHotkey(n: number, key: string): void {
+    if (key === POTION || this.inventory.byKey(key)) this.inventory.setHotkey(n, key);
+  }
+
+  /** Uses what is on number key n + 1 (0 for 1), with a note to say what happened. */
+  hotkey(n: number): void {
     if (this.outcome) return;
-    const notify = (text: string) => this.events.push({ type: 'notify', text });
-    if (this.stats.potions <= 0) notify('No healing potions');
-    else if (this.stats.health >= this.stats.maxHealth) notify('Your health is full');
-    else if (drinkPotion(this.stats)) notify('Healing potion drunk');
+    const key = this.inventory.hotkeys[n];
+    const text = key === undefined ? `Nothing is on ${n + 1}: choose a favourite and press ${n + 1} to put it there` : this.use(key);
+    if (text) this.events.push({ type: 'notify', text });
   }
 
   /** The door, exit or wall straight ahead within `reach`, if any. Open doors are looked through unless the player stands in one. */

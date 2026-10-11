@@ -20,6 +20,8 @@ export interface MoveInput {
   forward: number; // -1..1
   strafe: number; // -1..1, positive = right
   run: boolean;
+  /** Multiplies the speed: quicker characters move faster. */
+  pace?: number;
 }
 
 /** Something round the player can't walk through, such as a creature. */
@@ -49,7 +51,7 @@ function bumps(bodies: Body[], x0: number, y0: number, x1: number, y1: number): 
 
 /** Moves the player, sliding along walls (and around bodies) one axis at a time. */
 export function step(level: Level, p: PlayerState, input: MoveInput, dt: number, openDoors: Set<number>, bodies: Body[] = []): void {
-  const speed = WALK_SPEED * (input.run ? RUN_FACTOR : 1) * dt;
+  const speed = WALK_SPEED * (input.run ? RUN_FACTOR : 1) * (input.pace ?? 1) * dt;
   const fx = Math.cos(p.yaw);
   const fy = Math.sin(p.yaw);
   // Right-hand vector, perpendicular to forward.

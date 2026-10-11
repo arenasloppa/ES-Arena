@@ -44,8 +44,10 @@ export interface Vitals {
   maxHealth: number;
   stamina: number;
   maxStamina: number;
-  potions: number;
 }
+
+/** The menus over the game: Skyrim's menu of menus, the item and magic menus, the character sheet and the favourites. */
+export type GameMenu = 'tween' | 'items' | 'magic' | 'character' | 'favourites';
 
 /** Something shown on the compass: a creature hunting the player, or where the current objective is. */
 export interface CompassMarker {
@@ -104,11 +106,13 @@ export interface EngineOptions {
  * plays its sounds and draws it. The controls follow Skyrim's: on a
  * controller, the left stick moves, the right stick looks, RT attacks (hold
  * for a power attack), LT blocks, A uses things, Y jumps, LB sprints,
- * clicking the left stick sneaks, up on the D-pad drinks a potion, View opens
- * the map and B or Start opens the menu; on a keyboard, the left mouse button
- * attacks and the right one blocks, E uses things, Space jumps, Shift
- * sprints, C sneaks, Q drinks a potion, M opens the map and Esc or Tab opens
- * the menu.
+ * clicking the left stick sneaks, up or down on the D-pad opens the
+ * favourites and left or right uses the two favourites put there, B opens
+ * the menu of menus, View the map and Start the pause menu; on a keyboard,
+ * the left mouse button attacks and the right one blocks, E uses things,
+ * Space jumps, Shift sprints, C sneaks, Q opens the favourites and 1 to 8 use
+ * the favourites put on them, Tab opens the menu of menus, I the items, P the
+ * magic, M the map and Esc the pause menu.
  */
 export class Engine {
   private readonly scene = new THREE.Scene();
@@ -147,6 +151,8 @@ export class Engine {
   private deathFaded = false;
   private escapedAt: number | undefined;
   onPause?: () => void;
+  /** The player asked for one of the menus over the game. */
+  onMenu?: (which: GameMenu) => void;
   onDeath?: () => void;
   onEscape?: () => void;
   /** The map screen opened (true) or closed. */
@@ -290,7 +296,7 @@ export class Engine {
     const pad = this.options.pad;
     const alive = !d.outcome;
     if (pad?.connected) {
-      if (pad.take('B') || pad.take('Start')) {
+      if (pad.take('Start')) {
         this.onPause?.();
         return;
       }
@@ -299,10 +305,16 @@ export class Engine {
           this.openMap();
           return;
         }
+        const menu = pad.take('B') ? 'tween' : pad.take('Up') || pad.take('Down') ? 'favourites' : undefined;
+        if (menu) {
+          this.onMenu?.(menu);
+          return;
+        }
         if (pad.take('A')) this.activate(true);
         if (pad.take('Y')) this.startJump();
         if (pad.take('LS')) this.sneaking = !this.sneaking;
-        if (pad.take('Up')) d.quaff();
+        if (pad.take('Left')) d.hotkey(0);
+        if (pad.take('Right')) d.hotkey(1);
       }
     }
 
@@ -352,7 +364,7 @@ export class Engine {
     const hud = this.options.hud;
     if (hud) {
       const s = d.stats;
-      hud.vitals({ health: s.health, maxHealth: s.maxHealth, stamina: s.stamina, maxStamina: s.maxStamina, potions: s.potions });
+      hud.vitals({ health: s.health, maxHealth: s.maxHealth, stamina: s.stamina, maxStamina: s.maxStamina });
       hud.detection(d.sneaking ? d.detection() : undefined);
       this.showTarget();
     }
@@ -559,18 +571,26 @@ export class Engine {
       this.keys.add(e.code);
       return;
     }
-    if (e.code === 'Escape' || e.code === 'Tab') {
+    if (e.code === 'Escape') {
       e.preventDefault();
       this.onPause?.();
+      return;
+    }
+    const menu = MENU_KEYS.get(e.code);
+    if (menu) {
+      // Tab would otherwise move the focus about the page.
+      e.preventDefault();
+      if (!this.dungeon.outcome) this.onMenu?.(menu);
       return;
     }
     this.keys.add(e.code);
     if (e.code === 'Space') e.preventDefault(); // don't scroll or press a focused button
     if (e.repeat || this.dungeon.outcome) return;
-    if (e.code === 'KeyE') this.activate();
+    const hotkey = /^(?:Digit|Numpad)([1-8])$/.exec(e.code);
+    if (hotkey) this.dungeon.hotkey(Number(hotkey[1]) - 1);
+    else if (e.code === 'KeyE') this.activate();
     else if (e.code === 'Space') this.startJump();
     else if (e.code === 'KeyC') this.sneaking = !this.sneaking;
-    else if (e.code === 'KeyQ') this.dungeon.quaff();
     else if (e.code === 'KeyM') this.openMap();
   };
 
@@ -702,6 +722,14 @@ export class Engine {
     else if (this.running && !this.autopilot && !this.mapOpen && !this.dungeon.outcome) this.onPause?.();
   };
 }
+
+/** Keys that open the menus over the game, as in Skyrim. */
+const MENU_KEYS = new Map<string, GameMenu>([
+  ['Tab', 'tween'],
+  ['KeyI', 'items'],
+  ['KeyP', 'magic'],
+  ['KeyQ', 'favourites'],
+]);
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));

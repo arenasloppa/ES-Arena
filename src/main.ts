@@ -17,22 +17,27 @@ import {
 } from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
 import { SoundBank } from './audio/sound';
+import { parseClassAnswers, parseNameChunks, parseQuestions, type ClassChooser, type Question } from './formats/creation';
 import { readExeData, type ExeData } from './formats/exe';
 import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
+import { creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
 import { Dungeon } from './game/dungeon';
 import { buildLevel } from './game/level';
-import { Engine } from './game/engine';
+import { Engine, type GameMenu } from './game/engine';
 import { GamepadInput } from './input/gamepad';
 import { CreatureView } from './render/creatureView';
 import { TextureCache } from './render/textures';
 import { buildLevelScene } from './render/levelScene';
 import { MapView } from './render/mapView';
+import { Portraits } from './render/portrait';
 import { WeaponView } from './render/weaponView';
 import { backdropLevel } from './render/backdrop';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
+import { CharacterCreation } from './ui/creation';
+import { GameMenus } from './ui/gameMenus';
 import { Hud } from './ui/hud';
 import { MenuNav } from './ui/menu';
 import { Minimap } from './ui/minimap';
@@ -46,6 +51,8 @@ const checks = $<HTMLUListElement>('checks');
 const folderError = $('folder-error');
 const mapSelect = $<HTMLSelectElement>('map-select');
 const playButton = $<HTMLButtonElement>('play');
+const newCharacterButton = $<HTMLButtonElement>('new-character');
+const who = $('who');
 const resumeButton = $<HTMLButtonElement>('resume');
 const mapButton = $<HTMLButtonElement>('open-map');
 const mapScreen = $('map-screen');
@@ -62,6 +69,13 @@ let data: GameData | undefined;
 /** Creature and weapon tables from the game's program, once read; null when they could not be. */
 let tables: ExeData | null | undefined;
 let sounds: SoundBank | undefined;
+/** The paper doll and item pictures, read from the game folder. */
+let portraits: Portraits | undefined;
+/** Classes, races, questions and words for making a character, once read from the game folder. */
+let creation: Promise<CreationData> | undefined;
+let creationLoaded: CreationData | undefined;
+/** The character of the map being played. */
+let runCharacter: Character | undefined;
 /** Textures of the map being played, freed with it. */
 let textures: TextureCache | undefined;
 let engine: Engine | undefined;
@@ -74,20 +88,23 @@ const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'controls' | 'dead' | 'escaped';
+type Screen = 'folder' | 'play' | 'create' | 'controls' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
+  create: $('screen-create'),
   controls: $('screen-controls'),
   dead: $('screen-dead'),
   escaped: $('screen-escaped'),
 };
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
+const creator = new CharacterCreation(screens.create);
 
 const nav = new MenuNav(menu, pad, input, {
   back: () => {
-    if (screen === 'controls') showScreen(screenBeforeControls);
+    if (screen === 'create') creator.back();
+    else if (screen === 'controls') showScreen(screenBeforeControls);
     else if (playing()) resume();
   },
   resume: () => {
@@ -104,17 +121,25 @@ function showScreen(next: Screen) {
   nav.focusFirst();
 }
 
-/** The button hints along the bottom: Back closes the Controls screen, or returns to the game. */
+/** The button hints along the bottom: Back steps back through character creation, closes the Controls screen, or returns to the game. */
 function updateHints() {
-  $('hint-back').hidden = screen !== 'controls' && !playing();
-  $('hint-back-label').textContent = screen === 'controls' ? 'Back' : 'Resume';
-  $('hint-change').hidden = screen !== 'play' && screen !== 'controls';
+  $('hint-back').hidden = screen !== 'controls' && screen !== 'create' && !playing();
+  $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : 'Resume';
+  $('hint-change').hidden = screen !== 'play' && screen !== 'controls' && screen !== 'create';
 }
 
 function updatePlayOptions() {
   resumeButton.hidden = !playing();
   mapButton.hidden = !playing();
   playButton.textContent = playing() && mapSelect.value === engineMap ? 'Start over' : 'Enter the dungeon';
+  const saved = creationLoaded && loadCharacter(creationLoaded);
+  newCharacterButton.hidden = !saved;
+  who.hidden = !saved;
+  if (saved && creationLoaded) {
+    const race = creationLoaded.races[saved.race]?.name ?? '';
+    const cls = creationLoaded.classes[saved.cls]?.name ?? '';
+    who.textContent = `${saved.name}, ${race} ${cls}`;
+  }
   updateHints();
 }
 
@@ -165,6 +190,65 @@ function setStatus(text: string) {
   status.textContent = text;
 }
 
+/** QUESTION.TXT, CLASSES.DAT and NAMECHNK.DAT; any that are missing or unreadable are left out. */
+async function readCreationFiles(game: GameData): Promise<{ questions?: Question[]; chooser?: ClassChooser; names?: string[][] }> {
+  const read = async <T>(name: string, parse: (bytes: Uint8Array) => T): Promise<T | undefined> => {
+    if (!game.has(name)) return undefined;
+    try {
+      return parse(await game.read(name));
+    } catch (err) {
+      console.warn(`Could not read ${name}:`, err);
+      return undefined;
+    }
+  };
+  return {
+    questions: await read('QUESTION.TXT', (bytes) => parseQuestions(new TextDecoder('latin1').decode(bytes))),
+    chooser: await read('CLASSES.DAT', parseClassAnswers),
+    names: await read('NAMECHNK.DAT', parseNameChunks),
+  };
+}
+
+/** What making a character needs, read from the game folder once. */
+async function creationFor(): Promise<CreationData | undefined> {
+  const game = data;
+  if (!game) return undefined;
+  creation ??= (async () => {
+    if (tables === undefined) tables = await loadTables(game);
+    return creationData(tables?.character, await readCreationFiles(game));
+  })();
+  const loaded = await creation;
+  if (data !== game) return undefined; // another folder was chosen meanwhile
+  creationLoaded = loaded;
+  return loaded;
+}
+
+/** Plays the map with the character made last time, making one first when there is none. */
+async function enterDungeon(name: string) {
+  const made = await creationFor();
+  if (!made) return;
+  const character = loadCharacter(made);
+  if (character) await startMap(name, character);
+  else await createCharacter(name);
+}
+
+/** Opens character creation; the new character then plays the map. */
+async function createCharacter(map: string) {
+  const made = await creationFor();
+  if (!made) return;
+  showScreen('create');
+  creator.start({
+    data: made,
+    weapons: tables?.weapons ?? [],
+    portraits,
+    finish: 'Enter the dungeon',
+    done: (character) => {
+      saveCharacter(character, made.classes[character.cls]);
+      void startMap(map, character);
+    },
+    cancel: () => showScreen('play'),
+  });
+}
+
 /**
  * Reads the creature and weapon tables from the game's program, unpacking it
  * first when it is packed (the CD version's ACD.EXE is). Without them the
@@ -190,8 +274,9 @@ async function loadTables(game: GameData): Promise<ExeData | null> {
   return null;
 }
 
-async function startMap(name: string) {
-  if (!data) return;
+async function startMap(name: string, character: Character) {
+  if (!data || !creationLoaded) return;
+  const made = creationLoaded;
   setEngine(undefined);
   hud.reset();
   playButton.disabled = true;
@@ -207,7 +292,7 @@ async function startMap(name: string) {
     const palette = parseCol(await data.read('PAL.COL'));
     if (tables === undefined) tables = await loadTables(data);
     const cache = new TextureCache(data, palette);
-    const dungeon = new Dungeon(level, tables ?? undefined);
+    const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]));
     const scene = await buildLevelScene(level, cache);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem));
     const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => cache.screenImages(file));
@@ -224,6 +309,7 @@ async function startMap(name: string) {
       minimap: new Minimap($<HTMLCanvasElement>('minimap'), dungeon),
     });
     next.onPause = pause;
+    next.onMenu = openGameMenu;
     next.onDeath = died;
     next.onEscape = escaped;
     next.onMap = (open) => {
@@ -231,6 +317,7 @@ async function startMap(name: string) {
       hudEl.hidden = open;
     };
     setEngine(next, name);
+    runCharacter = character;
     textures = cache;
     $('map-name').textContent = level.name || name;
     if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
@@ -262,15 +349,44 @@ async function startMap(name: string) {
 
 function resume() {
   if (!engine || !playing()) return;
+  gameMenus.close();
   menu.hidden = true;
   hudEl.hidden = false;
   engine.start();
 }
 
+/** Opens one of the menus over the game: the menu of menus, the items, magic, the character or the favourites. */
+function openGameMenu(which: GameMenu) {
+  if (!engine || !playing()) return;
+  // Paused first, so letting go of the mouse doesn't count as asking for the pause menu.
+  engine.pause();
+  if (document.pointerLockElement) document.exitPointerLock();
+  hudEl.hidden = true;
+  gameMenus.open(which);
+}
+
+/** Opens the map over the game, from a menu. */
+function openMap() {
+  if (!engine || !playing()) return;
+  gameMenus.close();
+  menu.hidden = true;
+  engine.openMap();
+  engine.start();
+}
+
+const gameMenus = new GameMenus($('game-menu'), pad, input, {
+  run: () => (engine && playing() && runCharacter && creationLoaded ? { dungeon: engine.dungeon, character: runCharacter, data: creationLoaded } : undefined),
+  portraits: () => portraits,
+  resume,
+  openMap,
+  pause: () => pause(),
+});
+
 /** Shows the menu over the game, with the run's progress under the options. */
 function showMenu(next: Screen) {
   engine?.pause();
   if (document.pointerLockElement) document.exitPointerLock();
+  gameMenus.close();
   hudEl.hidden = true;
   mapScreen.hidden = true;
   menu.hidden = false;
@@ -343,6 +459,7 @@ function uiFrame(now: number) {
   pad.poll(now);
   input.update(pad);
   if (!menu.hidden) nav.frame(now);
+  else if (gameMenus.isOpen) gameMenus.frame(now);
   // Like Skyrim, pause if the controller goes away mid-game.
   else if (padWasConnected && !pad.connected && playing()) pause();
   padWasConnected = pad.connected;
@@ -383,6 +500,9 @@ async function useSource(source: FileSource): Promise<boolean> {
   try {
     data = await GameData.open(source);
     tables = undefined;
+    creation = undefined;
+    creationLoaded = undefined;
+    portraits = new Portraits(data);
     sounds = new SoundBank(data);
     sounds.setVolume(settings.volume);
     sounds.wake();
@@ -404,6 +524,8 @@ async function useSource(source: FileSource): Promise<boolean> {
   updatePlayOptions();
   showScreen('play');
   setStatus(`Found ${data.bsa.entries.length} files in GLOBAL.BSA.`);
+  // Read the classes now, to say who plays and to have character creation ready.
+  void creationFor().then(updatePlayOptions);
   return true;
 }
 
@@ -495,6 +617,9 @@ $('change-folder').addEventListener('click', () => {
   setEngine(undefined);
   void showBackdrop();
   data = undefined;
+  portraits = undefined;
+  creation = undefined;
+  creationLoaded = undefined;
   updatePlayOptions();
   showScreen('folder');
   setStatus('');
@@ -508,18 +633,14 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-back]')) {
 }
 
 resumeButton.addEventListener('click', resume);
-mapButton.addEventListener('click', () => {
-  if (!engine || !playing()) return;
-  menu.hidden = true;
-  engine.openMap();
-  engine.start();
-});
-playButton.addEventListener('click', () => startMap(mapSelect.value));
-$('try-again').addEventListener('click', () => engineMap && startMap(engineMap));
-$('play-again').addEventListener('click', () => engineMap && startMap(engineMap));
+mapButton.addEventListener('click', openMap);
+playButton.addEventListener('click', () => enterDungeon(mapSelect.value));
+newCharacterButton.addEventListener('click', () => createCharacter(mapSelect.value));
+$('try-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
+$('play-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
 mapSelect.addEventListener('change', updatePlayOptions);
 // Choosing the map list itself (A on a controller, or Enter) plays the map picked in it.
-mapSelect.addEventListener('choose', () => startMap(mapSelect.value));
+mapSelect.addEventListener('choose', () => enterDungeon(mapSelect.value));
 
 bindSettingRows(screens.controls, settings, (key) => {
   if (key === 'volume') sounds?.setVolume(settings.volume);

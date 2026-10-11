@@ -1,0 +1,731 @@
+/**
+ * The menus over the game, after Skyrim's. Tab (B on a controller) opens the
+ * menu of menus: the character sheet above, the items to the left, magic to
+ * the right and the map below. The item menu lists what the character
+ * carries by kind, with a picture of the picked piece and its numbers, and
+ * anything in it can be equipped, made a favourite or dropped. The
+ * favourites (Q, or up or down on the D-pad) list down the left of the game,
+ * where each can be put on a number key (on a controller, the D-pad's left
+ * or right) to use without opening a menu. The game waits while any of them
+ * is open.
+ */
+import { experienceFor, POTION_HEALS } from '../game/combat';
+import type { Character, CreationData } from '../game/character';
+import type { Dungeon, MenuEntry } from '../game/dungeon';
+import type { GameMenu } from '../game/engine';
+import { ARMOUR_TYPES, HOTKEYS, itemFrame, POTION } from '../game/items';
+import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
+import { PIXEL_ASPECT, type Portraits } from '../render/portrait';
+import { padHotkeyGlyph, type Action, type InputModeWatcher } from './controls';
+
+/** The run the menus show: the dungeon being played and its character. */
+export interface MenuRun {
+  dungeon: Dungeon;
+  character: Character;
+  data: CreationData;
+}
+
+export interface GameMenuHost {
+  /** The run being played; undefined when there is none. */
+  run(): MenuRun | undefined;
+  portraits(): Portraits | undefined;
+  /** Closes the menus and goes back to the game. */
+  resume(): void;
+  /** Closes the menus and opens the map. */
+  openMap(): void;
+  /** Closes the menus and opens the pause menu. */
+  pause(): void;
+}
+
+type TweenPick = 'character' | 'items' | 'magic' | 'map';
+const TWEEN: Record<Direction, TweenPick> = { up: 'character', left: 'items', right: 'magic', down: 'map' };
+
+interface Category {
+  name: string;
+  holds(e: MenuEntry): boolean;
+}
+
+const CATEGORIES: Category[] = [
+  { name: 'Favourites', holds: (e) => e.favourite },
+  { name: 'All', holds: () => true },
+  { name: 'Weapons', holds: (e) => e.category === 'weapons' },
+  { name: 'Apparel', holds: (e) => e.category === 'apparel' },
+  { name: 'Potions', holds: (e) => e.category === 'potions' },
+  { name: 'Misc', holds: (e) => e.category === 'misc' },
+];
+const ALL = 1;
+const MESSAGE_MS = 3500;
+
+/** A button hint along the bottom, which the mouse can also click. */
+interface Hint {
+  action: Action;
+  label: string;
+  run(): void;
+}
+
+export class GameMenus {
+  private which: GameMenu | undefined;
+  private tweenPick: TweenPick | undefined;
+  private category = ALL;
+  private column: 'categories' | 'list' = 'list';
+  private row = 0;
+  private favouriteRow = 0;
+  private readonly repeater = new Repeater();
+  private messageTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The entry whose picture the item card shows. */
+  private pictureKey = '';
+
+  private readonly panels: Record<GameMenu, HTMLElement>;
+  private readonly tweenOptions: Record<TweenPick, HTMLButtonElement>;
+  private readonly categoryList: HTMLElement;
+  private readonly itemList: HTMLElement;
+  private readonly card: HTMLElement;
+  private readonly picture: HTMLCanvasElement;
+  private readonly cardName: HTMLElement;
+  private readonly cardStats: HTMLElement;
+  private readonly cardNote: HTMLElement;
+  private readonly doll: HTMLCanvasElement;
+  private readonly sheet: HTMLElement;
+  private readonly magicNote: HTMLElement;
+  private readonly favouriteList: HTMLElement;
+  private readonly message: HTMLElement;
+  private readonly bar: HTMLElement;
+  private readonly hints: HTMLElement;
+
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly pad: GamepadInput,
+    private readonly input: InputModeWatcher,
+    private readonly host: GameMenuHost,
+  ) {
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+
+    // The menu of menus.
+    const tween = el('section', 'gm-tween');
+    tween.append(el('div', 'tween-ring'));
+    this.tweenOptions = {} as Record<TweenPick, HTMLButtonElement>;
+    for (const [pick, label] of [
+      ['character', 'Character'],
+      ['items', 'Items'],
+      ['magic', 'Magic'],
+      ['map', 'Map'],
+    ] as Array<[TweenPick, string]>) {
+      const b = el('button', `tween-option tween-${pick}`, label);
+      b.addEventListener('mouseenter', () => this.pickTween(pick));
+      b.addEventListener('click', () => this.openTween(pick));
+      this.tweenOptions[pick] = b;
+      tween.append(b);
+    }
+
+    // Items: kinds, the list, and a card for the picked one.
+    const items = el('section', 'gm-items');
+    this.categoryList = el('ul', 'gm-categories');
+    this.categoryList.setAttribute('role', 'listbox');
+    this.categoryList.setAttribute('aria-label', 'Kinds of item');
+    this.itemList = el('ul', 'gm-list');
+    this.itemList.setAttribute('role', 'listbox');
+    this.itemList.setAttribute('aria-label', 'Items');
+    this.card = el('aside', 'gm-card');
+    this.picture = el('canvas', 'gm-picture');
+    this.cardName = el('h3', 'gm-card-name');
+    this.cardStats = el('dl', 'gm-card-stats');
+    this.cardNote = el('p', 'gm-card-note');
+    this.card.append(this.cardName, el('div', 'rule'), this.cardStats, this.cardNote);
+    const right = el('div', 'gm-right');
+    right.append(this.picture, this.card);
+    items.append(this.categoryList, this.itemList, right);
+
+    // Magic: nothing to cast yet.
+    const magic = el('section', 'gm-magic');
+    this.magicNote = el('p', 'gm-empty');
+    magic.append(el('h2', '', 'Magic'), el('div', 'rule'), this.magicNote);
+
+    // The character sheet: the paper doll beside the numbers.
+    const character = el('section', 'gm-character');
+    this.doll = el('canvas', 'gm-doll');
+    this.sheet = el('div', 'gm-sheet');
+    character.append(this.doll, this.sheet);
+
+    // Favourites, down the left of the game.
+    const favourites = el('section', 'gm-favourites');
+    this.favouriteList = el('ul', 'gm-list');
+    this.favouriteList.setAttribute('role', 'listbox');
+    this.favouriteList.setAttribute('aria-label', 'Favourites');
+    favourites.append(el('h2', '', 'Favourites'), el('div', 'rule'), this.favouriteList);
+
+    this.panels = { tween, items, magic, character, favourites };
+    this.message = el('p', 'gm-message');
+    this.message.setAttribute('role', 'status');
+    this.bar = el('div', 'gm-bar');
+    this.hints = el('div', 'hints gm-hints');
+    root.append(...Object.values(this.panels), this.message, this.bar, this.hints);
+
+    // Clicking the dark around the favourites list goes back to the game.
+    root.addEventListener('mousedown', (e) => {
+      if (this.which === 'favourites' && e.target === root) this.host.resume();
+    });
+    window.addEventListener('keydown', this.onKeyDown);
+    input.onChange(() => this.which && this.render());
+  }
+
+  get isOpen(): boolean {
+    return this.which !== undefined;
+  }
+
+  get current(): GameMenu | undefined {
+    return this.which;
+  }
+
+  /** Opens one of the menus; the caller has paused the game. */
+  open(which: GameMenu): void {
+    if (!this.host.run()) return;
+    this.which = which;
+    this.root.hidden = false;
+    this.root.dataset.panel = which;
+    for (const [name, panel] of Object.entries(this.panels)) panel.hidden = name !== which;
+    // A stick or D-pad still held from walking, or from picking this menu, shouldn't move through it.
+    this.repeater.hold(this.pad.connected ? this.pad.direction() : undefined);
+    if (which === 'tween') this.tweenPick = undefined;
+    if (which === 'items') this.column = this.shown().length ? 'list' : 'categories';
+    if (which === 'favourites') this.favouriteRow = 0;
+    this.showMessage('');
+    this.render();
+  }
+
+  close(): void {
+    if (!this.which) return;
+    this.which = undefined;
+    this.root.hidden = true;
+    clearTimeout(this.messageTimer);
+  }
+
+  /** Acts on the controller; call every frame while a menu is open, after the controller was read. */
+  frame(now: number): void {
+    const pad = this.pad;
+    if (!this.which || !pad.connected) return;
+    if (pad.take('Start')) return this.host.pause();
+    if (pad.take('B')) return this.back();
+    const which = this.which;
+    if (which === 'favourites') {
+      // The D-pad's left and right are the controller's two hotkeys.
+      if (pad.take('Left')) this.setHotkey(0);
+      if (pad.take('Right')) this.setHotkey(1);
+    }
+    if (pad.take('A')) this.choose();
+    if (pad.take('Y')) this.toggleFavourite();
+    if (pad.take('X') && which === 'items') this.drop();
+    if (which === 'items') {
+      if (pad.take('LB')) this.moveCategory(-1);
+      if (pad.take('RB')) this.moveCategory(1);
+    }
+    const direction = this.repeater.update(pad.direction(), now);
+    if (direction && !(which === 'favourites' && (direction === 'left' || direction === 'right'))) this.go(direction);
+  }
+
+  // ---- Moving about ----
+
+  private go(direction: Direction): void {
+    switch (this.which) {
+      case 'tween':
+        this.pickTween(TWEEN[direction]);
+        break;
+      case 'items':
+        if (direction === 'left') this.column = 'categories';
+        else if (direction === 'right') {
+          if (this.shown().length) this.column = 'list';
+        } else if (this.column === 'categories') this.moveCategory(direction === 'up' ? -1 : 1);
+        else this.row = step(this.row, direction === 'up' ? -1 : 1, this.shown().length);
+        this.render();
+        break;
+      case 'favourites':
+        if (direction === 'up' || direction === 'down') {
+          this.favouriteRow = step(this.favouriteRow, direction === 'up' ? -1 : 1, this.favourites().length);
+          this.render();
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** A, Enter or E: open the picked menu, go into the list, or use the picked entry. */
+  private choose(): void {
+    if (this.which === 'tween') {
+      if (this.tweenPick) this.openTween(this.tweenPick);
+    } else if (this.which === 'items') {
+      if (this.column === 'categories') this.go('right');
+      else this.use(this.selected());
+    } else if (this.which === 'favourites') this.use(this.favourites()[this.favouriteRow]);
+  }
+
+  /** B or Esc: from the item list to its kinds, otherwise back to the game. */
+  private back(): void {
+    if (this.which === 'items' && this.column === 'list') {
+      this.column = 'categories';
+      this.render();
+    } else this.host.resume();
+  }
+
+  private pickTween(pick: TweenPick): void {
+    this.tweenPick = pick;
+    this.render();
+  }
+
+  private openTween(pick: TweenPick): void {
+    if (pick === 'map') this.host.openMap();
+    else this.open(pick);
+  }
+
+  private moveCategory(delta: number): void {
+    this.category = (this.category + delta + CATEGORIES.length) % CATEGORIES.length;
+    this.row = 0;
+    this.render();
+  }
+
+  // ---- Acting on entries ----
+
+  private use(entry: MenuEntry | undefined): void {
+    const d = this.host.run()?.dungeon;
+    if (!d || !entry) return;
+    this.showMessage(d.use(entry.key) ?? '');
+    this.render();
+  }
+
+  private toggleFavourite(): void {
+    const d = this.host.run()?.dungeon;
+    const entry = this.which === 'favourites' ? this.favourites()[this.favouriteRow] : this.which === 'items' ? this.selected() : undefined;
+    if (!d || !entry || (entry.key !== POTION && !entry.item)) return;
+    const now = d.favourite(entry.key);
+    this.showMessage(`${entry.name} ${now ? 'added to' : 'taken off'} the favourites`);
+    this.render();
+  }
+
+  private drop(): void {
+    const d = this.host.run()?.dungeon;
+    const entry = this.selected();
+    if (!d || !entry?.item || this.column !== 'list') return;
+    this.showMessage(d.drop(entry.key) ?? '');
+    this.render();
+  }
+
+  /** Puts the picked entry on number key n + 1, making it a favourite if it isn't. */
+  private setHotkey(n: number): void {
+    const d = this.host.run()?.dungeon;
+    const entry = this.which === 'favourites' ? this.favourites()[this.favouriteRow] : this.which === 'items' && this.column === 'list' ? this.selected() : undefined;
+    if (!d || !entry || (entry.key !== POTION && !entry.item)) return;
+    d.setHotkey(n, entry.key);
+    const where = this.input.mode === 'gamepad' && n < 2 ? `the D-pad's ${n === 0 ? 'left' : 'right'}` : String(n + 1);
+    this.showMessage(`${entry.name} put on ${where}`);
+    this.render();
+  }
+
+  private showMessage(text: string): void {
+    this.message.textContent = text;
+    this.message.classList.toggle('shown', !!text);
+    clearTimeout(this.messageTimer);
+    if (text) this.messageTimer = setTimeout(() => this.message.classList.remove('shown'), MESSAGE_MS);
+  }
+
+  // ---- What there is to show ----
+
+  private entries(): MenuEntry[] {
+    const d = this.host.run()?.dungeon;
+    return d ? d.entries().sort((a, b) => a.name.localeCompare(b.name)) : [];
+  }
+
+  /** The entries of the kind picked in the item menu. */
+  private shown(): MenuEntry[] {
+    return this.entries().filter(CATEGORIES[this.category].holds);
+  }
+
+  private selected(): MenuEntry | undefined {
+    const shown = this.shown();
+    this.row = Math.min(this.row, Math.max(0, shown.length - 1));
+    return shown[this.row];
+  }
+
+  /** The favourites the character still has, in the order they were chosen. */
+  private favourites(): MenuEntry[] {
+    const d = this.host.run()?.dungeon;
+    if (!d) return [];
+    const byKey = new Map(d.entries().map((e) => [e.key, e]));
+    return d.inventory.favourites.flatMap((key) => byKey.get(key) ?? []);
+  }
+
+  // ---- Drawing ----
+
+  private render(): void {
+    const run = this.host.run();
+    if (!run || !this.which) return;
+    switch (this.which) {
+      case 'tween':
+        for (const [pick, b] of Object.entries(this.tweenOptions)) b.classList.toggle('picked', pick === this.tweenPick);
+        this.renderBar(run, true);
+        this.setHints([
+          { action: 'use', label: 'Open', run: () => this.choose() },
+          { action: 'close', label: 'Close', run: () => this.host.resume() },
+        ]);
+        break;
+      case 'items':
+        this.renderItems(run);
+        break;
+      case 'magic':
+        this.magicNote.textContent = run.data.classes[run.character.cls]?.spellcaster
+          ? 'You know no spells yet. Spells are not in the remake yet.'
+          : 'You know no spells. Spells are not in the remake yet.';
+        this.renderBar(run, true);
+        this.setHints([{ action: 'back', label: 'Back', run: () => this.back() }]);
+        break;
+      case 'character':
+        this.renderCharacter(run);
+        this.renderBar(run, true);
+        this.setHints([{ action: 'back', label: 'Back', run: () => this.back() }]);
+        break;
+      case 'favourites':
+        this.renderFavourites();
+        this.bar.hidden = true;
+        break;
+    }
+  }
+
+  private renderItems(run: MenuRun): void {
+    const all = this.entries();
+    this.categoryList.replaceChildren(
+      ...CATEGORIES.map((c, i) => {
+        const li = el('li', 'gm-category', c.name);
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', String(i === this.category));
+        li.classList.toggle('picked', i === this.category);
+        li.classList.toggle('active', i === this.category && this.column === 'categories');
+        li.classList.toggle('empty', !all.some(c.holds));
+        li.addEventListener('click', () => {
+          this.category = i;
+          this.row = 0;
+          this.column = this.shown().length ? 'list' : 'categories';
+          this.render();
+        });
+        return li;
+      }),
+    );
+    const shown = this.shown();
+    const picked = this.selected();
+    this.itemList.classList.toggle('active', this.column === 'list');
+    this.itemList.replaceChildren(
+      ...(shown.length
+        ? shown.map((entry, i) => {
+            const li = this.entryRow(entry, i === this.row && this.column === 'list');
+            li.addEventListener('mouseenter', () => {
+              if (this.row === i && this.column === 'list') return;
+              this.row = i;
+              this.column = 'list';
+              this.render();
+            });
+            li.addEventListener('click', () => this.use(entry));
+            return li;
+          })
+        : [el('li', 'gm-nothing', 'Nothing')]),
+    );
+    this.itemList.querySelector('.picked')?.scrollIntoView({ block: 'nearest' });
+    this.renderCard(run, this.column === 'list' ? picked : undefined);
+    this.renderBar(run, false);
+    const hints: Hint[] = [];
+    if (picked && this.column === 'list') {
+      const verb = picked.key === POTION ? 'Drink' : picked.item ? (picked.equipped ? 'Unequip' : 'Equip') : undefined;
+      if (verb) hints.push({ action: 'use', label: verb, run: () => this.use(picked) });
+      if (picked.key === POTION || picked.item) {
+        hints.push({ action: 'favourite', label: picked.favourite ? 'Unfavourite' : 'Favourite', run: () => this.toggleFavourite() });
+      }
+      if (picked.item) hints.push({ action: 'drop', label: 'Drop', run: () => this.drop() });
+    } else if (this.column === 'categories' && shown.length) hints.push({ action: 'use', label: 'Select', run: () => this.choose() });
+    hints.push({ action: 'back', label: this.column === 'list' ? 'Back' : 'Close', run: () => this.back() });
+    this.setHints(hints);
+  }
+
+  private entryRow(entry: MenuEntry, picked: boolean): HTMLLIElement {
+    const li = el('li', 'gm-row');
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', String(picked));
+    li.classList.toggle('picked', picked);
+    li.classList.toggle('equipped', entry.equipped);
+    const mark = el('span', 'gm-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    const name = el('span', 'gm-name', entry.name);
+    li.append(mark, name);
+    if (entry.count > 1) li.append(el('span', 'gm-count', `(${entry.count})`));
+    if (entry.favourite) li.append(el('span', 'gm-star', '★'));
+    if (entry.hotkey !== undefined) li.append(this.hotkeyBadge(entry.hotkey));
+    const d = this.host.run()?.dungeon;
+    if (entry.item && d?.inventory.forbidden(entry.item)) li.classList.add('forbidden');
+    if (entry.equipped) li.setAttribute('aria-label', `${entry.name}, equipped`);
+    return li;
+  }
+
+  /** The number key an entry is on; with a controller, the D-pad's arm for the first two. */
+  private hotkeyBadge(n: number): HTMLElement {
+    const badge = el('span', 'gm-hotkey');
+    if (this.input.mode === 'gamepad' && n < 2) badge.append(padHotkeyGlyph(n));
+    else badge.textContent = String(n + 1);
+    if (this.input.mode === 'gamepad' && n >= 2) badge.classList.add('dim');
+    return badge;
+  }
+
+  private renderCard(run: MenuRun, entry: MenuEntry | undefined): void {
+    this.card.hidden = !entry;
+    if (entry?.key !== this.pictureKey || !entry?.item) {
+      this.picture.hidden = true;
+      this.pictureKey = '';
+    }
+    if (!entry) return;
+    this.cardName.textContent = entry.name;
+    const rows: Array<[string, string]> = [];
+    const item = entry.item;
+    let note = '';
+    if (item) {
+      if (item.kind === 'weapon' && item.damage) rows.push(['Damage', `${item.damage[0]}–${item.damage[1]}`]);
+      else rows.push(['Armour', String(item.rating ?? 0)]);
+      rows.push(['Weight', weight(item.weight)], ['Value', String(item.value)]);
+      const kind = item.kind === 'armour' ? `${ARMOUR_TYPES[item.armour ?? 0]} armour` : item.kind === 'shield' ? 'Shield' : item.twoHanded ? 'Two-handed' : 'One-handed';
+      note = run.dungeon.inventory.forbidden(item) ?? (entry.equipped ? `${kind}, equipped` : kind);
+      this.card.classList.toggle('forbidden', !!run.dungeon.inventory.forbidden(item));
+      if (this.pictureKey !== entry.key) void this.showPicture(itemFrame(item), run.character.gender, entry.key);
+    } else if (entry.key === POTION) {
+      rows.push(['Heals', String(POTION_HEALS)], ['Count', String(entry.count)]);
+      note = 'Restores health';
+      this.card.classList.remove('forbidden');
+    } else {
+      rows.push(['Count', String(entry.count)]);
+      note = 'Opens a locked door in this dungeon';
+      this.card.classList.remove('forbidden');
+    }
+    this.cardStats.replaceChildren(
+      ...rows.flatMap(([k, v]) => {
+        const dt = el('dt', '', k);
+        const dd = el('dd', '', v);
+        return [dt, dd];
+      }),
+    );
+    this.cardNote.textContent = note;
+  }
+
+  /** Shows the item's picture from the game, if it is still the one picked when it loads. */
+  private async showPicture(frame: number, gender: Character['gender'], key: string): Promise<void> {
+    this.pictureKey = key;
+    const image = await this.host.portraits()?.item(frame, gender);
+    if (!image || this.which !== 'items' || this.pictureKey !== key) return;
+    this.picture.width = image.width;
+    this.picture.height = image.height;
+    const ctx = this.picture.getContext('2d')!;
+    ctx.clearRect(0, 0, image.width, image.height);
+    ctx.drawImage(image, 0, 0);
+    // As large as fits, in Arena's tall pixels.
+    const box = { w: Math.min(380, innerWidth * 0.3), h: Math.min(340, innerHeight * 0.4) };
+    const scale = Math.min(4, box.w / image.width, box.h / (image.height * PIXEL_ASPECT));
+    this.picture.style.width = `${Math.round(image.width * scale)}px`;
+    this.picture.style.height = `${Math.round(image.height * scale * PIXEL_ASPECT)}px`;
+    this.picture.hidden = false;
+  }
+
+  private renderCharacter(run: MenuRun): void {
+    const { dungeon: d, character: c, data } = run;
+    const cls = data.classes[c.cls];
+    const race = data.races[c.race];
+    const s = d.stats;
+    const hero = d.hero;
+    const portraits = this.host.portraits();
+    this.doll.hidden = !portraits;
+    void portraits
+      ?.drawDoll(this.doll, { race: c.race, gender: c.gender, face: c.face, robe: !!cls?.spellcaster, equipment: d.inventory.pictureFrames() })
+      .then((drawn) => drawn !== undefined && (this.doll.hidden = !drawn));
+    const title = el('h2', 'gm-title', c.name);
+    const sub = el('p', 'gm-sub', `Level ${s.level} ${race?.name ?? ''} ${cls?.name ?? ''}`.replace(/\s+/g, ' '));
+    const attributes = el('dl', 'gm-attributes');
+    data.attributes.forEach((name, i) => attributes.append(el('dt', '', name), el('dd', '', String(c.attributes[i] ?? 0))));
+    const next = experienceFor(s.level + 1, hero.experience);
+    const [low, high] = s.weapon.damage;
+    const bonus = hero.damageBonus ? ` ${hero.damageBonus > 0 ? '+' : '−'}${Math.abs(hero.damageBonus)}` : '';
+    const rows: Array<[string, string]> = [
+      ['Health', `${Math.ceil(s.health)} / ${s.maxHealth}`],
+      ['Stamina', `${Math.floor(s.stamina)} / ${s.maxStamina}`],
+      ['Armour', String(d.inventory.armourRating())],
+      ['Damage', `${low}–${high}${bonus}`],
+      ['Experience', `${s.experience} / ${next}`],
+      ['Gold', String(s.gold)],
+      ['Carrying', `${weight(d.inventory.weight(s.potions))} / ${hero.carry}`],
+    ];
+    if (hero.critical > 0) rows.push(['Critical strikes', `${Math.round(hero.critical * 100)}%`]);
+    if (hero.lockpicking > 0) rows.push(['Lock picking', `${Math.round(Math.min(0.95, hero.lockpicking + 0.05 * (s.level - 1)) * 100)}%`]);
+    const derived = el('dl', 'gm-derived');
+    for (const [k, v] of rows) derived.append(el('dt', '', k), el('dd', '', v));
+    this.sheet.replaceChildren(title, sub, el('div', 'rule'), attributes, derived);
+  }
+
+  private renderFavourites(): void {
+    const list = this.favourites();
+    this.favouriteRow = Math.min(this.favouriteRow, Math.max(0, list.length - 1));
+    this.favouriteList.replaceChildren(
+      ...(list.length
+        ? list.map((entry, i) => {
+            const li = this.entryRow(entry, i === this.favouriteRow);
+            li.querySelector('.gm-star')?.remove();
+            li.addEventListener('mouseenter', () => {
+              if (this.favouriteRow === i) return;
+              this.favouriteRow = i;
+              this.render();
+            });
+            li.addEventListener('click', () => this.use(entry));
+            return li;
+          })
+        : [el('li', 'gm-nothing', 'No favourites yet: press F in the item menu to add one')]),
+    );
+    this.favouriteList.querySelector('.picked')?.scrollIntoView({ block: 'nearest' });
+    const hints: Hint[] = [];
+    if (list.length) {
+      hints.push({ action: 'use', label: 'Use', run: () => this.choose() });
+      hints.push({ action: 'setHotkey', label: 'Hotkey', run: () => this.showMessage(this.hotkeyHelp()) });
+      hints.push({ action: 'favourite', label: 'Remove', run: () => this.toggleFavourite() });
+    }
+    hints.push({ action: 'back', label: 'Close', run: () => this.back() });
+    this.setHints(hints);
+  }
+
+  private hotkeyHelp(): string {
+    return this.input.mode === 'gamepad'
+      ? "Press left or right on the D-pad to put the picked favourite there; in the game, the same press uses it"
+      : `Press a number from 1 to ${HOTKEYS} to put the picked favourite on it; in the game, the same key uses it`;
+  }
+
+  /** The bottom bar: the character's level and progress, or what they carry. */
+  private renderBar(run: MenuRun, level: boolean): void {
+    const { dungeon: d, character: c } = run;
+    const s = d.stats;
+    this.bar.hidden = false;
+    this.bar.replaceChildren();
+    if (level) {
+      const before = experienceFor(s.level, d.hero.experience);
+      const after = experienceFor(s.level + 1, d.hero.experience);
+      const progress = Math.max(0, Math.min(1, (s.experience - before) / Math.max(1, after - before)));
+      const xp = el('div', 'bar gm-xp');
+      xp.append(el('div', 'bar-fill'));
+      xp.style.setProperty('--fill', progress.toFixed(3));
+      xp.setAttribute('aria-label', `${Math.round(progress * 100)}% of the way to level ${s.level + 1}`);
+      this.bar.append(
+        stat('Health', `${Math.ceil(s.health)}/${s.maxHealth}`),
+        el('span', 'gm-who', `${c.name}`),
+        stat('Level', String(s.level)),
+        xp,
+        stat('Stamina', `${Math.floor(s.stamina)}/${s.maxStamina}`),
+      );
+    } else {
+      const carried = d.inventory.weight(s.potions);
+      const load = stat('Weight', `${weight(carried)}/${d.hero.carry}`);
+      load.classList.toggle('over', carried > d.hero.carry);
+      this.bar.append(stat('Armour', String(d.inventory.armourRating())), load, stat('Gold', String(s.gold)));
+    }
+  }
+
+  private setHints(hints: Hint[]): void {
+    this.hints.replaceChildren(
+      ...hints.map((h) => {
+        const b = el('button', 'hint');
+        b.type = 'button';
+        const glyph = el('span');
+        glyph.dataset.glyph = h.action;
+        b.append(glyph, h.label);
+        b.addEventListener('click', h.run);
+        return b;
+      }),
+    );
+    this.input.render(this.hints);
+  }
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (!this.which || e.defaultPrevented) return;
+    // Typing in a box is not for the menus (there is none in them, but be safe).
+    if (e.target instanceof HTMLInputElement) return;
+    const which = this.which;
+    const code = e.code;
+    const handled = () => e.preventDefault();
+    if (code === 'Tab' || (code === 'KeyI' && which === 'items') || (code === 'KeyQ' && which === 'favourites')) {
+      handled();
+      this.host.resume();
+      return;
+    }
+    if (code === 'Escape' || code === 'Backspace') {
+      handled();
+      this.back();
+      return;
+    }
+    if (code === 'KeyI' || code === 'KeyP') {
+      handled();
+      this.open(code === 'KeyI' ? 'items' : 'magic');
+      return;
+    }
+    if (code === 'KeyM' && which === 'tween') {
+      handled();
+      this.host.openMap();
+      return;
+    }
+    const direction = KEY_DIRECTIONS.get(code);
+    if (direction) {
+      handled();
+      if (which === 'favourites' && (direction === 'left' || direction === 'right')) return;
+      this.go(direction);
+      return;
+    }
+    if (code === 'Enter' || code === 'NumpadEnter' || code === 'KeyE' || code === 'Space') {
+      handled();
+      if (!e.repeat) this.choose();
+      return;
+    }
+    if (code === 'KeyF') {
+      handled();
+      this.toggleFavourite();
+      return;
+    }
+    if (code === 'KeyR' && which === 'items') {
+      handled();
+      this.drop();
+      return;
+    }
+    const digit = /^(?:Digit|Numpad)([1-8])$/.exec(code);
+    if (digit && (which === 'favourites' || which === 'items')) {
+      handled();
+      this.setHotkey(Number(digit[1]) - 1);
+    }
+  };
+}
+
+const KEY_DIRECTIONS = new Map<string, Direction>([
+  ['ArrowUp', 'up'],
+  ['KeyW', 'up'],
+  ['ArrowDown', 'down'],
+  ['KeyS', 'down'],
+  ['ArrowLeft', 'left'],
+  ['KeyA', 'left'],
+  ['ArrowRight', 'right'],
+  ['KeyD', 'right'],
+]);
+
+/** Moves through a list of `length`, stopping at the ends. */
+function step(index: number, delta: number, length: number): number {
+  return Math.max(0, Math.min(length - 1, index + delta));
+}
+
+/** Kilograms, with a decimal only when there is one. */
+function weight(kg: number): string {
+  return String(Math.round(kg * 10) / 10);
+}
+
+function stat(label: string, value: string): HTMLElement {
+  const span = el('span', 'gm-stat');
+  span.append(el('span', 'gm-stat-label', label), el('b', '', value));
+  return span;
+}
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text?: string): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}

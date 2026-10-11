@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExeData } from '../src/formats/exe';
 import {
   creatureHitChance,
+  DEFAULT_HERO,
   drinkPotion,
   experienceFor,
   gainExperience,
@@ -23,6 +24,8 @@ import {
   type CreatureWorld,
 } from '../src/game/creatures';
 import { Dungeon, IDLE_INPUT, type DungeonEvent, type DungeonInput } from '../src/game/dungeon';
+import type { Hero } from '../src/game/combat';
+import type { ClassInfo } from '../src/formats/classes';
 import { swingFrame } from '../src/render/weaponView';
 import { Exploration } from '../src/game/explore';
 import type { Level } from '../src/game/level';
@@ -84,15 +87,32 @@ describe('combat rules', () => {
     expect(drinkPotion(p)).toBe(false);
   });
 
-  it('raises the player’s level with experience', () => {
-    expect([1, 2, 3, 4].map(experienceFor)).toEqual([0, 1000, 3000, 6000]);
+  it('raises the player’s level with experience, each level needing twice the last', () => {
+    expect([1, 2, 3, 4].map((level) => experienceFor(level))).toEqual([0, 1000, 3000, 7000]);
+    expect(experienceFor(3, 900)).toBe(2700);
     const p = newPlayerStats(SWORD);
     p.health = 5;
     expect(gainExperience(p, 999, always(0))).toBe(0);
     expect(gainExperience(p, 1, always(0))).toBe(1);
     expect(p).toMatchObject({ level: 2, maxHealth: 34, health: 34, maxStamina: 110 });
-    expect(gainExperience(p, 5000, always(0))).toBe(2);
+    expect(gainExperience(p, 6000, always(0))).toBe(2);
     expect(p.level).toBe(4);
+  });
+
+  it('levels a character by their class: its experience, and its health die plus their endurance', () => {
+    const hero = { ...DEFAULT_HERO, health: 40, stamina: 90, experience: 500, healthDie: 12, healthBonus: -2 };
+    const p = newPlayerStats(SWORD, hero);
+    expect(p).toMatchObject({ health: 40, maxHealth: 40, stamina: 90 });
+    expect(gainExperience(p, 500, always(0.999), hero)).toBe(1);
+    expect(p.maxHealth).toBe(40 + 12 - 2);
+    // Never less than 1 a level.
+    gainExperience(p, 1000, always(0), hero);
+    expect(p.maxHealth).toBe(51);
+  });
+
+  it('lets an agile character dodge some blows, within the same limits', () => {
+    expect(creatureHitChance(1, 1, 0.1)).toBeCloseTo(0.45);
+    expect(creatureHitChance(1, 40, 0.1)).toBe(0.2);
   });
 });
 
@@ -279,6 +299,12 @@ function tick(d: Dungeon, seconds: number, i: DungeonInput = IDLE_INPUT): void {
   for (let t = 0; t < seconds - 1e-9; t += 0.05) d.update(0.05, t === 0 ? i : { ...i, attack: { ...i.attack, pressed: false, released: false } });
 }
 
+/** Returns the numbers given in turn, then the last one over and over. */
+const sequence = (...values: number[]) => {
+  let i = 0;
+  return () => values[Math.min(i++, values.length - 1)];
+};
+
 const notes = (events: DungeonEvent[]) => events.flatMap((e) => (e.type === 'notify' ? [e.text] : []));
 const sounds = (events: DungeonEvent[]) => events.flatMap((e) => (e.type === 'sound' ? [e.name] : []));
 
@@ -384,13 +410,18 @@ describe('a run through a dungeon', () => {
     expect(d.target()).toBeUndefined();
   });
 
-  it('finds better weapons in equipment, and no bows', () => {
+  it('puts the gear it finds in the pack, for the player to equip', () => {
     const level = textLevel(['#####', '#@..#', '#####'], { items: [{ x: 2.5, y: 1.5, name: 'EQUIPMEN.IMG', kind: 'equipment' }] });
-    const d = new Dungeon(level, TABLES, always(0));
-    expect(d.stats.weapon.name).toBe('Shortsword');
+    // Gear (0), a weapon (0), Steel (0.5, 0.5 of the three materials at level 1), the fourth usable weapon (0.8).
+    const d = new Dungeon(level, TABLES, sequence(0, 0, 0.5, 0.5, 0.8));
+    expect(d.stats.weapon.name).toBe('Steel Shortsword');
     d.activate();
-    expect(d.stats.weapon).toMatchObject({ name: 'Broadsword', damage: [5, 9], cif: 'SWORD.CIF' });
-    expect(notes(d.events)).toContain('Broadsword equipped');
+    expect(notes(d.events)).toContain('Steel Broadsword added');
+    expect(d.stats.weapon.name).toBe('Steel Shortsword');
+    const found = d.entries().find((e) => e.name === 'Steel Broadsword')!;
+    expect(found).toMatchObject({ category: 'weapons', equipped: false });
+    expect(d.use(found.key)).toBe('Steel Broadsword equipped');
+    expect(d.stats.weapon).toMatchObject({ name: 'Steel Broadsword', damage: [5, 9], cif: 'SWORD.CIF' });
   });
 
   it('tires the player when sprinting', () => {
@@ -542,5 +573,106 @@ describe('the weapon in hand', () => {
     expect(swingFrame(swing('chop', 0))).toBe(0);
     expect(swingFrame(swing('chop', 0.99))).toBe(4);
     expect(swingFrame(swing('thrust', 0.5))).toBe(27);
+  });
+});
+
+describe('the character in the dungeon', () => {
+  /** A made-up class; none of these values come from the game. */
+  const TINKER: ClassInfo = { name: 'Tinker', healthDie: 9, experience: 800, spellcaster: false, critical: true, thief: true, armour: 2, shields: [0], weapons: [1, 3] };
+  const hero = (overrides: Partial<Hero> = {}): Hero => ({ ...DEFAULT_HERO, ...overrides });
+  const arena = () => textLevel(['#######', '#@....#', '#######'], { creatures: [{ x: 2.7, y: 1.5, type: 0 }] });
+  const firstHurt = (d: Dungeon) => d.events.find((e) => e.type === 'hurt');
+
+  it('starts with the class’s own gear, a healing potion and a little gold', () => {
+    const d = new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER, health: 33 }));
+    expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Steel Dagger', 'Leather Cuirass']);
+    expect(d.stats).toMatchObject({ health: 33, potions: 1, gold: 25, weapon: { name: 'Steel Dagger' } });
+    expect(d.entries().map((e) => [e.name, e.category, e.equipped])).toEqual([
+      ['Steel Dagger', 'weapons', true],
+      ['Leather Cuirass', 'apparel', true],
+      ['Healing Potion', 'potions', false],
+    ]);
+  });
+
+  it('takes blows down by the armour worn', () => {
+    const bare = new Dungeon(arena(), TABLES, always(0));
+    tick(bare, 2);
+    expect(firstHurt(bare)).toMatchObject({ damage: 2 });
+    const armoured = new Dungeon(arena(), TABLES, always(0));
+    armoured.inventory.equip(armoured.inventory.add({ kind: 'armour', name: 'Test Plate', type: 0, armour: 0, rating: 100, weight: 1, value: 1 }));
+    tick(armoured, 2);
+    expect(firstHurt(armoured)).toMatchObject({ damage: 1 });
+  });
+
+  it('adds the character’s strength to blows, and lands critical strikes for double damage', () => {
+    const d = new Dungeon(arena(), TABLES, always(0), hero({ critical: 0.5, damageBonus: 1 }));
+    d.creatures[0].health = d.creatures[0].maxHealth = 20;
+    tick(d, 0.3, click);
+    expect(d.events.find((e) => e.type === 'hit')).toMatchObject({ damage: (4 + 1) * 2 });
+    expect(notes(d.events)).toContain('Critical strike!');
+  });
+
+  it('lets a thief pick a lock, trying again after a moment', () => {
+    const corridor = textLevel(['#########', '#@..L...X', '#########']);
+    const d = new Dungeon(corridor, TABLES, always(0.99), hero({ lockpicking: 0.5 }));
+    d.player.x = 3.3;
+    expect(d.target()).toMatchObject({ kind: 'door', verb: 'Pick lock', note: 'Locked' });
+    expect(d.pickChance(13)).toBeCloseTo(0.45);
+    d.activate();
+    d.activate();
+    expect(notes(d.events)).toEqual(['You failed to pick the lock']);
+    expect(d.locked(13)).toBe(true);
+    const lucky = new Dungeon(corridor, TABLES, always(0), hero({ lockpicking: 0.5 }));
+    lucky.player.x = 3.3;
+    lucky.activate();
+    expect(notes(lucky.events)).toEqual(['You picked the lock']);
+    expect(lucky.doors.get(13)!.target).toBe(1);
+  });
+
+  it('cannot run carrying too much', () => {
+    const d = new Dungeon(textLevel(['############', '#@.........#', '############']), TABLES, always(0), hero({ carry: 1 }));
+    tick(d, 1, input({ forward: 1, sprint: true }));
+    expect(notes(d.events)).toEqual(['You are carrying too much to run']);
+    expect(d.stats.stamina).toBe(100);
+    expect(d.player.x).toBeLessThan(4);
+  });
+
+  it('moves at the character’s own pace, and finds more gold with more luck', () => {
+    const level = textLevel(['############', '#@.........#', '############'], { items: [{ x: 2.5, y: 1.5, name: 'CHEST.IMG', kind: 'chest' }] });
+    const quick = new Dungeon(level, TABLES, always(0), hero({ pace: 1.5, fortune: 2 }));
+    quick.activate();
+    expect(notes(quick.events)[0]).toBe('40 gold added');
+    tick(quick, 1, input({ forward: 1 }));
+    expect(quick.player.x).toBeCloseTo(1.5 + 2.2 * 1.5, 1);
+  });
+
+  it('uses what is on the number keys: the healing potion on 1 to begin with', () => {
+    const d = new Dungeon(arena(), TABLES, always(0));
+    d.hotkey(0);
+    d.stats.potions = 1;
+    d.hotkey(0);
+    d.stats.health = 10;
+    d.hotkey(0);
+    d.hotkey(3);
+    expect(notes(d.events)).toEqual(['No healing potions', 'Your health is full', 'Healing potion drunk', expect.stringMatching(/^Nothing is on 4/)]);
+    const dagger = d.inventory.add({ kind: 'weapon', name: 'Test Dagger', type: 1, damage: [1, 3], weight: 1, value: 1 });
+    d.setHotkey(1, `item:${dagger.id}`);
+    d.hotkey(1);
+    expect(d.stats.weapon).toMatchObject({ name: 'Test Dagger', damage: [1, 3] });
+    expect(d.entries().find((e) => e.name === 'Test Dagger')).toMatchObject({ favourite: true, hotkey: 1, equipped: true });
+  });
+
+  it('drops gear for good, off the favourites and number keys, but never the weapon in hand', () => {
+    const d = new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER }));
+    const key = (name: string) => d.entries().find((e) => e.name === name)!.key;
+    expect(d.drop(key('Steel Dagger'))).toBe('Equip another weapon before you drop this one');
+    const cuirass = key('Leather Cuirass');
+    d.setHotkey(2, cuirass);
+    expect(d.drop(cuirass)).toBe('Leather Cuirass dropped');
+    expect(d.entries().map((e) => e.name)).toEqual(['Steel Dagger', 'Healing Potion']);
+    expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Steel Dagger']);
+    expect(d.inventory.favourites).not.toContain(cuirass);
+    expect(d.inventory.hotkeys[2]).toBeUndefined();
+    expect(d.drop('item:999')).toBeUndefined();
   });
 });
