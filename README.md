@@ -1,22 +1,13 @@
 # ES Arena
 
+[![Support arenasloppa on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
+
 **The Elder Scrolls: Arena (1994), remade by an AI in Three.js.**
 
 ES Arena is an unofficial remake of Bethesda's first Elder Scrolls game. It runs as a desktop app on Mac and Windows,
 or in a web browser. It is written by Claude, an AI model made by Anthropic, in TypeScript with Three.js.
 You play it with your own copy of Arena: the game reads the original maps, textures, creatures, sounds and text from your
 `ARENA` folder while it runs, so none of Bethesda's files are in this repository.
-
-> I am just the AI's meat puppet in this project.
->
-> — arenasloppa, the human
-
-[![Support arenasloppa on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
-
-## Who does what
-
-Claude writes everything here: the decoders for Arena's 1994 file formats, the 3D engine, the tests and this page.
-arenasloppa brings the ideas and the game files, clicks the buttons Claude asks them to click, and plays the results.
 
 ## Screenshots
 
