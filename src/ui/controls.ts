@@ -21,6 +21,7 @@ type PadInput =
   | 'LStick'
   | 'RStick'
   | 'LStickPress'
+  | 'RStickPress'
   | 'DPad'
   | 'DUpDown'
   | 'DLeftRight';
@@ -53,6 +54,8 @@ export type Action =
   | 'favourite'
   | 'drop'
   | 'setHotkey'
+  | 'turnItem'
+  | 'zoomItem'
   | 'close';
 
 interface Binding {
@@ -90,6 +93,8 @@ export const BINDINGS: Record<Action, Binding> = {
   favourite: { label: 'Favourite', keys: ['F'], pad: ['Y'] },
   drop: { label: 'Drop', keys: ['R'], pad: ['X'] },
   setHotkey: { label: 'Hotkey', keys: ['1–8'], pad: ['DLeftRight'] },
+  turnItem: { label: 'Turn', keys: ['Drag'], pad: ['RStick'] },
+  zoomItem: { label: 'Zoom', keys: ['Wheel'], pad: ['RStickPress'] },
   close: { label: 'Close', keys: ['Tab'], pad: ['B'] },
 };
 
@@ -155,10 +160,10 @@ const FACE: Record<PadStyle, Record<'A' | 'B' | 'X' | 'Y', Face>> = {
   nintendo: { A: { text: 'B' }, B: { text: 'A' }, X: { text: 'Y' }, Y: { text: 'X' } },
 };
 
-const OTHER: Record<PadStyle, Record<'LB' | 'LT' | 'RT' | 'Start' | 'View' | 'LStickPress', Face>> = {
-  xbox: { LB: { text: 'LB' }, LT: { text: 'LT' }, RT: { text: 'RT' }, Start: { icon: 'menu' }, View: { icon: 'view' }, LStickPress: { text: 'LS' } },
-  playstation: { LB: { text: 'L1' }, LT: { text: 'L2' }, RT: { text: 'R2' }, Start: { text: 'OPTIONS' }, View: { text: 'SHARE' }, LStickPress: { text: 'L3' } },
-  nintendo: { LB: { text: 'L' }, LT: { text: 'ZL' }, RT: { text: 'ZR' }, Start: { text: '+' }, View: { text: '−' }, LStickPress: { text: 'LS' } },
+const OTHER: Record<PadStyle, Record<'LB' | 'LT' | 'RT' | 'Start' | 'View' | 'LStickPress' | 'RStickPress', Face>> = {
+  xbox: { LB: { text: 'LB' }, LT: { text: 'LT' }, RT: { text: 'RT' }, Start: { icon: 'menu' }, View: { icon: 'view' }, LStickPress: { text: 'LS' }, RStickPress: { text: 'RS' } },
+  playstation: { LB: { text: 'L1' }, LT: { text: 'L2' }, RT: { text: 'R2' }, Start: { text: 'OPTIONS' }, View: { text: 'SHARE' }, LStickPress: { text: 'L3' }, RStickPress: { text: 'R3' } },
+  nintendo: { LB: { text: 'L' }, LT: { text: 'ZL' }, RT: { text: 'ZR' }, Start: { text: '+' }, View: { text: '−' }, LStickPress: { text: 'LS' }, RStickPress: { text: 'RS' } },
 };
 
 function fill(el: HTMLElement, face: Face): HTMLElement {
@@ -189,7 +194,7 @@ function padGlyph(input: PadInput, style: PadStyle): HTMLElement {
     g.classList.add('dpad');
     return fill(g, { icon: input.toLowerCase() });
   }
-  g.classList.add(input === 'LStickPress' ? 'stick' : 'shoulder');
+  g.classList.add(input === 'LStickPress' || input === 'RStickPress' ? 'stick' : 'shoulder');
   return fill(g, OTHER[style][input]);
 }
 

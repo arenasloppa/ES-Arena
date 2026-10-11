@@ -613,7 +613,12 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   position: absolute; right: max(40px, 6vw); top: 12vh; bottom: calc(118px + env(safe-area-inset-bottom, 0px)); width: min(420px, 32vw);
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 22px;
 }
-.gm-picture { flex: none; image-rendering: pixelated; filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.9)); }
+/* The picked item, to turn by dragging: it takes the room above its card. */
+.gm-picture {
+  flex: 1 1 0; width: 100%; min-height: 0; cursor: grab; touch-action: none;
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.9));
+}
+.gm-picture.dragging { cursor: grabbing; }
 .gm-card {
   width: 100%; padding: 16px 22px 14px; text-align: center;
   border: 1px solid var(--line-strong); background: rgba(0, 0, 0, 0.62);

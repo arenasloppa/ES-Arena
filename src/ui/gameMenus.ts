@@ -3,8 +3,9 @@
  * menu of menus, Skyrim's separated plus: the character sheet above, magic to
  * the left, the items to the right and the map below. Pushing a way lights
  * that arm and its name, and letting go opens its menu. The item menu lists what the character
- * carries by kind, with a picture of the picked piece and its numbers, and
- * anything in it can be equipped, made a favourite or dropped. The magic
+ * carries by kind, with the picked piece and its numbers, and anything in
+ * it can be equipped, made a favourite or dropped. The piece is Arena's
+ * picture of it given depth, to turn and look at closer as in Skyrim. The magic
  * menu lists the spells the character knows, with what each does at their
  * level and costs, and readies one to cast. The
  * favourites (Q, or up or down on the D-pad) list down the left of the game,
@@ -20,7 +21,8 @@ import { ARMOUR_TYPES, HOTKEYS, itemFrame, POTION } from '../game/items';
 import { describe as describeSpell, elementName, targetWords } from '../game/magic';
 import { spellColour } from '../render/spellView';
 import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
-import { PIXEL_ASPECT, type Portraits } from '../render/portrait';
+import { ItemView, STICK_TURN } from '../render/itemView';
+import type { Portraits } from '../render/portrait';
 import { padHotkeyGlyph, type Action, type InputModeWatcher } from './controls';
 
 /** The run the menus show: the dungeon being played and its character. */
@@ -89,6 +91,8 @@ export class GameMenus {
   private messageTimer: ReturnType<typeof setTimeout> | undefined;
   /** The entry whose picture the item card shows. */
   private pictureKey = '';
+  /** When the menus last read the controller, for turning the item with the right stick. */
+  private lastFrame = 0;
 
   private readonly panels: Record<GameMenu, HTMLElement>;
   private readonly tweenOptions: Record<TweenPick, HTMLButtonElement>;
@@ -97,6 +101,7 @@ export class GameMenus {
   private readonly itemList: HTMLElement;
   private readonly card: HTMLElement;
   private readonly picture: HTMLCanvasElement;
+  private readonly itemView: ItemView;
   private readonly cardName: HTMLElement;
   private readonly cardStats: HTMLElement;
   private readonly cardNote: HTMLElement;
@@ -147,6 +152,7 @@ export class GameMenus {
     this.itemList.setAttribute('aria-label', 'Items');
     this.card = el('aside', 'gm-card');
     this.picture = el('canvas', 'gm-picture');
+    this.itemView = new ItemView(this.picture);
     this.cardName = el('h3', 'gm-card-name');
     this.cardStats = el('dl', 'gm-card-stats');
     this.cardNote = el('p', 'gm-card-note');
@@ -253,7 +259,13 @@ export class GameMenus {
     if (which === 'items') {
       if (pad.take('LB')) this.moveCategory(-1);
       if (pad.take('RB')) this.moveCategory(1);
+      if (pad.take('RS')) this.itemView.toggleZoom();
+      // The right stick turns the picked item.
+      const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
+      const { x, y } = pad.look;
+      if (!this.picture.hidden && (x || y)) this.itemView.turn(x * STICK_TURN * dt, y * STICK_TURN * dt);
     }
+    this.lastFrame = now;
     if (this.which === 'tween') {
       this.aimWithPad();
       return;
@@ -527,6 +539,10 @@ export class GameMenus {
         hints.push({ action: 'favourite', label: picked.favourite ? 'Unfavourite' : 'Favourite', run: () => this.toggleFavourite() });
       }
       if (picked.item) hints.push({ action: 'drop', label: 'Drop', run: () => this.drop() });
+      // The item's picture is there to turn, where the screen is wide enough to show it.
+      if (picked.item && !matchMedia('(max-width: 720px)').matches) {
+        hints.push({ action: 'turnItem', label: 'Turn', run: () => this.itemView.spin() }, { action: 'zoomItem', label: 'Zoom', run: () => this.itemView.toggleZoom() });
+      }
     } else if (this.column === 'categories' && shown.length) hints.push({ action: 'use', label: 'Select', run: () => this.choose() });
     hints.push({ action: 'back', label: this.column === 'list' ? 'Back' : 'Close', run: () => this.back() });
     this.setHints(hints);
@@ -598,22 +614,14 @@ export class GameMenus {
     this.cardNote.textContent = note;
   }
 
-  /** Shows the item's picture from the game, if it is still the one picked when it loads. */
+  /** Shows the item's picture from the game as a model to turn, if it is still the one picked when it loads. */
   private async showPicture(frame: number, gender: Character['gender'], key: string): Promise<void> {
     this.pictureKey = key;
     const image = await this.host.portraits()?.item(frame, gender);
     if (!image || this.which !== 'items' || this.pictureKey !== key) return;
-    this.picture.width = image.width;
-    this.picture.height = image.height;
-    const ctx = this.picture.getContext('2d')!;
-    ctx.clearRect(0, 0, image.width, image.height);
-    ctx.drawImage(image, 0, 0);
-    // As large as fits, in Arena's tall pixels.
-    const box = { w: Math.min(380, innerWidth * 0.3), h: Math.min(340, innerHeight * 0.4) };
-    const scale = Math.min(4, box.w / image.width, box.h / (image.height * PIXEL_ASPECT));
-    this.picture.style.width = `${Math.round(image.width * scale)}px`;
-    this.picture.style.height = `${Math.round(image.height * scale * PIXEL_ASPECT)}px`;
+    // Shown first, so the view has a size to draw at.
     this.picture.hidden = false;
+    if (!this.itemView.show(image)) this.picture.hidden = true;
   }
 
   private renderMagic(run: MenuRun): void {
