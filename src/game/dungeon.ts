@@ -88,7 +88,7 @@ import {
 import { armourReduce, Inventory, itemKey, POTION, randomGear, startingGear, weaponOf, type Item, type NewItem } from './items';
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
-import { isBlocking, type Level, type LevelItem } from './level';
+import { isBlocking, type DoorSounds, type Level, type LevelItem } from './level';
 import { airborne, groundUnder, inChasm, jump, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
 import type { GameMessages } from '../formats/messages';
 import type { CreatureInfo, EncounterTables } from '../formats/exe';
@@ -773,17 +773,30 @@ export class Dungeon {
       if (door.open === door.target) continue;
       door.open = clamp(door.open + Math.sign(door.target - door.open) * DOOR_SPEED * dt, 0, 1);
       if (door.open === 1) this.openDoors.add(i);
+      const sounds = this.doorSounds(i);
+      if (door.open === 0 && sounds?.closeWhenShut && sounds.close) this.events.push({ type: 'sound', name: sounds.close, at: cellCentre(this.level, i) });
     }
   }
 
-  /** Messages and sounds for the cell the player has just walked into. */
+  /** The sounds of the door in a cell, by its kind; the remake's own creak and thud for a level without them. */
+  private doorSounds(cell: number): DoorSounds | undefined {
+    const kind = this.level.cells[cell]?.door ?? 'raising';
+    if (!this.level.doorSounds) return { open: 'OPENDOOR.VOC', close: 'CLOSDOOR.VOC', closeWhenShut: false };
+    return this.level.doorSounds[kind];
+  }
+
+  /**
+   * Messages and sounds for the cell the player has just walked into, as
+   * Arena does: the sound each time, the text each time too unless it is one
+   * to show only once ("~" in the INF).
+   */
   private updateCell(): void {
     const here = cellIndex(this.level, this.player.x, this.player.y);
     if (here === this.here) return;
     this.here = here;
     this.level.triggers.forEach((t, n) => {
       if (t.y * this.level.width + t.x !== here) return;
-      if (t.text && !this.shownTexts.has(n)) {
+      if (t.text && !(t.once && this.shownTexts.has(n))) {
         this.shownTexts.add(n);
         this.events.push({ type: 'message', text: t.text });
       }
@@ -1346,7 +1359,8 @@ export class Dungeon {
       if (blocked) return;
       door.target = 0;
       this.openDoors.delete(cell);
-      this.events.push({ type: 'sound', name: 'CLOSDOOR.VOC', at });
+      const sounds = this.doorSounds(cell);
+      if (sounds?.close && !sounds.closeWhenShut) this.events.push({ type: 'sound', name: sounds.close, at });
       return;
     }
     if (this.locked(cell)) {
@@ -1380,7 +1394,8 @@ export class Dungeon {
     const door = this.doors.get(cell)!;
     if (door.target === 1) return;
     door.target = 1;
-    this.events.push({ type: 'sound', name: 'OPENDOOR.VOC', at: cellCentre(this.level, cell) });
+    const open = this.doorSounds(cell)?.open;
+    if (open) this.events.push({ type: 'sound', name: open, at: cellCentre(this.level, cell) });
   }
 
   private useItem(item: DungeonItem): void {

@@ -144,7 +144,27 @@ export interface Level {
   locks: Map<number, number>;
   triggers: LevelTrigger[];
   start: { x: number; y: number };
+  /** The sounds each kind of door makes, from the INF's sound list; missing ones are left silent. */
+  doorSounds?: Partial<Record<DoorKind, DoorSounds>>;
 }
+
+/**
+ * A door's sounds. A swinging door sounds as it opens and again once it has
+ * shut; the others make one sound opening and one as they start to close.
+ */
+export interface DoorSounds {
+  open?: string;
+  close?: string;
+  /** The close sound plays once shut rather than as it starts closing. */
+  closeWhenShut: boolean;
+}
+
+/**
+ * Where in an INF's sound list each door's sounds are (OpenTESArena's
+ * ArenaVoxelUtils): a swinging door opens with 6 and shuts with 5, a sliding
+ * one uses 14 both ways and a raising one 15.
+ */
+const DOOR_SOUND_INDICES: Partial<Record<DoorKind, [number, number]>> = { swinging: [6, 5], sliding: [14, 14], raising: [15, 15] };
 
 const CHASM_IDS: Record<number, ChasmKind> = { 0x0c: 'dry', 0x0d: 'wet', 0x0e: 'lava' };
 const ITEM_KINDS: Record<number, ItemKind> = { 1: 'key', 2: 'corpse', 3: 'equipment', 4: 'treasure', 5: 'treasure', 6: 'treasure', 7: 'chest', 8: 'chest' };
@@ -320,6 +340,9 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile, platf
     creatures,
     locks,
     triggers,
+    doorSounds: Object.fromEntries(
+      Object.entries(DOOR_SOUND_INDICES).map(([kind, [open, close]]) => [kind, { open: inf.sounds[open], close: inf.sounds[close], closeWhenShut: kind === 'swinging' }]),
+    ),
     start,
   };
 }

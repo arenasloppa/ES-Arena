@@ -39,6 +39,11 @@ Camping and Ria's dreams.
 - The map moves to the menu of menus on a controller, as in Skyrim, where View is the wait button.
 - Every cutscene is checked against the original's order (OpenTESArena's): the opening (book, title, quote, scroll), the story before a new character, Ria's vision after making one, her dreams, and on death her farewell, or Jagar Tharn's taunt once the player holds a piece of the Staff (none can in the Imperial Dungeons). Leaving the Imperial Dungeons plays nothing in Arena either; it takes you to a town of your home province, which the remake doesn't have yet.
 
+Sounds and triggers as the levels give them.
+
+- Doors make the sounds their level's INF lists for their kind: the Imperial Dungeons' raising doors grind like the portcullis they are (PORTC), sliding doors grind (GRIND), and swinging doors creak open and thud once shut.
+- A map's messages show each time you step on them, as in Arena; only those the INF marks to show once ("You awaken to the drip of water...") show just once.
+
 Character creation by Arena's rules.
 
 - Attributes start from your race and gender's own values in the game, plus 4d5 each, with 5d5 bonus points to share out, all rolled as Arena rolls them. Health is 25 plus a roll of your class's hit die, and you start with 50 to 199 gold.

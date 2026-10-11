@@ -360,16 +360,29 @@ describe('a run through a dungeon', () => {
     expect(d.doors.get(13)!.target).toBe(1);
   });
 
-  it('shows each message once but plays its sound every time', () => {
+  it('shows a "~" message once and others each time, and plays the sound every time, as Arena does', () => {
     const level = corridor();
-    level.triggers = [{ x: 2, y: 1, text: 'Water drips.', sound: 'DRIP1.VOC' }];
+    level.triggers = [
+      { x: 2, y: 1, text: 'Water drips.', sound: 'DRIP1.VOC' },
+      { x: 3, y: 1, text: 'You awaken.', once: true },
+    ];
     const d = new Dungeon(level, TABLES, always(0));
-    for (const x of [2.5, 1.5, 2.5]) {
+    for (const x of [2.5, 3.5, 2.5, 3.5]) {
       d.player.x = x;
       d.update(0.01, IDLE_INPUT);
     }
-    expect(d.events.filter((e) => e.type === 'message')).toHaveLength(1);
+    const messages = d.events.flatMap((e) => (e.type === 'message' ? [e.text] : []));
+    expect(messages).toEqual(['Water drips.', 'You awaken.', 'Water drips.']);
     expect(sounds(d.events).filter((s) => s === 'DRIP1.VOC')).toHaveLength(2);
+  });
+
+  it('makes each kind of door’s sounds from the level’s list: a portcullis grinds up and down', () => {
+    const level = corridor();
+    level.doorSounds = { raising: { open: 'PORTC.VOC', close: 'PORTC.VOC', closeWhenShut: false }, swinging: { open: 'OPENDOOR.VOC', close: 'CLOSDOOR.VOC', closeWhenShut: true } };
+    const d = new Dungeon(level, TABLES, always(0));
+    const door = [...d.doors.keys()][0];
+    (d as unknown as { openDoor(c: number): void }).openDoor(door);
+    expect(sounds(d.events)).toContain('PORTC.VOC');
   });
 
   const arena = () => textLevel(['#######', '#@....#', '#######'], { creatures: [{ x: 2.7, y: 1.5, type: 0 }] });
