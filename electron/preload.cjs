@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('arenaDesktop', {
   reopenFolder: () => ipcRenderer.invoke('arena:reopen-folder'),
   rememberFolder: () => ipcRenderer.invoke('arena:remember-folder'),
   readFile: (path) => ipcRenderer.invoke('arena:read-file', path),
+  quit: () => ipcRenderer.invoke('arena:quit'),
 });

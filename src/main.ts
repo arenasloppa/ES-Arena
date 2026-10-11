@@ -1,7 +1,10 @@
-import '@fontsource/alegreya/latin-400.css';
-import '@fontsource/alegreya/latin-400-italic.css';
-import '@fontsource/alegreya/latin-600.css';
-import '@fontsource/im-fell-english-sc/latin-400.css';
+import '@fontsource/cinzel/latin-500.css';
+import '@fontsource/cinzel/latin-600.css';
+import '@fontsource/cinzel/latin-700.css';
+import '@fontsource/barlow-condensed/latin-300.css';
+import '@fontsource/barlow-condensed/latin-400.css';
+import '@fontsource/barlow-condensed/latin-500.css';
+import '@fontsource/barlow-condensed/latin-600.css';
 import * as THREE from 'three';
 import { desktop, type DesktopFolder } from './data/desktop';
 import {
@@ -14,34 +17,110 @@ import {
 } from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
 import { parseCol } from './formats/palette';
-import { parseImg } from './formats/img';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
 import { buildLevel } from './game/level';
 import { Engine } from './game/engine';
-import { TextureCache, toTexture } from './render/textures';
+import { GamepadInput } from './input/gamepad';
+import { TextureCache } from './render/textures';
 import { buildLevelScene } from './render/levelScene';
 import { backdropLevel } from './render/backdrop';
+import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
+import { Hud } from './ui/hud';
+import { MenuNav } from './ui/menu';
+import { bindSettingRows, loadSettings } from './ui/settings';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const menu = $('menu');
-const hud = $('hud');
+const hudEl = $('hud');
 const status = $('status');
 const checks = $<HTMLUListElement>('checks');
 const folderError = $('folder-error');
-const stepFolder = $('step-folder');
-const stepPlay = $('step-play');
 const mapSelect = $<HTMLSelectElement>('map-select');
 const playButton = $<HTMLButtonElement>('play');
+const resumeButton = $<HTMLButtonElement>('resume');
 const canvas = $<HTMLCanvasElement>('view');
 
 const DEFAULT_MAP = 'START.MIF';
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-const messageEl = $('message');
+const pad = new GamepadInput();
+const input = new InputModeWatcher();
+const hud = new Hud(hudEl);
+const settings = loadSettings();
 let data: GameData | undefined;
 let engine: Engine | undefined;
+/** The map being played; undefined while only the backdrop runs. */
 let engineMap: string | undefined;
+let tipsShown = false;
+
+const playing = () => engineMap !== undefined;
+
+// ---- Menu screens ----
+
+type Screen = 'folder' | 'play' | 'controls';
+const screens: Record<Screen, HTMLElement> = {
+  folder: $('screen-folder'),
+  play: $('screen-play'),
+  controls: $('screen-controls'),
+};
+let screen: Screen = 'folder';
+let screenBeforeControls: Screen = 'folder';
+
+const nav = new MenuNav(menu, pad, input, {
+  back: () => {
+    if (screen === 'controls') showScreen(screenBeforeControls);
+    else if (playing()) resume();
+  },
+  resume: () => {
+    if (playing()) resume();
+  },
+});
+
+function showScreen(next: Screen) {
+  if (next === 'controls' && screen !== 'controls') screenBeforeControls = screen;
+  screen = next;
+  for (const [name, el] of Object.entries(screens)) el.hidden = name !== next;
+  menu.dataset.screen = next;
+  updateHints();
+  nav.focusFirst();
+}
+
+/** The button hints along the bottom: Back closes the Controls screen, or returns to the game. */
+function updateHints() {
+  $('hint-back').hidden = screen !== 'controls' && !playing();
+  $('hint-back-label').textContent = screen === 'controls' ? 'Back' : 'Resume';
+  $('hint-change').hidden = screen === 'folder';
+}
+
+function updatePlayOptions() {
+  resumeButton.hidden = !playing();
+  playButton.textContent = playing() && mapSelect.value === engineMap ? 'Start over' : 'Enter the dungeon';
+  updateHints();
+}
+
+/** Lists every in-game action with its keys and its controller buttons. */
+function fillBindings() {
+  const row = (action: (typeof GAME_ACTIONS)[number]) => {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    name.textContent = BINDINGS[action].label;
+    const cells = (['keyboard', 'gamepad'] as InputMode[]).map((mode) => {
+      const td = document.createElement('td');
+      const glyphs = document.createElement('span');
+      glyphs.dataset.glyph = action;
+      glyphs.dataset.glyphMode = mode;
+      td.append(glyphs);
+      return td;
+    });
+    tr.append(name, ...cells);
+    return tr;
+  };
+  $('bindings').replaceChildren(...GAME_ACTIONS.map(row));
+  input.render($('bindings'));
+}
+
+// ---- Game ----
 
 /** Stops the running engine (map or backdrop) and makes `next` the current one. */
 function setEngine(next?: Engine, map?: string) {
@@ -55,13 +134,84 @@ async function showBackdrop() {
   const { level, textures } = backdropLevel();
   const scene = await buildLevelScene(level, textures);
   if (engine) return; // a map started while the backdrop was building
-  setEngine(new Engine(renderer, level, scene, messageEl, { autopilot: true }));
+  setEngine(new Engine(renderer, level, scene, { autopilot: true }));
   engine!.start();
 }
 
 function setStatus(text: string) {
   status.textContent = text;
 }
+
+async function startMap(name: string) {
+  if (!data) return;
+  setEngine(undefined);
+  hud.reset();
+  playButton.disabled = true;
+  try {
+    setStatus(`Loading ${name}…`);
+    const mif = parseMif(await data.read(name));
+    const levelIndex = Math.min(mif.startingLevelIndex, mif.levels.length - 1);
+    const infName = mif.levels[levelIndex].info;
+    const inf = parseInf(await data.read(infName));
+    const level = buildLevel(mif, levelIndex, inf);
+    const palette = parseCol(await data.read('PAL.COL'));
+    const scene = await buildLevelScene(level, new TextureCache(data, palette));
+    const next = new Engine(renderer, level, scene, { pad, hud, controls: settings });
+    next.onPause = pause;
+    setEngine(next, name);
+    if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
+    if (scene.skippedFlats.length) {
+      console.info(`Not drawn yet (animated sprites and creatures): ${[...new Set(scene.skippedFlats)].join(', ')}`);
+    }
+    setStatus(`${level.name || name} · ${level.width}×${level.depth}`);
+    resume();
+    if (!tipsShown) {
+      tipsShown = true;
+      hud.showTips();
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus(`Could not load ${name}: ${(err as Error).message}`);
+    void showBackdrop();
+  } finally {
+    playButton.disabled = false;
+    updatePlayOptions();
+  }
+}
+
+function resume() {
+  if (!engine || !playing()) return;
+  menu.hidden = true;
+  hudEl.hidden = false;
+  engine.start();
+}
+
+function pause() {
+  engine?.pause();
+  if (document.pointerLockElement) document.exitPointerLock();
+  hudEl.hidden = true;
+  menu.hidden = false;
+  updatePlayOptions();
+  nav.opened();
+  showScreen('play');
+}
+
+/**
+ * Reads the controller for the menu and the button prompts, every frame. The running
+ * map reads it too, in the same frame, and gets the same presses.
+ */
+let padWasConnected = false;
+function uiFrame(now: number) {
+  pad.poll(now);
+  input.update(pad);
+  if (!menu.hidden) nav.frame(now);
+  // Like Skyrim, pause if the controller goes away mid-game.
+  else if (padWasConnected && !pad.connected && playing()) pause();
+  padWasConnected = pad.connected;
+  requestAnimationFrame(uiFrame);
+}
+
+// ---- Folder selection ----
 
 function showChecks(names: string[]) {
   const result = validateFolder(names);
@@ -100,7 +250,6 @@ async function useSource(source: FileSource): Promise<boolean> {
     setStatus('');
     return false;
   }
-  await showTitle(data);
   const maps = data.mapNames();
   mapSelect.replaceChildren(
     ...maps.map((m) => {
@@ -110,87 +259,24 @@ async function useSource(source: FileSource): Promise<boolean> {
       return o;
     }),
   );
-  stepFolder.hidden = true;
-  stepPlay.hidden = false;
+  updatePlayOptions();
+  showScreen('play');
   setStatus(`Found ${data.bsa.entries.length} files in GLOBAL.BSA.`);
   return true;
 }
-
-async function showTitle(d: GameData) {
-  if (!d.has('TITLE.IMG')) return;
-  try {
-    const img = parseImg(await d.read('TITLE.IMG'));
-    const pal = parseCol(await d.read('PAL.COL'));
-    const tex = toTexture(img, pal, false);
-    const art = $<HTMLCanvasElement>('title-art');
-    const ctx = art.getContext('2d')!;
-    const src = tex.image as { data: Uint8Array; width: number; height: number };
-    // toTexture flips rows for WebGL; flip back for the 2D canvas.
-    const out = ctx.createImageData(src.width, src.height);
-    const row = src.width * 4;
-    for (let y = 0; y < src.height; y++) out.data.set(src.data.subarray((src.height - 1 - y) * row, (src.height - y) * row), y * row);
-    ctx.putImageData(out, 0, 0);
-    art.hidden = false;
-  } catch (err) {
-    console.warn('Title image failed to load:', err);
-  }
-}
-
-async function startMap(name: string) {
-  if (!data) return;
-  if (engine && engineMap === name) {
-    resume();
-    return;
-  }
-  setEngine(undefined);
-  playButton.disabled = true;
-  try {
-    setStatus(`Loading ${name}…`);
-    const mif = parseMif(await data.read(name));
-    const levelIndex = Math.min(mif.startingLevelIndex, mif.levels.length - 1);
-    const infName = mif.levels[levelIndex].info;
-    const inf = parseInf(await data.read(infName));
-    const level = buildLevel(mif, levelIndex, inf);
-    const palette = parseCol(await data.read('PAL.COL'));
-    const scene = await buildLevelScene(level, new TextureCache(data, palette));
-    const next = new Engine(renderer, level, scene, messageEl);
-    next.onPause = pause;
-    setEngine(next, name);
-    if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
-    if (scene.skippedFlats.length) {
-      console.info(`Not drawn yet (animated sprites and creatures): ${[...new Set(scene.skippedFlats)].join(', ')}`);
-    }
-    setStatus(`${level.name || name} · ${level.width}×${level.depth}`);
-    resume();
-  } catch (err) {
-    console.error(err);
-    setStatus(`Could not load ${name}: ${(err as Error).message}`);
-    void showBackdrop();
-  } finally {
-    playButton.disabled = false;
-  }
-}
-
-function resume() {
-  menu.hidden = true;
-  hud.hidden = false;
-  playButton.textContent = 'Resume';
-  engine?.start();
-}
-
-function pause() {
-  engine?.pause();
-  if (document.pointerLockElement) document.exitPointerLock();
-  menu.hidden = false;
-  hud.hidden = true;
-}
-
-// ---- Folder selection ----
 
 const reuseButton = $<HTMLButtonElement>('reuse-folder');
 const pickButton = $<HTMLButtonElement>('pick-folder');
 const fallbackLabel = $('pick-fallback');
 const folderInput = $<HTMLInputElement>('folder-input');
+
+/** Browsers open their folder pickers only for a click or a key press, not for a controller button. */
+function needsClick(): boolean {
+  const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+  if (!activation || activation.isActive) return false;
+  setStatus('Use the mouse or keyboard for this one: browsers only open their folder picker for a click or a key press.');
+  return true;
+}
 
 async function useHandle(handle: FileSystemDirectoryHandle) {
   setStatus('Scanning folder…');
@@ -220,8 +306,13 @@ if (desktop) {
   const bridge = desktop;
   pickButton.addEventListener('click', () => useDesktopFolder(bridge.chooseFolder()));
   void useDesktopFolder(bridge.reopenFolder());
+  for (const quit of document.querySelectorAll<HTMLButtonElement>('.quit')) {
+    quit.hidden = false;
+    quit.addEventListener('click', () => void bridge.quit());
+  }
 } else if (supportsDirectoryPicker() && !embedded) {
   pickButton.addEventListener('click', async () => {
+    if (needsClick()) return;
     try {
       const handle = await pickDirectory();
       await saveFolderHandle(handle);
@@ -231,6 +322,7 @@ if (desktop) {
       // Some embedded pages block the folder picker; the upload-style picker still works there.
       pickButton.hidden = true;
       fallbackLabel.hidden = false;
+      fallbackLabel.focus();
       setStatus('This page cannot open the folder picker, so use the button again to choose the folder.');
     }
   });
@@ -239,15 +331,20 @@ if (desktop) {
     reuseButton.hidden = false;
     reuseButton.textContent = `Use "${handle.name}" again`;
     reuseButton.addEventListener('click', async () => {
+      if (needsClick()) return;
       if (await ensureReadPermission(handle)) await useHandle(handle);
       else setStatus('Access to the folder was not allowed.');
     });
+    if (screen === 'folder') nav.focusFirst();
   });
 } else {
   pickButton.hidden = true;
   fallbackLabel.hidden = false;
 }
 
+fallbackLabel.addEventListener('click', (e) => {
+  if (e.target === fallbackLabel && needsClick()) e.preventDefault();
+});
 folderInput.addEventListener('change', async () => {
   if (folderInput.files?.length) await useSource(sourceFromFileList(folderInput.files));
 });
@@ -256,15 +353,26 @@ $('change-folder').addEventListener('click', () => {
   setEngine(undefined);
   void showBackdrop();
   data = undefined;
-  playButton.textContent = 'Enter the dungeon';
-  stepPlay.hidden = true;
-  stepFolder.hidden = false;
+  updatePlayOptions();
+  showScreen('folder');
   setStatus('');
 });
 
-playButton.addEventListener('click', () => startMap(mapSelect.value));
-mapSelect.addEventListener('change', () => {
-  playButton.textContent = mapSelect.value === engineMap ? 'Resume' : 'Enter the dungeon';
-});
+for (const el of document.querySelectorAll<HTMLElement>('[data-screen]')) {
+  el.addEventListener('click', () => showScreen(el.dataset.screen as Screen));
+}
+for (const el of document.querySelectorAll<HTMLElement>('[data-back]')) {
+  el.addEventListener('click', () => showScreen(screenBeforeControls));
+}
 
+resumeButton.addEventListener('click', resume);
+playButton.addEventListener('click', () => startMap(mapSelect.value));
+mapSelect.addEventListener('change', updatePlayOptions);
+// Choosing the map list itself (A on a controller, or Enter) plays the map picked in it.
+mapSelect.addEventListener('choose', () => startMap(mapSelect.value));
+
+bindSettingRows(screens.controls, settings);
+fillBindings();
+showScreen('folder');
 void showBackdrop();
+requestAnimationFrame(uiFrame);

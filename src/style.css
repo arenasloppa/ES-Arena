@@ -1,65 +1,253 @@
-/* Layout: a full-window 3D view with one framed menu panel centred over it, like Arena's in-game scrolls.
-   Single dark theme by choice: the dungeon view is always dark. */
+/* After Skyrim's interface: white condensed type straight on the darkened game view, thin rules with a
+   diamond at the centre, no boxes. Single dark theme by choice: the dungeon view is always dark. */
 :root {
-  --night: #0b0a08; /* page and fog colour */
-  --panel: rgba(22, 18, 13, 0.94);
-  --frame: #5c4831; /* carved-wood border */
-  --gilt: #c9a24a; /* headings, focus, accents */
-  --ink: #eadfc6; /* body text */
-  --ash: #a8987c; /* secondary text */
-  --button: #6a4e2b;
-  --button-hover: #85623a;
-  --field: #1c1712;
-  --ok: #93c47d;
-  --error: #e3735c;
-  --shadow: rgba(0, 0, 0, 0.75);
-  --crosshair: rgba(255, 240, 200, 0.6);
-  --font-display: 'IM Fell English SC', 'Iowan Old Style', Georgia, serif;
-  --font-body: 'Alegreya', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  --night: #050505; /* page colour behind the 3D view */
+  --ink: #f3f0e8; /* text and picked options */
+  --dim: #8e8b84; /* options not picked, notes */
+  --line: rgba(243, 240, 232, 0.32); /* rules */
+  --line-strong: rgba(243, 240, 232, 0.75);
+  --glow: rgba(255, 248, 230, 0.55);
+  --shade: rgba(0, 0, 0, 0.55);
+  --error: #e08a7c;
+  --font-title: 'Cinzel', 'Trajan Pro', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Barlow Condensed', 'Futura Condensed', 'Avenir Next Condensed', 'Arial Narrow', sans-serif;
+  --compass-scale: 3px; /* per degree; matches the marks hud.ts places */
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink); font: 17px/1.5 var(--font-body); overflow: hidden; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--night); color: var(--ink);
+  font: 400 18px/1.4 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+/* Playing with a controller: hide the pointer until the mouse moves. */
+body[data-input='gamepad'], body[data-input='gamepad'] * { cursor: none !important; }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-.panel {
-  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: min(560px, calc(100vw - 32px)); max-height: calc(100% - 32px); overflow: auto;
-  background: var(--panel); border: 2px solid var(--frame);
-  box-shadow: inset 0 0 0 4px var(--panel), inset 0 0 0 5px var(--gilt), 0 12px 48px var(--shadow);
-  padding: 28px;
-  display: grid; gap: 12px;
+
+/* ---- Rules with a diamond, as under Skyrim's headings ---- */
+.rule { position: relative; height: 12px; width: min(440px, 80%); margin: 0 auto; }
+.rule::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line) 22%, var(--line) 78%, transparent);
 }
-.panel > * { margin: 0; min-width: 0; }
-#step-folder, #step-play { display: grid; gap: 12px; }
-#step-folder > *, #step-play > * { margin: 0; }
-h1 { color: var(--gilt); font: 400 34px/1.1 var(--font-display); text-wrap: balance; }
-.sub { color: var(--ash); font-style: italic; }
-code { color: var(--gilt); font-size: 0.9em; }
-#title-art { width: 100%; max-width: 100%; image-rendering: pixelated; border: 1px solid var(--frame); }
-.buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-button, .button {
-  font: 600 16px/1.2 var(--font-body); background: var(--button); color: var(--ink);
-  border: 1px solid var(--gilt); padding: 9px 16px; cursor: pointer;
+.rule::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 7px; height: 7px;
+  border: 1px solid var(--line-strong); background: var(--night);
+  transform: translate(-50%, -50%) rotate(45deg);
 }
-button:hover, .button:hover { background: var(--button-hover); }
-button:focus-visible, .button:focus-within, select:focus-visible { outline: 2px solid var(--gilt); outline-offset: 2px; }
-button:disabled { opacity: 0.6; cursor: progress; }
-button.secondary { background: transparent; }
-label { color: var(--ash); }
-select { font: inherit; background: var(--field); color: var(--ink); border: 1px solid var(--frame); padding: 4px 6px; margin-left: 8px; max-width: 100%; }
-#checks { list-style: none; padding: 0; font-size: 15px; display: grid; gap: 2px; }
+
+/* ---- Menu ---- */
+#menu {
+  position: fixed; inset: 0; overflow-y: auto;
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  padding: 5vh 16px calc(96px + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+}
+/* Darkens the edges of the view behind the menu, with a slow drift of smoke. */
+#menu::before, #menu::after { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+#menu::before {
+  background: radial-gradient(ellipse 75% 70% at 50% 42%, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.84) 72%, rgba(0, 0, 0, 0.95));
+}
+#menu::after {
+  inset: -20%;
+  background:
+    radial-gradient(ellipse 40% 25% at 30% 60%, rgba(200, 200, 195, 0.07), transparent 70%),
+    radial-gradient(ellipse 35% 20% at 70% 35%, rgba(200, 200, 195, 0.05), transparent 70%);
+  animation: smoke 36s ease-in-out infinite alternate;
+}
+@keyframes smoke {
+  from { transform: translate3d(-4%, 2%, 0) scale(1); }
+  to { transform: translate3d(5%, -3%, 0) scale(1.12); }
+}
+.logo { margin-top: auto; display: grid; gap: 6px; }
+.logo > * { margin: 0; }
+.logo-kicker {
+  font: 500 clamp(13px, 1.7vw, 18px)/1 var(--font-title);
+  letter-spacing: 0.5em; margin-right: -0.5em; text-transform: uppercase; color: rgba(243, 240, 232, 0.85);
+}
+h1 {
+  font: 700 clamp(64px, 12vw, 132px)/1 var(--font-title);
+  letter-spacing: 0.08em; margin-right: -0.08em; text-transform: uppercase;
+  color: transparent; background: linear-gradient(#ffffff 0%, #e2ded5 45%, #8f8b84 100%);
+  -webkit-background-clip: text; background-clip: text;
+  filter: drop-shadow(0 3px 14px rgba(0, 0, 0, 0.85));
+}
+.logo-sub {
+  font: 300 clamp(14px, 1.5vw, 17px)/1.3 var(--font-ui);
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin-top: 6px;
+}
+h2 {
+  margin: 0; font: 600 clamp(24px, 3vw, 32px)/1.1 var(--font-title);
+  letter-spacing: 0.22em; margin-right: -0.22em; text-transform: uppercase;
+}
+/* The settings screens have no logo, as in Skyrim. */
+#menu[data-screen='controls'] .logo { display: none; }
+#menu[data-screen='controls'] .screen { margin-top: auto; }
+#menu[data-screen='controls'] #status { display: none; }
+
+.screen { display: grid; justify-items: center; gap: 18px; width: 100%; }
+.options { display: grid; justify-items: center; gap: 2px; width: min(480px, 100%); }
+.option, .option-row {
+  font: 400 clamp(20px, 2.4vw, 26px)/1.25 var(--font-ui);
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim); background: none; border: 0; border-radius: 0;
+  padding: 6px 28px; cursor: pointer; transition: color 0.12s, text-shadow 0.12s;
+}
+.option:focus, .option-row:focus-within { outline: none; color: var(--ink); text-shadow: 0 0 14px var(--glow); }
+/* The picked option sits on a soft band of light, like Skyrim's lists. */
+.option:focus:not(select), .option-row:focus-within {
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(255, 255, 255, 0.1), transparent);
+}
+.option-row:focus-within .option { background: none; }
+.option:disabled { opacity: 0.5; cursor: progress; }
+.option-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 24px; width: 100%; text-align: left; }
+.row-label { white-space: nowrap; }
+/* In the main menu the map list sits centred like the other options. */
+#screen-play .option-row { display: flex; justify-content: center; gap: 18px; width: auto; }
+.settings { width: min(580px, 100%); }
+.row-value { display: inline-flex; align-items: center; gap: 4px; justify-self: end; }
+.arrow { padding: 0 8px; cursor: pointer; opacity: 0.35; font-family: var(--font-ui); }
+.option-row:focus-within .arrow, .option-row:hover .arrow { opacity: 1; }
+.option-row select.option {
+  appearance: none; -webkit-appearance: none; padding: 0 4px; min-width: 7em; field-sizing: content;
+  font: inherit; letter-spacing: 0.06em; color: inherit; text-shadow: inherit; text-align: center; text-align-last: center;
+}
+.option-row select.option option { background: #111; color: var(--ink); text-transform: none; }
+.value { min-width: 2.6em; text-align: center; }
+.slider { width: clamp(80px, 12vw, 140px); height: 3px; background: rgba(243, 240, 232, 0.2); position: relative; margin: 0 6px; }
+.slider-fill {
+  position: absolute; inset: 0; background: currentColor;
+  transform-origin: left; transform: scaleX(var(--fill, 0.5));
+}
+
+.notes { max-width: 560px; color: var(--dim); font: 300 17px/1.45 var(--font-ui); letter-spacing: 0.02em; }
+.notes > * { margin: 0 0 10px; }
+.notes strong { color: var(--ink); font-weight: 500; }
+#checks { list-style: none; padding: 0; display: grid; gap: 2px; font-size: 16px; }
 #checks:empty { display: none; }
 #checks li::before { content: '✗ '; color: var(--error); }
-#checks li.found::before { content: '✓ '; color: var(--ok); }
-#checks li span { color: var(--ash); }
+#checks li.found::before { content: '✓ '; color: var(--ink); }
 .error { color: var(--error); }
-#status { color: var(--ash); font-size: 15px; min-height: 1.5em; }
-#hud { position: fixed; inset: 0; pointer-events: none; }
-#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--crosshair); font: 20px monospace; }
-#message {
-  position: absolute; top: 12%; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(640px, calc(100vw - 32px));
-  background: var(--panel); border: 1px solid var(--frame); padding: 12px 18px; white-space: pre-line; text-align: center;
+#status { margin: 0 0 auto; min-height: 1.4em; color: var(--dim); font: 300 16px/1.4 var(--font-ui); letter-spacing: 0.06em; }
+
+.bindings { border-collapse: collapse; font: 400 18px/1.2 var(--font-ui); letter-spacing: 0.04em; text-align: left; }
+.bindings th {
+  font-weight: 400; font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+  padding: 0 16px 8px;
 }
-#help { position: absolute; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: 16px; right: 16px; text-align: center; color: var(--ash); font-size: 14px; text-shadow: 0 1px 2px var(--shadow); }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+.bindings td { padding: 5px 16px; border-top: 1px solid rgba(243, 240, 232, 0.08); }
+.bindings td:first-child { text-transform: uppercase; letter-spacing: 0.12em; }
+.bindings [data-glyph] { margin-right: 0; }
+
+/* Button hints along the bottom of the menu. */
+.hints {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 32px;
+  padding: 16px 24px calc(16px + env(safe-area-inset-bottom, 0px));
+  font: 400 16px/1 var(--font-ui); letter-spacing: 0.14em; text-transform: uppercase;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+}
+.hints::before {
+  content: ''; position: absolute; top: 0; left: 15%; right: 15%; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line), transparent);
+}
+.hint { display: inline-flex; align-items: center; }
+
+/* ---- Key caps and controller buttons ---- */
+[data-glyph] { display: inline-flex; align-items: center; gap: 0.25em; margin-right: 0.55em; vertical-align: middle; }
+.glyph {
+  display: inline-grid; place-items: center; box-sizing: border-box;
+  min-width: 1.65em; height: 1.65em; padding: 0 0.35em;
+  font: 600 0.78em/1 var(--font-ui); letter-spacing: 0.02em; text-transform: none; text-shadow: none;
+  color: var(--ink);
+}
+.glyph svg { width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.key { border: 1px solid rgba(243, 240, 232, 0.75); border-radius: 3px; background: rgba(0, 0, 0, 0.45); box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.12); }
+.key.wide { padding: 0 0.5em; }
+.pad.face, .pad.stick { width: 1.65em; padding: 0; border-radius: 50%; }
+.pad.face { background: #1b1b1b; border: 1px solid rgba(243, 240, 232, 0.35); }
+.pad.stick { border: 1.5px solid rgba(243, 240, 232, 0.8); background: rgba(0, 0, 0, 0.45); }
+.pad.shoulder { border: 1px solid rgba(243, 240, 232, 0.75); border-radius: 0.5em 0.5em 0.25em 0.25em; background: rgba(0, 0, 0, 0.45); padding: 0 0.4em; }
+.pad.dpad { padding: 0; }
+.pad.dpad svg { width: 1.5em; height: 1.5em; fill: currentColor; stroke: none; }
+body[data-pad='xbox'] .face-a { background: #4c9a2a; border-color: #4c9a2a; color: #fff; }
+body[data-pad='xbox'] .face-b { background: #c8372b; border-color: #c8372b; color: #fff; }
+body[data-pad='xbox'] .face-y { background: #dcaa1c; border-color: #dcaa1c; color: #1a1a1a; }
+body[data-pad='playstation'] .face-a { color: #8fb4f0; }
+body[data-pad='playstation'] .face-b { color: #f07a74; }
+body[data-pad='playstation'] .face-y { color: #4fc3a7; }
+
+/* ---- In-game HUD ---- */
+#hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.6); }
+#compass {
+  position: absolute; top: calc(18px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+  width: min(500px, 76vw); height: 30px;
+}
+/* Diamond caps at both ends of the bar. */
+#compass::before, #compass::after {
+  content: ''; position: absolute; top: 50%; width: 9px; height: 9px;
+  border: 1px solid var(--line-strong); background: rgba(0, 0, 0, 0.6);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+#compass::before { left: 8px; }
+#compass::after { left: calc(100% - 8px); }
+.compass-window {
+  position: absolute; inset: 0 14px; overflow: hidden;
+  background:
+    linear-gradient(var(--line), var(--line)) top / 100% 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) bottom / 100% 1px no-repeat,
+    rgba(0, 0, 0, 0.42);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+#compass-strip {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: 0;
+  transform: translateX(calc((var(--heading, 0) + 360) * -1 * var(--compass-scale)));
+}
+.mark {
+  position: absolute; top: 50%; left: calc(var(--at) * var(--compass-scale));
+  width: 1px; height: 6px; background: rgba(243, 240, 232, 0.4); transform: translate(-50%, -50%);
+}
+.mark.major { height: 11px; background: rgba(243, 240, 232, 0.6); }
+.mark.letter { width: auto; height: auto; background: none; font: 500 19px/1 var(--font-ui); letter-spacing: 0; }
+#crosshair { position: absolute; left: 50%; top: 50%; width: 15px; height: 5px; transform: translate(-50%, -50%); }
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute; top: 0; width: 4px; height: 4px;
+  border: solid rgba(243, 240, 232, 0.8); border-width: 1.5px 1.5px 0 0;
+}
+#crosshair::before { left: 0; transform: rotate(45deg); }
+#crosshair::after { right: 0; transform: rotate(-135deg); }
+#prompt { position: absolute; left: 50%; top: calc(50% + 36px); transform: translateX(-50%); text-align: center; white-space: nowrap; }
+.prompt-action { display: inline-flex; align-items: center; font-size: 20px; letter-spacing: 0.06em; }
+#prompt-name { font-size: 30px; line-height: 1.1; letter-spacing: 0.03em; }
+#message {
+  position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); margin: 0;
+  width: min(820px, calc(100vw - 48px)); text-align: center; white-space: pre-line;
+  font: 400 clamp(19px, 2.2vw, 24px)/1.4 var(--font-ui); letter-spacing: 0.02em;
+  opacity: 0; transition: opacity 0.8s;
+}
+#message.shown { opacity: 1; transition-duration: 0.25s; }
+#tips {
+  position: absolute; top: calc(24px + env(safe-area-inset-top, 0px)); left: 24px;
+  display: grid; grid-template-columns: max-content auto; gap: 6px 4px; align-items: center;
+  padding: 14px 48px 14px 18px; font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase;
+  background: linear-gradient(90deg, var(--shade), transparent);
+  border-left: 1px solid var(--line);
+}
+.tip { display: contents; }
+
+@media (max-width: 720px) {
+  #tips { display: none !important; }
+  #compass { top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .bindings { font-size: 15px; }
+  .bindings th { font-size: 12px; letter-spacing: 0.1em; }
+  .bindings th, .bindings td { padding-left: 6px; padding-right: 6px; }
+  .option-row { padding-left: 12px; padding-right: 12px; gap: 12px; }
+  .slider { width: 64px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #menu::after { animation: none; }
+  .option, .option-row, #message { transition: none; }
+}

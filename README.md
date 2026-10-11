@@ -22,6 +22,8 @@ arenasloppa brings the ideas and the game files, clicks the buttons Claude asks 
 - Walk the Imperial Dungeons where Arena begins, in first person, or try any of the game's other maps from the menu.
 - The original wall, floor and ceiling textures, animated water and lava, raised platforms, doors that slide open,
   decorations such as chains and barrels, and the dungeon's own messages when you reach their squares.
+- Play with a controller or the keyboard and mouse, with Skyrim's controls, menu and HUD: a compass, button prompts
+  that match your controller, jumping, sneaking and sprinting.
 
 Coming later: creatures and combat, sound and music, cities and the wilderness, character creation and saving.
 
@@ -64,14 +66,23 @@ npm run app     # or open it as the desktop app
 
 ### Controls
 
-| Key | Action |
-|---|---|
-| <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Move |
-| Mouse | Look (click the view to capture the mouse, or drag where it can't be captured) |
-| Arrow keys | Turn and move |
-| <kbd>Shift</kbd> | Run |
-| <kbd>E</kbd>, <kbd>Space</kbd> or click | Open doors |
-| <kbd>Esc</kbd> | Menu |
+The controls follow Skyrim's. Any controller the browser or app recognises works, including Xbox, PlayStation and
+Switch Pro controllers, and the on-screen prompts show its own buttons.
+
+| Action | Keyboard and mouse | Controller (PlayStation) |
+|---|---|---|
+| Move | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Left stick |
+| Look | Mouse (click the view to capture it) | Right stick |
+| Turn and walk | Arrow keys | |
+| Open doors | <kbd>E</kbd> or click | A (✕) |
+| Jump | <kbd>Space</kbd> | Y (△) |
+| Sprint | <kbd>Shift</kbd> | LB (L1) |
+| Sneak | <kbd>C</kbd> | Click the left stick (L3) |
+| Menu | <kbd>Esc</kbd> or <kbd>Tab</kbd> | B or Start (○ or Options) |
+
+In the menus, move with the arrow keys, the D-pad or the left stick, choose with <kbd>Enter</kbd> or A, change a setting
+with left and right, and go back with <kbd>Esc</kbd> or B. LB and RB, or <kbd>Page Up</kbd> and <kbd>Page Down</kbd>,
+skip ten maps at a time. The Controls screen sets look speed, inverted look and vibration.
 
 ### Files it reads
 
@@ -87,6 +98,8 @@ copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`, `SOUND.CFG`, `
 | `src/formats/` | Readers for Arena's file formats: the BSA archive, COL palettes, IMG/SET/RCI images, MIF maps, INF level definitions, and the LZSS and LZHUF decompressors. No browser or Three.js code. |
 | `src/data/` | Finding and reading the player's `ARENA` folder, and checking the required files. |
 | `src/game/` | The level model built from a MIF map and its INF file, movement and collision, and the game loop. |
+| `src/input/` | Controllers, read through the browser's Gamepad API. |
+| `src/ui/` | The Skyrim-style menu and HUD: moving through the menu, the compass, button prompts and the control settings. |
 | `src/render/` | Turning a level into Three.js meshes and textures, plus the stand-in hall shown behind the menu, whose textures the remake draws itself. |
 | `electron/` | The desktop app: a window that shows the built game and can read the `ARENA` folder you pick, and nothing else on your computer. |
 | `tests/` | Unit tests. `tests/helpers/encode.ts` builds fake archives, maps and compressed data, so the tests never need the real game files. |
@@ -116,4 +129,4 @@ checking against the original game.
 This is an unofficial fan project, not affiliated with or endorsed by Bethesda Softworks or ZeniMax Media.
 The Elder Scrolls and Arena are trademarks of their owners. Arena is free to download, but its license allows
 personal use only, so this repository never contains the game's files; the remake reads them from your own copy.
-The menu's fonts, Alegreya and IM Fell English SC, are used under the SIL Open Font License.
+The menu's fonts, Cinzel and Barlow Condensed, are used under the SIL Open Font License.

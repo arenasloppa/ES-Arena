@@ -109,6 +109,10 @@ ipcMain.handle('arena:read-file', async (event, relPath) => {
   return fs.readFile(file);
 });
 
+ipcMain.handle('arena:quit', (event) => {
+  if (fromGame(event)) app.quit();
+});
+
 /** Serves dist/ as app://arena/, which gives the game a proper origin instead of file://. */
 async function serveGame(request) {
   const file = path.join(DIST, path.normalize(decodeURIComponent(new URL(request.url).pathname)));

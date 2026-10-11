@@ -13,6 +13,13 @@
  *   0xDxxx               diagonal wall, texture (v & 0xFF) - 1
  * FLOR voxel: floor texture index hi byte; 0x0C/0x0D/0x0E are dry, wet and
  * lava chasms; the low byte can hold a flat index as well.
+ *
+ * Orientation: Arena's grids run from east to west along a row (column 0 is
+ * the east edge) and from north to south down the rows. START.MIF's own
+ * directions agree ("go west, then south" leads to higher columns, then
+ * higher rows), as do OpenTESArena's axes. Drawn as stored, the world would
+ * be a mirror image, so the level is flipped east-west here: in a Level, +x
+ * is east and +y is south.
  */
 import type { MifFile, MifLevel } from '../formats/mif';
 import { expandTextures, roleTexture, type InfFile } from '../formats/inf';
@@ -86,8 +93,10 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
     if (r) chasmTextures[kind] = r.index;
   }
 
-  const cells: Cell[] = [];
+  const cells: Cell[] = new Array(width * depth);
   const flats: LevelFlat[] = [];
+  /** Column in the level for a MIF column (see Orientation above). */
+  const east = (x: number) => width - 1 - x;
 
   for (let y = 0; y < depth; y++) {
     for (let x = 0; x < width; x++) {
@@ -123,7 +132,7 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
         switch (hi >> 4) {
           case 0x8: {
             const flat = inf.flats[lo];
-            if (flat) flats.push({ x: x + 0.5, y: y + 0.5, name: flat.name, yOffset: flat.yOffset });
+            if (flat) flats.push({ x: east(x) + 0.5, y: y + 0.5, name: flat.name, yOffset: flat.yOffset });
             break;
           }
           case 0x9:
@@ -138,23 +147,25 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile): Leve
           case 0xd:
             cell.kind = 'diagonal';
             cell.wallTex = clampWall(lo - 1);
-            cell.diagonalFlip = (v & 0x0100) !== 0;
+            // Mirroring the grid swaps which corners a diagonal joins.
+            cell.diagonalFlip = (v & 0x0100) === 0;
             break;
           default:
             break;
         }
       }
-      cells.push(cell);
+      cells[y * width + east(x)] = cell;
     }
   }
 
   const triggers: LevelTrigger[] = ml.triggers.map((t) => {
     const raw = inf.texts[t.textIndex];
     const text = raw && !raw.startsWith('+') ? raw.replace(/^~/, '').trim() : undefined;
-    return { x: t.x, y: t.y, text };
+    return { x: east(t.x), y: t.y, text };
   });
 
-  const start = mif.startPoints[0] ?? findOpenCell(cells, width, depth);
+  const startPoint = mif.startPoints[0];
+  const start = startPoint ? { x: width - startPoint.x, y: startPoint.y } : findOpenCell(cells, width, depth);
 
   // The INF has no separate ceiling texture for most dungeons; use the most common floor.
   const floorCounts = new Map<number, number>();

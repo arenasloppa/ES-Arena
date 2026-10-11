@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseInf } from '../src/formats/inf';
 import { parseMif } from '../src/formats/mif';
 import { buildLevel, isBlocking } from '../src/game/level';
-import { blockedAt, doorInFront, step, type PlayerState } from '../src/game/player';
+import { blockedAt, doorInFront, startJump, step, stepJump, type PlayerState } from '../src/game/player';
 import { buildLevelGeometry } from '../src/render/levelGeometry';
 import { encryptInf, makeMif } from './helpers/encode';
 
@@ -48,20 +48,30 @@ function level() {
 }
 
 describe('buildLevel', () => {
+  // The level is the MIF grid mirrored east-west, so MIF column x lands in column 4 - x here.
   it('decodes walls, doors, flats, chasms and raised platforms', () => {
     const l = level();
     const at = (x: number, y: number) => l.cells[y * 5 + x];
     expect(at(0, 0)).toMatchObject({ kind: 'wall', wallTex: 1 });
     expect(l.wallTextures[1]).toEqual({ file: 'WALLA.SET', frame: 0 });
     expect(at(2, 1)).toMatchObject({ kind: 'door', wallTex: 1 });
-    expect(at(1, 2).kind).toBe('empty');
-    expect(l.flats).toEqual([{ x: 1.5, y: 2.5, name: 'BARREL.IMG', yOffset: undefined }]);
+    expect(at(3, 2).kind).toBe('empty');
+    expect(l.flats).toEqual([{ x: 3.5, y: 2.5, name: 'BARREL.IMG', yOffset: undefined }]);
     expect(at(2, 2).chasm).toBe('wet');
     expect(l.chasmTextures.wet).toBe(4);
-    expect(at(3, 2)).toMatchObject({ kind: 'raised', wallTex: 1, capTex: 1, capIsWall: true });
+    expect(at(1, 2)).toMatchObject({ kind: 'raised', wallTex: 1, capTex: 1, capIsWall: true });
     expect(at(1, 1).floorTex).toBe(1);
-    expect(l.start).toEqual({ x: 1.5, y: 3.5 });
+    expect(l.start).toEqual({ x: 3.5, y: 3.5 });
     expect(l.triggers).toEqual([{ x: 2, y: 3, text: 'Hello there.' }]);
+  });
+
+  it('turns the east-to-west MIF rows around so that +x runs east', () => {
+    const row = [0x0202, 0, 0, 0xd002, 0xd102];
+    const mif = parseMif(makeMif({ width: 5, depth: 1, start: { x: 1.5, y: 0.5 }, map1: row, flor: new Array(5).fill(0x0100) }));
+    const l = buildLevel(mif, 0, parseInf(INF));
+    expect(l.cells.map((c) => c.kind)).toEqual(['diagonal', 'diagonal', 'empty', 'empty', 'wall']);
+    expect(l.cells.slice(0, 2).map((c) => c.diagonalFlip)).toEqual([false, true]);
+    expect(l.start).toEqual({ x: 3.5, y: 0.5 });
   });
 
   it('blocks walls and closed doors only', () => {
@@ -107,5 +117,23 @@ describe('level geometry', () => {
     expect(g.doors).toHaveLength(1);
     expect(g.batches.has('liquid:wet')).toBe(true);
     for (const b of g.batches.values()) expect(b.positions.length / 3).toBe((b.indices.length / 6) * 4);
+  });
+});
+
+describe('jumping', () => {
+  it('peaks at the apex halfway through and lands after the full time', () => {
+    const j = { height: 0, speed: 0 };
+    expect(startJump(j, 0.2, 0.5)).toBe(true);
+    expect(startJump(j, 0.2, 0.5)).toBe(false);
+    let peak = 0;
+    let t = 0;
+    while (t < 1 && (t === 0 || j.height > 0)) {
+      stepJump(j, 0.2, 0.5, 1 / 240);
+      peak = Math.max(peak, j.height);
+      t += 1 / 240;
+    }
+    expect(peak).toBeCloseTo(0.2, 2);
+    expect(t).toBeCloseTo(0.5, 1);
+    expect(j).toEqual({ height: 0, speed: 0 });
   });
 });

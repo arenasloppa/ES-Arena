@@ -10,46 +10,121 @@
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
-      <div id="crosshair">+</div>
-      <div id="message" hidden></div>
-      <div id="help">WASD move · Mouse or drag to look · Shift run · E or click opens doors · Esc menu</div>
+      <div id="compass" aria-hidden="true">
+        <div class="compass-window"><div id="compass-strip"></div></div>
+      </div>
+      <div id="crosshair" aria-hidden="true"></div>
+      <div id="prompt" hidden>
+        <div class="prompt-action"><span data-glyph="activate"></span><span id="prompt-verb"></span></div>
+        <div id="prompt-name"></div>
+      </div>
+      <aside id="tips" hidden>
+        <p class="tip"><span data-glyph="move"></span><span>Move</span></p>
+        <p class="tip"><span data-glyph="look"></span><span>Look</span></p>
+        <p class="tip"><span data-glyph="activate"></span><span>Open doors</span></p>
+        <p class="tip"><span data-glyph="jump"></span><span>Jump</span></p>
+        <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
+        <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
+        <p class="tip"><span data-glyph="menu"></span><span>Menu</span></p>
+      </aside>
+      <p id="message" role="status" aria-live="polite"></p>
     </div>
 
-    <section id="menu" class="panel">
-      <canvas id="title-art" width="320" height="200" hidden></canvas>
-      <h1>The Elder Scrolls: Arena</h1>
-      <p class="sub">An unofficial fan remake in Three.js. Bring your own copy of the game.</p>
+    <main id="menu">
+      <header class="logo">
+        <p class="logo-kicker">The Elder Scrolls</p>
+        <h1>Arena</h1>
+        <div class="rule" aria-hidden="true"></div>
+        <p class="logo-sub">An unofficial remake, played with your own copy of the game</p>
+      </header>
 
-      <div id="step-folder">
-        <p>
-          This remake ships none of Bethesda's files. Choose the <code>ARENA</code> folder from your copy of the game.
-          In the free Steam release it sits inside the game's install folder, and it holds <code>GLOBAL.BSA</code>.
-          Your files stay on this computer and are never uploaded.
-        </p>
-        <div class="buttons">
-          <button id="reuse-folder" hidden>Use my ARENA folder again</button>
-          <button id="pick-folder">Choose ARENA folder…</button>
-          <label id="pick-fallback" class="button" hidden>
+      <section id="screen-folder" class="screen" aria-label="Choose your game folder">
+        <nav class="options">
+          <button id="reuse-folder" class="option" hidden>Use my ARENA folder again</button>
+          <button id="pick-folder" class="option">Choose ARENA folder…</button>
+          <label id="pick-fallback" class="option" tabindex="0" hidden>
             Choose ARENA folder…
             <input id="folder-input" type="file" webkitdirectory multiple hidden />
           </label>
+          <button class="option" data-screen="controls">Controls</button>
+          <button class="option quit" hidden>Quit</button>
+        </nav>
+        <div class="notes">
+          <p>
+            This remake ships none of Bethesda's files. Choose the <strong>ARENA</strong> folder from your copy of
+            the game, the one that holds GLOBAL.BSA. In the free Steam release it sits inside the game's install
+            folder. Your files stay on this computer and are never uploaded.
+          </p>
+          <ul id="checks"></ul>
+          <p id="folder-error" class="error" hidden></p>
         </div>
-        <ul id="checks"></ul>
-        <p id="folder-error" class="error" hidden></p>
-      </div>
+      </section>
 
-      <div id="step-play" hidden>
-        <label>
-          Map
-          <select id="map-select"></select>
-        </label>
-        <div class="buttons">
-          <button id="play">Enter the dungeon</button>
-          <button id="change-folder" class="secondary">Change folder</button>
-        </div>
-      </div>
-      <p id="status"></p>
-    </section>
+      <section id="screen-play" class="screen" aria-label="Main menu" hidden>
+        <nav class="options">
+          <button id="resume" class="option" hidden>Resume</button>
+          <button id="play" class="option">Enter the dungeon</button>
+          <div class="option-row">
+            <span class="row-label" id="map-label">Map</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <select id="map-select" class="option" aria-labelledby="map-label"></select>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </div>
+          <button class="option" data-screen="controls">Controls</button>
+          <button id="change-folder" class="option">Change folder</button>
+          <button class="option quit" hidden>Quit</button>
+        </nav>
+      </section>
+
+      <section id="screen-controls" class="screen" aria-label="Controls" hidden>
+        <h2>Controls</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <table class="bindings">
+          <thead>
+            <tr><th scope="col"></th><th scope="col">Keyboard and mouse</th><th scope="col">Controller</th></tr>
+          </thead>
+          <tbody id="bindings"></tbody>
+        </table>
+        <nav class="options settings">
+          <button class="option option-row" data-setting="lookSpeed">
+            <span class="row-label">Look speed</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option option-row" data-setting="invertLook">
+            <span class="row-label">Invert look</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option option-row" data-setting="vibration">
+            <span class="row-label">Vibration</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option" data-back>Back</button>
+        </nav>
+      </section>
+
+      <p id="status" role="status"></p>
+
+      <footer class="hints" aria-hidden="true">
+        <span class="hint"><span data-glyph="select"></span>Select</span>
+        <span class="hint" id="hint-change"><span data-glyph="change"></span>Change</span>
+        <span class="hint" id="hint-back"><span data-glyph="back"></span><span id="hint-back-label">Back</span></span>
+      </footer>
+    </main>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

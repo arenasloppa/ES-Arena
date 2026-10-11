@@ -17,6 +17,8 @@ export interface DesktopBridge {
   /** Remembers the open folder for next time. */
   rememberFolder(): Promise<void>;
   readFile(path: string): Promise<Uint8Array>;
+  /** Closes the app. */
+  quit(): Promise<void>;
 }
 
 export const desktop = (window as unknown as { arenaDesktop?: DesktopBridge }).arenaDesktop;

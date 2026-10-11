@@ -71,3 +71,26 @@ export function doorInFront(level: Level, p: PlayerState, reach = 1.4): number |
   }
   return undefined;
 }
+
+/** A hop off the floor; height is above the floor, in room-height units like the level. */
+export interface Jump {
+  height: number;
+  speed: number;
+}
+
+/** Starts a jump that peaks at `apex` halfway through `duration` seconds; false if already in the air. */
+export function startJump(j: Jump, apex: number, duration: number): boolean {
+  if (j.height > 0 || j.speed !== 0) return false;
+  j.speed = (4 * apex) / duration;
+  return true;
+}
+
+export function stepJump(j: Jump, apex: number, duration: number, dt: number): void {
+  if (j.height <= 0 && j.speed === 0) return;
+  j.speed -= ((8 * apex) / (duration * duration)) * dt;
+  j.height += j.speed * dt;
+  if (j.height <= 0) {
+    j.height = 0;
+    j.speed = 0;
+  }
+}
