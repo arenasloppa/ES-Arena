@@ -53,16 +53,16 @@ const hudEl = $('hud');
 const status = $('status');
 const checks = $<HTMLUListElement>('checks');
 const folderError = $('folder-error');
-const mapSelect = $<HTMLSelectElement>('map-select');
 const playButton = $<HTMLButtonElement>('play');
 const newCharacterButton = $<HTMLButtonElement>('new-character');
-const who = $('who');
 const resumeButton = $<HTMLButtonElement>('resume');
-const mapButton = $<HTMLButtonElement>('open-map');
+const mainMenuButton = $<HTMLButtonElement>('to-main-menu');
 const mapScreen = $('map-screen');
 const canvas = $<HTMLCanvasElement>('view');
 
+/** Arena begins in the Imperial Dungeons. Development builds can start elsewhere with ?map=NAME.MIF. */
 const DEFAULT_MAP = 'START.MIF';
+const startMapName = () => (import.meta.env.DEV && new URLSearchParams(location.search).get('map')?.toUpperCase()) || DEFAULT_MAP;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const pad = new GamepadInput();
@@ -154,21 +154,21 @@ function showScreen(next: Screen) {
 function updateHints() {
   $('hint-back').hidden = screen !== 'controls' && screen !== 'create' && !playing();
   $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : 'Resume';
-  $('hint-change').hidden = screen !== 'play' && screen !== 'controls' && screen !== 'create';
+  $('hint-change').hidden = screen !== 'controls' && screen !== 'create';
 }
 
+/**
+ * The main menu as Skyrim's: Continue (with the character made last time)
+ * and New on the title screen; Resume and Main Menu over a game.
+ */
 function updatePlayOptions() {
-  resumeButton.hidden = !playing();
-  mapButton.hidden = !playing();
-  playButton.textContent = playing() && mapSelect.value === engineMap ? 'Start over' : 'Enter the dungeon';
+  const inGame = playing();
   const saved = creationLoaded && loadCharacter(creationLoaded);
-  newCharacterButton.hidden = !saved;
-  who.hidden = !saved;
-  if (saved && creationLoaded) {
-    const race = creationLoaded.races[saved.race]?.name ?? '';
-    const cls = creationLoaded.classes[saved.cls]?.name ?? '';
-    who.textContent = `${saved.name}, ${race} ${cls}`;
-  }
+  resumeButton.hidden = !inGame;
+  mainMenuButton.hidden = !inGame;
+  playButton.hidden = inGame || !saved;
+  newCharacterButton.hidden = inGame;
+  $('change-folder').hidden = !data;
   updateHints();
 }
 
@@ -373,7 +373,7 @@ async function startMap(name: string, character: Character) {
     if (scene.skippedFlats.length) {
       console.info(`Not drawn yet (animated sprites): ${[...new Set(scene.skippedFlats)].join(', ')}`);
     }
-    setStatus(`${level.name || name} · ${level.width}×${level.depth}`);
+    setStatus('');
     if (!tables && level.creatures.length) {
       hud.notify('The monsters could not be read from the game program, so this dungeon is empty');
     }
@@ -448,13 +448,6 @@ function showMenu(next: Screen) {
 
 function pause() {
   showMenu('play');
-  const d = engine?.dungeon;
-  if (d && playing()) {
-    const s = d.stats;
-    const potions = s.potions === 1 ? '1 healing potion' : `${s.potions} healing potions`;
-    const goal = d.objective ? `\n${d.quest!.name}: ${d.objective.text}` : '';
-    setStatus(`${d.level.name || engineMap} · Level ${s.level} · ${s.weapon.name} · ${potions} · ${s.gold} gold${goal}`);
-  }
 }
 
 async function died() {
@@ -570,18 +563,9 @@ async function useSource(source: FileSource): Promise<boolean> {
     setStatus('');
     return false;
   }
-  const maps = data.mapNames();
-  mapSelect.replaceChildren(
-    ...maps.map((m) => {
-      const o = document.createElement('option');
-      o.value = o.textContent = m;
-      if (m === DEFAULT_MAP) o.selected = true;
-      return o;
-    }),
-  );
   updatePlayOptions();
   showScreen('play');
-  setStatus(`Found ${data.bsa.entries.length} files in GLOBAL.BSA.`);
+  setStatus('');
   // Read the classes now, to say who plays and to have character creation ready.
   void creationFor().then(updatePlayOptions);
   music.play(SONGS.menu);
@@ -696,16 +680,18 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-back]')) {
   el.addEventListener('click', () => showScreen(screenBeforeControls));
 }
 
-$('watch-intro').addEventListener('click', () => void showCutscene(OPENING, playing() ? undefined : SONGS.menu));
 resumeButton.addEventListener('click', resume);
-mapButton.addEventListener('click', openMap);
-playButton.addEventListener('click', () => enterDungeon(mapSelect.value));
-newCharacterButton.addEventListener('click', () => createCharacter(mapSelect.value));
+playButton.addEventListener('click', () => enterDungeon(startMapName()));
+newCharacterButton.addEventListener('click', () => createCharacter(startMapName()));
+mainMenuButton.addEventListener('click', () => {
+  // Leave the game for the title screen, as Skyrim's Quit to Main Menu does.
+  setEngine(undefined);
+  void showBackdrop();
+  updatePlayOptions();
+  showScreen('play');
+});
 $('try-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
 $('play-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
-mapSelect.addEventListener('change', updatePlayOptions);
-// Choosing the map list itself (A on a controller, or Enter) plays the map picked in it.
-mapSelect.addEventListener('choose', () => enterDungeon(mapSelect.value));
 
 bindSettingRows(screens.controls, settings, (key) => {
   if (key === 'volume') sounds?.setVolume(settings.volume);

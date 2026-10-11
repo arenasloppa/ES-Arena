@@ -139,12 +139,12 @@ On the map, move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the
 the right stick to turn it, and zoom with the mouse wheel or the triggers.
 
 In the main menu and character creation, move with the arrow keys, the D-pad or the left stick, choose with
-<kbd>Enter</kbd> or A, change a setting with left and right, and go back with <kbd>Esc</kbd> or B. LB and RB, or
-<kbd>Page Up</kbd> and <kbd>Page Down</kbd>, skip ten maps at a time. The Controls screen sets look speed, inverted
-look, sound and music volume, whether the opening plays and vibration.
+<kbd>Enter</kbd> or A, change a setting with left and right, and go back with <kbd>Esc</kbd> or B. The Settings screen
+sets look speed, inverted look, sound and music volume, whether the opening plays and vibration, and changes the
+ARENA folder.
 
 In a cutscene, <kbd>Enter</kbd>, <kbd>Space</kbd>, a click or A goes on to the next picture or line, and <kbd>Esc</kbd>,
-B or Start skips the rest. Watch the opening again from the main menu.
+B or Start skips the rest.
 
 ### Files it reads
 

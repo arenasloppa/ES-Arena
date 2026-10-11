@@ -89,7 +89,6 @@
         <p class="logo-kicker">The Elder Scrolls</p>
         <h1>Arena</h1>
         <div class="rule" aria-hidden="true"></div>
-        <p class="logo-sub">An unofficial remake, played with your own copy of the game</p>
       </header>
 
       <section id="screen-folder" class="screen" aria-label="Choose your game folder">
@@ -100,7 +99,7 @@
             Choose ARENA folder…
             <input id="folder-input" type="file" webkitdirectory multiple hidden />
           </label>
-          <button class="option" data-screen="controls">Controls</button>
+          <button class="option" data-screen="controls">Settings</button>
           <button class="option quit" hidden>Quit</button>
         </nav>
         <div class="notes">
@@ -115,31 +114,20 @@
       </section>
 
       <section id="screen-play" class="screen" aria-label="Main menu" hidden>
-        <p id="who" class="who" hidden></p>
         <nav class="options">
           <button id="resume" class="option" hidden>Resume</button>
-          <button id="open-map" class="option" hidden>Map</button>
-          <button id="play" class="option">Enter the dungeon</button>
-          <button id="new-character" class="option" hidden>New character</button>
-          <div class="option-row">
-            <span class="row-label" id="map-label">Location</span>
-            <span class="row-value">
-              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
-              <select id="map-select" class="option" aria-labelledby="map-label"></select>
-              <span class="arrow" data-step="1" aria-hidden="true">›</span>
-            </span>
-          </div>
-          <button class="option" data-screen="controls">Controls</button>
-          <button id="watch-intro" class="option">Watch the opening</button>
-          <button id="change-folder" class="option">Change folder</button>
+          <button id="play" class="option" hidden>Continue</button>
+          <button id="new-character" class="option">New</button>
+          <button class="option" data-screen="controls">Settings</button>
+          <button id="to-main-menu" class="option" hidden>Main Menu</button>
           <button class="option quit" hidden>Quit</button>
         </nav>
       </section>
 
       <section id="screen-create" class="screen create" aria-label="Make your character" hidden></section>
 
-      <section id="screen-controls" class="screen" aria-label="Controls" hidden>
-        <h2>Controls</h2>
+      <section id="screen-controls" class="screen" aria-label="Settings" hidden>
+        <h2>Settings</h2>
         <div class="rule" aria-hidden="true"></div>
         <table class="bindings">
           <thead>
@@ -199,6 +187,7 @@
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
           </button>
+          <button id="change-folder" class="option">Change ARENA folder</button>
           <button class="option" data-back>Back</button>
         </nav>
       </section>
