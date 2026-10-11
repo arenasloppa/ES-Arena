@@ -1,6 +1,7 @@
 # ES Arena
 
 [![Support ES Arena on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
+[![Support ES Arena on Patreon](https://img.shields.io/badge/Support%20ES%20Arena%20on-Patreon-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/cw/Arenasloppa)
 
 **The Elder Scrolls: Arena (1994), remade by AI in Three.js.**
 
@@ -224,6 +225,7 @@ Your support helps buy the AI tokens that Claude and ChatGPT use to write the ga
 on it and more of Arena, sooner. Every little bit helps. Thank you!
 
 [![Support ES Arena on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
+[![Support ES Arena on Patreon](https://img.shields.io/badge/Support%20ES%20Arena%20on-Patreon-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/cw/Arenasloppa)
 
 ## Legal
 
