@@ -5,6 +5,23 @@ Every release of ES Arena, newest first. Each one is on the
 
 ## Unreleased
 
+## 0.3.0 (2026-10-11)
+
+The first dungeon, playable from your cell to the Shift Gate, with monsters, combat and sound.
+
+- Rats and goblins now roam the Imperial Dungeons, where the original game puts them, drawn with Arena's own pictures and using its stats. They wander, notice you when they see you, chase you round corners and fight back.
+- Fight with Arena's weapons and swings, using Skyrim's controls: attack with the left mouse button or RT, hold it for a power attack, block with the right mouse button or LT, and attack while blocking to bash an enemy off balance.
+- Sneak up on a creature that hasn't noticed you for a sneak attack that does three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you. They notice you more slowly from behind.
+- Health and stamina bars, a health bar for the creature you're fighting, healing potions (Q, or up on the D-pad), and levels that raise your health and stamina.
+- Your cell door is locked: find its key, or keep hitting the lock until it breaks. Search bodies and chests, and pick up gold, potions and better weapons.
+- Step through the Shift Gate to escape, and see your time, what you slew and how much you explored. If you die, you can try again.
+- Quest objectives in the corner, with markers on the compass for the next objective and for the creatures nearby.
+- A 3D map that fills in as you explore (M, or View on a controller), and a minimap in a frame at the top right.
+- Arena's own sound effects, each coming from where it happens in the dungeon. Set the volume on the Controls screen.
+- More of Skyrim's touches: the dungeon's name as you arrive, a banner when you level up or clear a dungeon, fades in and out, a wider view while you sprint, and blood on the screen when your blow lands.
+- Decorations are drawn at their proper size, things on raised platforms stand on them, barred doors can be seen through, and walls and doors use the textures the original gives them.
+- The README now has screenshots of the game, retaken for every release.
+
 ## 0.2.0 (2026-10-11)
 
 Controllers, and a new look in the style of Skyrim.

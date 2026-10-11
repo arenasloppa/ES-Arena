@@ -139,6 +139,10 @@ describe('INF', () => {
     '*ITEM 32',
     'rat.dfa',
     '',
+    '@SOUND',
+    'drip1.voc 16',
+    'closdoor.voc\t5',
+    '',
     '@TEXT',
     '*TEXT 0',
     '+10',
@@ -172,8 +176,10 @@ describe('INF', () => {
     expect(roleTexture(inf, 'BOXSIDE', 0)?.index).toBe(1);
     expect(roleTexture(inf, 'BOXCAP', 0)?.texture.file).toBe('FLOORA.SET');
     expect(roleTexture(inf, 'WETCHASM')?.index).toBe(6);
-    expect(inf.flats).toEqual([{ name: 'BARREL.IMG' }, { name: 'CHAINS1.IMG', yOffset: -35 }, { name: 'RAT.DFA' }]);
+    expect(inf.flats).toEqual([{ name: 'BARREL.IMG' }, { name: 'CHAINS1.IMG', yOffset: -35 }, { name: 'RAT.DFA', item: 32 }]);
+    expect(inf.texts[0]).toBe('+10');
     expect(inf.texts[1]).toBe('~You awaken.\nSecond line.');
+    expect(inf.sounds).toEqual({ 16: 'DRIP1.VOC', 5: 'CLOSDOOR.VOC' });
   });
 });
 
@@ -192,6 +198,12 @@ describe('MIF', () => {
     expect(l.map1[0]).toBe(0x0101);
     expect(l.flor[11]).toBe(0x0400);
     expect(l.triggers).toEqual([{ x: 1, y: 1, textIndex: 2, soundIndex: 255 }]);
+    expect(l.locks).toEqual([]);
+  });
+
+  it('reads locked doors', () => {
+    const mif = parseMif(makeMif({ width: 2, depth: 1, map1: [0, 0], flor: [0, 0], locks: [[1, 0, 10], [0, 0, 3]] }));
+    expect(mif.levels[0].locks).toEqual([{ x: 1, y: 0, level: 10 }, { x: 0, y: 0, level: 3 }]);
   });
 
   it('rejects files without a header', () => {

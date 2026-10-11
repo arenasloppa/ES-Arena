@@ -63,6 +63,8 @@ function browserPads(): ArrayLike<Gamepad | null> {
 export class GamepadInput {
   move: Stick = { x: 0, y: 0 };
   look: Stick = { x: 0, y: 0 };
+  /** How far the triggers are pulled, 0 to 1. */
+  triggers = { left: 0, right: 0 };
   style: PadStyle = 'xbox';
   connected = false;
   /** True when a button was held or a stick pushed at the last read. */
@@ -95,6 +97,11 @@ export class GamepadInput {
     const axes = pad?.axes ?? [];
     this.move = deadzone(axes[0] ?? 0, axes[1] ?? 0);
     this.look = deadzone(axes[2] ?? 0, axes[3] ?? 0);
+    const pull = (i: number) => {
+      const v = pad?.buttons[i]?.value ?? 0;
+      return v < 0.08 ? 0 : v;
+    };
+    this.triggers = { left: pull(BUTTON.LT), right: pull(BUTTON.RT) };
     if (pad) this.style = padStyle(pad.id);
     // A stick needs a real push, so one that drifts past the dead zone doesn't keep taking over the prompts.
     this.active = down.size > 0 || Math.hypot(this.move.x, this.move.y) > 0.4 || Math.hypot(this.look.x, this.look.y) > 0.4;

@@ -165,19 +165,24 @@ describe('settings', () => {
 
   it('keeps settings between visits, within range', () => {
     const storage = memoryStorage();
-    saveSettings({ lookSpeed: 1.6, invertLook: true, vibration: false }, storage);
-    expect(loadSettings(storage)).toEqual({ lookSpeed: 1.6, invertLook: true, vibration: false });
+    saveSettings({ lookSpeed: 1.6, invertLook: true, vibration: false, volume: 0.3 }, storage);
+    expect(loadSettings(storage)).toEqual({ lookSpeed: 1.6, invertLook: true, vibration: false, volume: 0.3 });
+    expect(loadSettings(memoryStorage('{"volume": 7}')).volume).toBe(1);
+    expect(loadSettings(memoryStorage('{"volume": 0}')).volume).toBe(0);
     expect(loadSettings(memoryStorage('{"lookSpeed": 40}')).lookSpeed).toBe(2);
     expect(loadSettings(memoryStorage('{"lookSpeed": "fast"}')).lookSpeed).toBe(1);
   });
 
-  it('steps look speed in fifths and flips switches', () => {
+  it('steps look speed in fifths and volume in tenths, and flips switches', () => {
     const s = { ...DEFAULT_SETTINGS };
     expect(stepSetting(s, 'lookSpeed', 1, false)).toBeCloseTo(1.2);
     expect(stepSetting(s, 'lookSpeed', -1, false)).toBeCloseTo(0.8);
     expect(stepSetting({ ...s, lookSpeed: 2 }, 'lookSpeed', 1, false)).toBe(2);
     expect(stepSetting({ ...s, lookSpeed: 2 }, 'lookSpeed', 1, true)).toBeCloseTo(0.2);
     expect(stepSetting({ ...s, lookSpeed: 0.2 }, 'lookSpeed', -1, false)).toBeCloseTo(0.2);
+    expect(stepSetting(s, 'volume', 1, false)).toBeCloseTo(0.9);
+    expect(stepSetting({ ...s, volume: 0 }, 'volume', -1, false)).toBe(0);
+    expect(stepSetting({ ...s, volume: 1 }, 'volume', 1, true)).toBe(0);
     expect(stepSetting(s, 'invertLook', 1, false)).toBe(true);
     expect(stepSetting(s, 'vibration', -1, false)).toBe(false);
   });

@@ -102,7 +102,7 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
         case 'door': {
           const b: QuadBatch = { positions: [], uvs: [], indices: [] };
           for (const s of SIDES) sideFace(b, x, y, s.normal, 0, h);
-          doors.push({ cellIndex: i, x, y, key: wallKey, batch: b });
+          doors.push({ cellIndex: i, x, y, key: c.seeThrough ? `glass:${c.wallTex}` : wallKey, batch: b });
           break;
         }
         default:

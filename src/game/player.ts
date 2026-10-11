@@ -3,7 +3,10 @@
  * can be unit tested. Positions are in voxel units: x along MIF columns,
  * y along MIF rows.
  */
-import { isBlocking, type Level } from './level';
+import { blockedFor, cellIndex } from './grid';
+import type { Level } from './level';
+
+export { cellIndex };
 
 export interface PlayerState {
   x: number;
@@ -19,28 +22,33 @@ export interface MoveInput {
   run: boolean;
 }
 
+/** Something round the player can't walk through, such as a creature. */
+export interface Body {
+  x: number;
+  y: number;
+  r: number;
+}
+
 export const PLAYER_RADIUS = 0.2;
 const WALK_SPEED = 2.2; // voxels per second
 const RUN_FACTOR = 1.9;
 
-export function cellIndex(level: Level, x: number, y: number): number {
-  const cx = Math.floor(x);
-  const cy = Math.floor(y);
-  if (cx < 0 || cy < 0 || cx >= level.width || cy >= level.depth) return -1;
-  return cy * level.width + cx;
+export function blockedAt(level: Level, x: number, y: number, openDoors: Set<number>): boolean {
+  return blockedFor(level, x, y, PLAYER_RADIUS, openDoors);
 }
 
-export function blockedAt(level: Level, x: number, y: number, openDoors: Set<number>): boolean {
-  const r = PLAYER_RADIUS;
-  for (const [dx, dy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
-    const i = cellIndex(level, x + dx, y + dy);
-    if (i < 0 || isBlocking(level.cells[i], openDoors, i)) return true;
+/** True when moving from (x0, y0) to (x1, y1) pushes further into a body. */
+function bumps(bodies: Body[], x0: number, y0: number, x1: number, y1: number): boolean {
+  for (const b of bodies) {
+    const reach = b.r + PLAYER_RADIUS;
+    const after = Math.hypot(b.x - x1, b.y - y1);
+    if (after < reach && after < Math.hypot(b.x - x0, b.y - y0)) return true;
   }
   return false;
 }
 
-/** Moves the player, sliding along walls one axis at a time. */
-export function step(level: Level, p: PlayerState, input: MoveInput, dt: number, openDoors: Set<number>): void {
+/** Moves the player, sliding along walls (and around bodies) one axis at a time. */
+export function step(level: Level, p: PlayerState, input: MoveInput, dt: number, openDoors: Set<number>, bodies: Body[] = []): void {
   const speed = WALK_SPEED * (input.run ? RUN_FACTOR : 1) * dt;
   const fx = Math.cos(p.yaw);
   const fy = Math.sin(p.yaw);
@@ -54,8 +62,8 @@ export function step(level: Level, p: PlayerState, input: MoveInput, dt: number,
     dx = (dx / len) * speed;
     dy = (dy / len) * speed;
   }
-  if (!blockedAt(level, p.x + dx, p.y, openDoors)) p.x += dx;
-  if (!blockedAt(level, p.x, p.y + dy, openDoors)) p.y += dy;
+  if (!blockedAt(level, p.x + dx, p.y, openDoors) && !bumps(bodies, p.x, p.y, p.x + dx, p.y)) p.x += dx;
+  if (!blockedAt(level, p.x, p.y + dy, openDoors) && !bumps(bodies, p.x, p.y, p.x, p.y + dy)) p.y += dy;
 }
 
 /** Returns the index of the first door cell within reach in front of the player, if any. */

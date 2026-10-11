@@ -160,6 +160,9 @@ export function backdropLevel(): { level: Level; textures: TextureProvider } {
     chasmTextures: { wet: 2 },
     ceilingTex: 1,
     flats: [],
+    items: [],
+    creatures: [],
+    locks: new Map(),
     triggers: [],
     start: { x: 6.5, y: 6.5 },
   };

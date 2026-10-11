@@ -8,9 +8,27 @@ import type { GamepadInput, PadStyle } from '../input/gamepad';
 export type InputMode = 'keyboard' | 'gamepad';
 
 /** Controller inputs, named by their place on an Xbox controller. */
-type PadInput = 'A' | 'B' | 'Y' | 'LB' | 'Start' | 'LStick' | 'RStick' | 'LStickPress' | 'DPad';
+type PadInput = 'A' | 'B' | 'Y' | 'LB' | 'LT' | 'RT' | 'Start' | 'View' | 'LStick' | 'RStick' | 'LStickPress' | 'DPad' | 'DUp';
 
-export type Action = 'move' | 'look' | 'activate' | 'jump' | 'sprint' | 'sneak' | 'menu' | 'select' | 'back' | 'change';
+export type Action =
+  | 'move'
+  | 'look'
+  | 'attack'
+  | 'block'
+  | 'activate'
+  | 'jump'
+  | 'sprint'
+  | 'sneak'
+  | 'potion'
+  | 'map'
+  | 'menu'
+  | 'select'
+  | 'back'
+  | 'change'
+  | 'mapMove'
+  | 'mapTurn'
+  | 'mapZoom'
+  | 'mapClose';
 
 interface Binding {
   label: string;
@@ -21,18 +39,26 @@ interface Binding {
 export const BINDINGS: Record<Action, Binding> = {
   move: { label: 'Move', keys: ['W', 'A', 'S', 'D'], pad: ['LStick'] },
   look: { label: 'Look', keys: ['Mouse'], pad: ['RStick'] },
-  activate: { label: 'Open doors', keys: ['E'], pad: ['A'] },
+  attack: { label: 'Attack, hold to power attack', keys: ['Click'], pad: ['RT'] },
+  block: { label: 'Block, attack while blocking to bash', keys: ['RClick'], pad: ['LT'] },
+  activate: { label: 'Use, take, open', keys: ['E'], pad: ['A'] },
   jump: { label: 'Jump', keys: ['Space'], pad: ['Y'] },
   sprint: { label: 'Sprint', keys: ['Shift'], pad: ['LB'] },
   sneak: { label: 'Sneak', keys: ['C'], pad: ['LStickPress'] },
+  potion: { label: 'Drink a healing potion', keys: ['Q'], pad: ['DUp'] },
+  map: { label: 'Map', keys: ['M'], pad: ['View'] },
   menu: { label: 'Menu', keys: ['Esc', 'Tab'], pad: ['B', 'Start'] },
   select: { label: 'Select', keys: ['Enter'], pad: ['A'] },
   back: { label: 'Back', keys: ['Esc'], pad: ['B'] },
   change: { label: 'Change', keys: ['←', '→'], pad: ['DPad'] },
+  mapMove: { label: 'Move', keys: ['W', 'A', 'S', 'D'], pad: ['LStick'] },
+  mapTurn: { label: 'Turn', keys: ['Drag'], pad: ['RStick'] },
+  mapZoom: { label: 'Zoom', keys: ['Wheel'], pad: ['LT', 'RT'] },
+  mapClose: { label: 'Close', keys: ['M'], pad: ['B'] },
 };
 
 /** The in-game actions, in the order the controls screen and the first-time tips list them. */
-export const GAME_ACTIONS: Action[] = ['move', 'look', 'activate', 'jump', 'sprint', 'sneak', 'menu'];
+export const GAME_ACTIONS: Action[] = ['move', 'look', 'attack', 'block', 'activate', 'jump', 'sprint', 'sneak', 'potion', 'map', 'menu'];
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -45,6 +71,12 @@ const ICONS: Record<string, string> = {
   dpad: '<path d="M6.2 2.5h3.6v3.7h3.7v3.6H9.8v3.7H6.2V9.8H2.5V6.2h3.7z"/>',
   '←': '<path d="M12.5 8h-9M7 4.5L3.5 8 7 11.5"/>',
   '→': '<path d="M3.5 8h9M9 4.5l3.5 3.5L9 11.5"/>',
+  view: '<rect x="3" y="4" width="7" height="5.5" rx="1"/><rect x="6" y="6.5" width="7" height="5.5" rx="1"/>',
+  dup: '<path class="dim" d="M6.2 2.5h3.6v3.7h3.7v3.6H9.8v3.7H6.2V9.8H2.5V6.2h3.7z"/><path d="M6.2 2.5h3.6v3.7H6.2z"/>',
+  Mouse: '<rect x="4.5" y="2" width="7" height="12" rx="3.5"/><path d="M8 2v4.5M4.5 6.5h7"/>',
+  Click: '<rect x="4.5" y="2" width="7" height="12" rx="3.5"/><path d="M8 2v4.5M4.5 6.5h7"/><path class="fill" d="M8 2.3v4.2H4.8V5.4A3.2 3.2 0 0 1 8 2.3z"/>',
+  RClick: '<rect x="4.5" y="2" width="7" height="12" rx="3.5"/><path d="M8 2v4.5M4.5 6.5h7"/><path class="fill" d="M8 2.3v4.2h3.2V5.4A3.2 3.2 0 0 0 8 2.3z"/>',
+  Wheel: '<rect x="4.5" y="2" width="7" height="12" rx="3.5"/><path d="M8 4.2v3"/>',
 };
 
 function icon(name: string): SVGSVGElement {
@@ -64,10 +96,10 @@ const FACE: Record<PadStyle, Record<'A' | 'B' | 'Y', Face>> = {
   nintendo: { A: { text: 'B' }, B: { text: 'A' }, Y: { text: 'X' } },
 };
 
-const OTHER: Record<PadStyle, Record<'LB' | 'Start' | 'LStickPress', Face>> = {
-  xbox: { LB: { text: 'LB' }, Start: { icon: 'menu' }, LStickPress: { text: 'LS' } },
-  playstation: { LB: { text: 'L1' }, Start: { text: 'OPTIONS' }, LStickPress: { text: 'L3' } },
-  nintendo: { LB: { text: 'L' }, Start: { text: '+' }, LStickPress: { text: 'LS' } },
+const OTHER: Record<PadStyle, Record<'LB' | 'LT' | 'RT' | 'Start' | 'View' | 'LStickPress', Face>> = {
+  xbox: { LB: { text: 'LB' }, LT: { text: 'LT' }, RT: { text: 'RT' }, Start: { icon: 'menu' }, View: { icon: 'view' }, LStickPress: { text: 'LS' } },
+  playstation: { LB: { text: 'L1' }, LT: { text: 'L2' }, RT: { text: 'R2' }, Start: { text: 'OPTIONS' }, View: { text: 'SHARE' }, LStickPress: { text: 'L3' } },
+  nintendo: { LB: { text: 'L' }, LT: { text: 'ZL' }, RT: { text: 'ZR' }, Start: { text: '+' }, View: { text: '−' }, LStickPress: { text: 'LS' } },
 };
 
 function fill(el: HTMLElement, face: Face): HTMLElement {
@@ -94,9 +126,9 @@ function padGlyph(input: PadInput, style: PadStyle): HTMLElement {
     g.textContent = input[0];
     return g;
   }
-  if (input === 'DPad') {
+  if (input === 'DPad' || input === 'DUp') {
     g.classList.add('dpad');
-    return fill(g, { icon: 'dpad' });
+    return fill(g, { icon: input === 'DPad' ? 'dpad' : 'dup' });
   }
   g.classList.add(input === 'LStickPress' ? 'stick' : 'shoulder');
   return fill(g, OTHER[style][input]);

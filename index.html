@@ -10,25 +10,84 @@
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
+      <canvas id="weapon" aria-hidden="true"></canvas>
+      <div id="hurt" aria-hidden="true"></div>
       <div id="compass" aria-hidden="true">
-        <div class="compass-window"><div id="compass-strip"></div></div>
+        <div class="compass-window"><div id="compass-strip"></div><div id="compass-marks"></div></div>
+      </div>
+      <div id="enemy" hidden aria-hidden="true">
+        <div id="enemy-name"></div>
+        <div class="bar" id="enemy-bar"><div class="bar-fill"></div></div>
+      </div>
+      <div id="minimap-frame" aria-hidden="true">
+        <canvas id="minimap"></canvas>
+        <svg class="minimap-ring" viewBox="0 0 100 100">
+          <circle class="bezel" cx="50" cy="50" r="46.75" />
+          <circle class="ring" cx="50" cy="50" r="49.4" />
+          <circle class="ring inner" cx="50" cy="50" r="44.5" />
+          <path class="stud ahead" d="M50 0.6L52.65 3.25 50 5.9 47.35 3.25z" />
+          <path class="stud" d="M96.75 47.35L99.4 50 96.75 52.65 94.1 50z" />
+          <path class="stud" d="M50 94.1L52.65 96.75 50 99.4 47.35 96.75z" />
+          <path class="stud" d="M3.25 47.35L5.9 50 3.25 52.65 0.6 50z" />
+        </svg>
+      </div>
+      <div id="banner" aria-live="polite">
+        <p class="banner-kicker" hidden></p>
+        <p class="banner-title"></p>
+        <div class="rule" aria-hidden="true"></div>
+        <p class="banner-sub" hidden></p>
+      </div>
+      <div id="sneak-eye" hidden aria-hidden="true">
+        <svg viewBox="-26 -14 52 28">
+          <path class="eye-white" d="M-22 0Q0 6 22 0Q0 6-22 0z" />
+          <ellipse class="eye-iris" rx="5.4" ry="0" />
+          <path class="eye-lid" d="M-22 0Q0 6 22 0Q0 6-22 0z" />
+        </svg>
       </div>
       <div id="crosshair" aria-hidden="true"></div>
       <div id="prompt" hidden>
         <div class="prompt-action"><span data-glyph="activate"></span><span id="prompt-verb"></span></div>
         <div id="prompt-name"></div>
+        <div id="prompt-note" hidden></div>
       </div>
       <aside id="tips" hidden>
         <p class="tip"><span data-glyph="move"></span><span>Move</span></p>
         <p class="tip"><span data-glyph="look"></span><span>Look</span></p>
-        <p class="tip"><span data-glyph="activate"></span><span>Open doors</span></p>
-        <p class="tip"><span data-glyph="jump"></span><span>Jump</span></p>
+        <p class="tip"><span data-glyph="attack"></span><span>Attack, hold to power attack</span></p>
+        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash</span></p>
+        <p class="tip"><span data-glyph="activate"></span><span>Use, take, open</span></p>
         <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
         <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
+        <p class="tip"><span data-glyph="potion"></span><span>Drink a healing potion</span></p>
+        <p class="tip"><span data-glyph="map"></span><span>Map</span></p>
         <p class="tip"><span data-glyph="menu"></span><span>Menu</span></p>
       </aside>
+      <div id="corner">
+        <div id="notes" role="status" aria-live="polite"></div>
+      </div>
       <p id="message" role="status" aria-live="polite"></p>
+      <div id="quick" hidden><span data-glyph="potion"></span><span>Healing potions</span><span id="quick-count"></span></div>
+      <div id="vitals" aria-hidden="true">
+        <div class="bar" id="health"><div class="bar-fill"></div></div>
+        <div class="bar" id="stamina"><div class="bar-fill"></div></div>
+      </div>
     </div>
+
+    <div id="map-screen" hidden>
+      <header class="map-title">
+        <h2 id="map-name">Map</h2>
+        <div class="rule" aria-hidden="true"></div>
+      </header>
+      <div id="map-north" aria-hidden="true"><span>N</span></div>
+      <footer class="hints" aria-hidden="true">
+        <span class="hint"><span data-glyph="mapMove"></span>Move</span>
+        <span class="hint"><span data-glyph="mapTurn"></span>Turn</span>
+        <span class="hint"><span data-glyph="mapZoom"></span>Zoom</span>
+        <span class="hint"><span data-glyph="mapClose"></span>Close</span>
+      </footer>
+    </div>
+
+    <div id="fade" aria-hidden="true"></div>
 
     <main id="menu">
       <header class="logo">
@@ -63,9 +122,10 @@
       <section id="screen-play" class="screen" aria-label="Main menu" hidden>
         <nav class="options">
           <button id="resume" class="option" hidden>Resume</button>
+          <button id="open-map" class="option" hidden>Map</button>
           <button id="play" class="option">Enter the dungeon</button>
           <div class="option-row">
-            <span class="row-label" id="map-label">Map</span>
+            <span class="row-label" id="map-label">Location</span>
             <span class="row-value">
               <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
               <select id="map-select" class="option" aria-labelledby="map-label"></select>
@@ -105,6 +165,15 @@
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
           </button>
+          <button class="option option-row" data-setting="volume">
+            <span class="row-label">Sound volume</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
           <button class="option option-row" data-setting="vibration">
             <span class="row-label">Vibration</span>
             <span class="row-value">
@@ -114,6 +183,27 @@
             </span>
           </button>
           <button class="option" data-back>Back</button>
+        </nav>
+      </section>
+
+      <section id="screen-dead" class="screen" aria-label="You have died" hidden>
+        <h2>You have died</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <p class="notes" id="dead-notes"></p>
+        <nav class="options">
+          <button id="try-again" class="option">Try again</button>
+          <button class="option" data-screen="play">Main menu</button>
+        </nav>
+      </section>
+
+      <section id="screen-escaped" class="screen" aria-label="You have escaped" hidden>
+        <h2>Free at last</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <p class="notes" id="escaped-notes"></p>
+        <dl id="run-stats" class="stats"></dl>
+        <nav class="options">
+          <button id="play-again" class="option">Play again</button>
+          <button class="option" data-screen="play">Main menu</button>
         </nav>
       </section>
 

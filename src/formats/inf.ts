@@ -8,7 +8,12 @@
  *                       means a 5-frame SET, and each frame takes its own
  *                       index. "*BOXCAP 3", "*DOOR 0", "*WETCHASM" style tags
  *                       precede entries with special roles.
- *   @FLATS            - sprite names (decoration, creatures)
+ *   @FLATS            - sprite names (decoration, creatures). "*ITEM n" marks
+ *                       the next one as an item: 1 key, 2 corpse, 3 equipment,
+ *                       4-6 treasure, 7-8 chests, 32+ creature n - 32.
+ *   @SOUND            - "drip1.voc 16": the sound files MIF triggers play
+ *   @TEXT             - "*TEXT n" entries that MIF triggers show. "~" in front
+ *                       means show once; "+n" is not shown but names key n.
  *   @CEILING          - ceiling height and other level settings
  */
 const KEY = [0xea, 0x7b, 0x4e, 0xbd, 0x19, 0xc9, 0x38, 0x99];
@@ -41,6 +46,8 @@ export interface InfFlat {
   name: string;
   /** "Y:-35" modifier: vertical offset in Arena units (negative is up). */
   yOffset?: number;
+  /** "*ITEM n" before the entry: what kind of item it stands for (see the module comment). */
+  item?: number;
 }
 
 export interface InfFile {
@@ -55,6 +62,8 @@ export interface InfFile {
   roles: Record<string, InfRole[]>;
   /** @TEXT entries keyed by their "*TEXT n" number (what MIF triggers show). */
   texts: Record<number, string>;
+  /** @SOUND entries: sound file by the number MIF triggers use. */
+  sounds: Record<number, string>;
   raw: string;
 }
 
@@ -64,7 +73,8 @@ export function parseInf(data: Uint8Array): InfFile {
   for (const b of plain) text += String.fromCharCode(b);
   const lines = text.split(/\r?\n/);
 
-  const inf: InfFile = { floors: [], walls: [], flats: [], roles: {}, texts: {}, raw: text };
+  const inf: InfFile = { floors: [], walls: [], flats: [], roles: {}, texts: {}, sounds: {}, raw: text };
+  let item: number | undefined;
   let textIndex: number | undefined;
   let section = '';
   let pending: Array<{ tag: string; arg?: number }> = [];
@@ -105,7 +115,11 @@ export function parseInf(data: Uint8Array): InfFile {
       (section === 'FLOORS' ? inf.floors : inf.walls).push(tex);
       expandedCount[section] += tex.frames;
     } else if (section === 'FLATS') {
-      if (line.startsWith('*')) continue;
+      if (line.startsWith('*')) {
+        const m = /^\*ITEM\s+(\d+)/i.exec(line);
+        if (m) item = parseInt(m[1], 10);
+        continue;
+      }
       const [name, ...mods] = line.split(/\s+/);
       if (!/\.(IMG|CFA|DFA)$/i.test(name)) continue;
       const flat: InfFlat = { name: name.toUpperCase() };
@@ -113,7 +127,12 @@ export function parseInf(data: Uint8Array): InfFile {
         const m = /^Y:(-?\d+)$/i.exec(mod);
         if (m) flat.yOffset = parseInt(m[1], 10);
       }
+      if (item !== undefined) flat.item = item;
+      item = undefined;
       inf.flats.push(flat);
+    } else if (section === 'SOUND') {
+      const m = /^(\S+\.VOC)\s+(\d+)/i.exec(line);
+      if (m) inf.sounds[parseInt(m[2], 10)] = m[1].toUpperCase();
     } else if (section === 'CEILING') {
       const n = parseInt(line.split(/[\s,]+/)[0], 10);
       if (!Number.isNaN(n) && inf.ceilingHeight === undefined) inf.ceilingHeight = n;

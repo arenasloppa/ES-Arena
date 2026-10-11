@@ -4,6 +4,8 @@
  * A MIF is a list of tagged chunks: 4 ASCII bytes + u16 payload size.
  * "MHDR" holds the start points and map size; each "LEVL" chunk opens a level
  * and is followed by its own chunks (NAME, INFO, MAP1, MAP2, FLOR, ...).
+ * TRIG lists 4-byte triggers (x, y, text, sound; 255 = none) and LOCK
+ * 3-byte locked doors (x, y, lock level).
  * MAP1 (walls/objects), MAP2 (second storey) and FLOR (floors) are
  * u16-per-voxel grids, stored as a u16 uncompressed size followed by
  * LZHUF ("type 08") data.
@@ -21,6 +23,13 @@ export interface MifTrigger {
   soundIndex: number;
 }
 
+export interface MifLock {
+  x: number;
+  y: number;
+  /** How hard the lock is; the key that opens it carries the same number. */
+  level: number;
+}
+
 export interface MifLevel {
   name: string;
   /** INF file this level uses, upper-cased (e.g. "START.INF"). */
@@ -30,6 +39,7 @@ export interface MifLevel {
   map2?: Uint16Array;
   flor: Uint16Array;
   triggers: MifTrigger[];
+  locks: MifLock[];
 }
 
 export interface MifFile {
@@ -77,7 +87,7 @@ export function parseMif(data: Uint8Array): MifFile {
     const size = view.getUint16(o + 4, true);
     const p = o + 6;
     if (t === 'LEVL') {
-      level = { name: '', info: '', numFloors: 1, map1: new Uint16Array(cells), flor: new Uint16Array(cells), triggers: [] };
+      level = { name: '', info: '', numFloors: 1, map1: new Uint16Array(cells), flor: new Uint16Array(cells), triggers: [], locks: [] };
       levels.push(level);
       o = p; // LEVL's size covers its children; walk into them.
       continue;
@@ -107,6 +117,9 @@ export function parseMif(data: Uint8Array): MifFile {
           for (let i = 0; i + 4 <= size; i += 4) {
             level.triggers.push({ x: data[p + i], y: data[p + i + 1], textIndex: data[p + i + 2], soundIndex: data[p + i + 3] });
           }
+          break;
+        case 'LOCK':
+          for (let i = 0; i + 3 <= size; i += 3) level.locks.push({ x: data[p + i], y: data[p + i + 1], level: data[p + i + 2] });
           break;
       }
     }

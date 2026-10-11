@@ -31,10 +31,11 @@ const INF = encryptInf(
 //   #b~r#
 //   #...#
 //   #####
-const W = 0x0202; // wall texture 1 (WALLA.SET frame 0)
+// Wall numbers count the 2 floor textures first: 4 is wall texture 1 (WALLA.SET frame 0), 3 is DOOR_1.IMG.
+const W = 0x0404;
 const map1 = [
   W, W, W, W, W,
-  W, 0, 0xb002, 0, W,
+  W, 0, 0xb003, 0, W,
   W, 0x8000, 0, 0x1800, W,
   W, 0, 0, 0, W,
   W, W, W, W, W,
@@ -54,7 +55,7 @@ describe('buildLevel', () => {
     const at = (x: number, y: number) => l.cells[y * 5 + x];
     expect(at(0, 0)).toMatchObject({ kind: 'wall', wallTex: 1 });
     expect(l.wallTextures[1]).toEqual({ file: 'WALLA.SET', frame: 0 });
-    expect(at(2, 1)).toMatchObject({ kind: 'door', wallTex: 1 });
+    expect(at(2, 1)).toMatchObject({ kind: 'door', wallTex: 0 });
     expect(at(3, 2).kind).toBe('empty');
     expect(l.flats).toEqual([{ x: 3.5, y: 2.5, name: 'BARREL.IMG', yOffset: undefined }]);
     expect(at(2, 2).chasm).toBe('wet');
@@ -62,16 +63,83 @@ describe('buildLevel', () => {
     expect(at(1, 2)).toMatchObject({ kind: 'raised', wallTex: 1, capTex: 1, capIsWall: true });
     expect(at(1, 1).floorTex).toBe(1);
     expect(l.start).toEqual({ x: 3.5, y: 3.5 });
-    expect(l.triggers).toEqual([{ x: 2, y: 3, text: 'Hello there.' }]);
+    expect(l.triggers).toEqual([{ x: 2, y: 3, text: 'Hello there.', once: true }]);
   });
 
   it('turns the east-to-west MIF rows around so that +x runs east', () => {
-    const row = [0x0202, 0, 0, 0xd002, 0xd102];
+    const row = [W, 0, 0, 0xd004, 0xd104];
     const mif = parseMif(makeMif({ width: 5, depth: 1, start: { x: 1.5, y: 0.5 }, map1: row, flor: new Array(5).fill(0x0100) }));
     const l = buildLevel(mif, 0, parseInf(INF));
     expect(l.cells.map((c) => c.kind)).toEqual(['diagonal', 'diagonal', 'empty', 'empty', 'wall']);
     expect(l.cells.slice(0, 2).map((c) => c.diagonalFlip)).toEqual([false, true]);
     expect(l.start).toEqual({ x: 3.5, y: 0.5 });
+  });
+
+  it('places items, creatures, locks and trigger sounds', () => {
+    const inf = parseInf(
+      encryptInf(
+        [
+          '@FLOORS',
+          'floora.set #2',
+          '@WALLS',
+          'door_1.img',
+          'walla.set #3',
+          'swater.img',
+          '*LEVELUP',
+          'gate.img',
+          '*TRANS',
+          '*DOOR 0',
+          'scell.img',
+          '@FLATS',
+          'barrel.img',
+          '*ITEM 1',
+          'key.img',
+          '*ITEM 5',
+          'treasre2.img',
+          '*ITEM 33',
+          'goblin.dfa',
+          '@SOUND',
+          'drip1.voc 16',
+          '@TEXT',
+          '*TEXT 0',
+          '+10',
+          '*TEXT 2',
+          'Rats!',
+        ].join('\n'),
+      ),
+    );
+    // MIF columns run east to west, so MIF column x is level column 5 - x.
+    const G = 0x0808; // GATE.IMG, wall texture 5
+    const map1 = [
+      W, W, G, W, W, W,
+      W, 0, 0x8002, 0x8003, 0x8000, W,
+      W, 0, 0xb009, 0x1800, 0, W,
+      W, W, W, W, W, W,
+    ];
+    const flor = new Array(24).fill(0x0100);
+    flor[7] = 0x0102; // KEY.IMG (flat 1, counted from 1 here)
+    flor[15] = 0x0101; // a barrel on the raised step
+    const mif = parseMif(
+      makeMif({ width: 6, depth: 4, map1, flor, triggers: [[1, 1, 0, 255], [4, 2, 2, 16], [4, 1, 255, 16]], locks: [[2, 2, 10]] }),
+    );
+    const l = buildLevel(mif, 0, inf);
+    expect(l.items).toEqual([
+      { x: 4.5, y: 1.5, name: 'KEY.IMG', kind: 'key', key: 10 },
+      { x: 3.5, y: 1.5, name: 'TREASRE2.IMG', kind: 'treasure' },
+    ]);
+    expect(l.creatures).toEqual([{ x: 2.5, y: 1.5, type: 1 }]);
+    expect(l.flats).toEqual([
+      { x: 1.5, y: 1.5, name: 'BARREL.IMG' },
+      { x: 2.5, y: 2.5, name: 'BARREL.IMG', base: 0x18 / 128 },
+    ]);
+    expect(l.cells[2 * 6 + 3]).toMatchObject({ kind: 'door', wallTex: 6, seeThrough: true });
+    expect(l.locks).toEqual(new Map([[2 * 6 + 3, 10]]));
+    expect(l.cells[3]).toMatchObject({ kind: 'wall', wallTex: 5, exit: 'up' });
+    expect(l.cells[0].exit).toBeUndefined();
+    expect(l.triggers).toEqual([
+      { x: 1, y: 2, text: 'Rats!', sound: 'DRIP1.VOC' },
+      { x: 1, y: 1, sound: 'DRIP1.VOC' },
+    ]);
   });
 
   it('blocks walls and closed doors only', () => {

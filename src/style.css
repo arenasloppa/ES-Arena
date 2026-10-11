@@ -82,10 +82,23 @@ h2 {
   margin: 0; font: 600 clamp(24px, 3vw, 32px)/1.1 var(--font-title);
   letter-spacing: 0.22em; margin-right: -0.22em; text-transform: uppercase;
 }
-/* The settings screens have no logo, as in Skyrim. */
-#menu[data-screen='controls'] .logo { display: none; }
-#menu[data-screen='controls'] .screen { margin-top: auto; }
-#menu[data-screen='controls'] #status { display: none; }
+/* The settings and end screens have no logo, as in Skyrim. */
+#menu:is([data-screen='controls'], [data-screen='dead'], [data-screen='escaped']) .logo { display: none; }
+#menu:is([data-screen='controls'], [data-screen='dead'], [data-screen='escaped']) .screen { margin-top: auto; }
+#menu:is([data-screen='controls'], [data-screen='dead'], [data-screen='escaped']) #status { display: none; }
+#screen-dead h2 { color: #e9d9d2; text-shadow: 0 0 24px rgba(160, 20, 10, 0.8); }
+#screen-dead, #screen-escaped { animation: fade-in 1.2s ease-out; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes banner-still {
+  0%, 90% { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; }
+}
+.stats {
+  display: grid; grid-template-columns: auto auto; gap: 4px 28px; margin: 0;
+  font: 400 19px/1.3 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.stats dt { color: var(--dim); text-align: right; }
+.stats dd { margin: 0; text-align: left; }
 
 .screen { display: grid; justify-items: center; gap: 18px; width: 100%; }
 .options { display: grid; justify-items: center; gap: 2px; width: min(480px, 100%); }
@@ -130,7 +143,7 @@ h2 {
 #checks li::before { content: '✗ '; color: var(--error); }
 #checks li.found::before { content: '✓ '; color: var(--ink); }
 .error { color: var(--error); }
-#status { margin: 0 0 auto; min-height: 1.4em; color: var(--dim); font: 300 16px/1.4 var(--font-ui); letter-spacing: 0.06em; }
+#status { margin: 0 0 auto; min-height: 1.4em; color: var(--dim); font: 300 16px/1.4 var(--font-ui); letter-spacing: 0.06em; white-space: pre-line; }
 
 .bindings { border-collapse: collapse; font: 400 18px/1.2 var(--font-ui); letter-spacing: 0.04em; text-align: left; }
 .bindings th {
@@ -164,6 +177,8 @@ h2 {
   color: var(--ink);
 }
 .glyph svg { width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.glyph svg .fill { fill: currentColor; stroke: none; }
+.glyph svg .dim { opacity: 0.35; }
 .key { border: 1px solid rgba(243, 240, 232, 0.75); border-radius: 3px; background: rgba(0, 0, 0, 0.45); box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.12); }
 .key.wide { padding: 0 0.5em; }
 .pad.face, .pad.stick { width: 1.65em; padding: 0; border-radius: 50%; }
@@ -181,6 +196,122 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 
 /* ---- In-game HUD ---- */
 #hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.6); }
+/* The weapon in hand: Arena's 320x147 view stretched to its old screen's 1.2-tall pixels, as wide as fits. */
+#weapon {
+  position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+  height: min(100vh, 100vw * 176.4 / 320); aspect-ratio: 320 / 176.4;
+  image-rendering: pixelated;
+}
+#hurt, #hud::after { content: ''; position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+#hurt { background: radial-gradient(ellipse 70% 65% at 50% 50%, transparent 40%, rgba(150, 12, 0, 0.6)); }
+#hurt.flash { animation: hurt 0.7s ease-out; }
+@keyframes hurt { from { opacity: 1; } to { opacity: 0; } }
+#hud::after { background: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 50%, rgba(120, 0, 0, 0.45)); }
+#hud.low-health::after { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+/* Health and stamina, as Skyrim's: thin bars with diamond ends that fade out when full. */
+.bar {
+  position: absolute; height: 9px; border: 1px solid rgba(243, 240, 232, 0.6); background: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.7); transition: opacity 0.8s;
+}
+.bar.faded { opacity: 0; }
+.bar::before, .bar::after {
+  content: ''; position: absolute; top: 50%; width: 7px; height: 7px;
+  border: 1px solid rgba(243, 240, 232, 0.75); background: #0b0a09; transform: translate(-50%, -50%) rotate(45deg);
+}
+.bar::before { left: -1px; }
+.bar::after { left: calc(100% + 1px); }
+.bar-fill { position: absolute; inset: 1px 2px; transform: scaleX(var(--fill, 1)); transition: transform 0.18s ease-out; }
+#vitals { position: absolute; left: 0; right: 0; bottom: calc(30px + env(safe-area-inset-bottom, 0px)); height: 11px; }
+#health { left: 50%; width: min(320px, 42vw); margin-left: calc(min(320px, 42vw) / -2); }
+#health .bar-fill { background: linear-gradient(#d4584b, #8e2519); transform-origin: center; }
+#stamina { right: max(32px, 5vw); width: min(260px, 28vw); }
+#stamina .bar-fill { background: linear-gradient(#62b066, #2c6a30); transform-origin: right; }
+
+#enemy {
+  position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+  width: min(300px, 56vw); text-align: center; transition: opacity 0.8s;
+}
+#enemy.faded { opacity: 0; }
+#enemy-name { font-size: 17px; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 5px; }
+#enemy .bar { position: relative; }
+#enemy .bar-fill { background: linear-gradient(#d4584b, #8e2519); transform-origin: center; }
+
+/* The minimap sits in a ring with a diamond at each quarter, like the compass's caps, clear of the screen's edges. */
+#minimap-frame {
+  position: absolute; top: calc(44px + env(safe-area-inset-top, 0px)); right: max(44px, 4vw);
+  width: clamp(132px, 13.5vw, 188px); aspect-ratio: 1; border-radius: 50%;
+  box-shadow: 0 0 26px rgba(0, 0, 0, 0.75);
+}
+#minimap { position: absolute; inset: 5.5%; width: 89%; height: 89%; border-radius: 50%; }
+.minimap-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.minimap-ring .bezel { fill: none; stroke: rgba(8, 7, 6, 0.72); stroke-width: 4.5; }
+.minimap-ring .ring { fill: none; stroke: rgba(243, 240, 232, 0.5); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.minimap-ring .ring.inner { stroke: rgba(243, 240, 232, 0.8); }
+.minimap-ring .stud { fill: #0b0a09; stroke: rgba(243, 240, 232, 0.75); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.minimap-ring .stud.ahead { fill: rgba(243, 240, 232, 0.85); }
+
+#corner {
+  position: absolute; top: calc(24px + env(safe-area-inset-top, 0px)); left: 24px;
+  display: grid; gap: 16px; justify-items: start; max-width: min(460px, 40vw);
+}
+#notes { display: grid; gap: 4px; }
+.note {
+  margin: 0; font-size: 21px; letter-spacing: 0.05em;
+  animation: note-in 0.3s ease-out; transition: opacity 0.8s;
+}
+.note.gone { opacity: 0; }
+/* Quest objectives, with a box that is ticked once done. */
+.note.objective { display: flex; align-items: center; gap: 10px; font-size: 20px; letter-spacing: 0.06em; }
+.note.objective.done { color: var(--dim); }
+.box {
+  position: relative; flex: none; width: 14px; height: 14px;
+  border: 1.5px solid rgba(243, 240, 232, 0.85); background: rgba(0, 0, 0, 0.4); box-shadow: 0 0 4px rgba(0, 0, 0, 0.9);
+}
+.done .box::after {
+  content: ''; position: absolute; left: 3px; top: -2px; width: 5px; height: 10px;
+  border: solid var(--ink); border-width: 0 2px 2px 0; transform: rotate(40deg);
+}
+
+/* Titles across the top: places, quests started, levels gained. */
+#banner {
+  position: absolute; left: 50%; top: calc(15vh + env(safe-area-inset-top, 0px)); transform: translateX(-50%);
+  width: min(720px, calc(100vw - 48px)); display: grid; gap: 6px; justify-items: center; text-align: center;
+  opacity: 0; visibility: hidden;
+}
+#banner.shown { animation: banner 4.2s ease-in-out forwards; }
+@keyframes banner {
+  0% { opacity: 0; visibility: visible; transform: translate(-50%, 6px); }
+  10% { opacity: 1; transform: translateX(-50%); }
+  80% { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+#banner > p { margin: 0; }
+.banner-kicker { font: 400 15px/1 var(--font-ui); letter-spacing: 0.3em; margin-right: -0.3em; text-transform: uppercase; color: rgba(243, 240, 232, 0.8); }
+.banner-title {
+  font: 600 clamp(26px, 3.4vw, 40px)/1.1 var(--font-title); letter-spacing: 0.18em; margin-right: -0.18em; text-transform: uppercase;
+}
+.banner-sub { font: 400 18px/1.2 var(--font-ui); letter-spacing: 0.22em; text-transform: uppercase; color: rgba(243, 240, 232, 0.85); }
+
+/* Markers on the compass: red for creatures hunting the player, gold for the objective. */
+#compass-marks { position: absolute; left: 50%; top: 0; bottom: 0; width: 0; }
+.marker { position: absolute; top: 50%; left: 0; transform: translate(calc(var(--x, 0px) - 50%), -50%); }
+.marker.enemy { width: 7px; height: 7px; border-radius: 50%; background: #e0473a; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7); }
+.marker.quest {
+  width: 0; height: 0; margin-top: -1px;
+  border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 11px solid #ecc86a;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
+}
+
+/* Fades the view to black and back: stepping through the way out, dying, starting a run. */
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+@keyframes note-in { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+#quick {
+  position: absolute; left: 24px; bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; font-size: 17px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+#quick-count { margin-left: 10px; font-size: 21px; }
 #compass {
   position: absolute; top: calc(18px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
   width: min(500px, 76vw); height: 30px;
@@ -212,6 +343,14 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 }
 .mark.major { height: 11px; background: rgba(243, 240, 232, 0.6); }
 .mark.letter { width: auto; height: auto; background: none; font: 500 19px/1 var(--font-ui); letter-spacing: 0; }
+/* Skyrim's sneak eye: shut while hidden, opening as creatures grow wary, wide open once seen. */
+#sneak-eye { position: absolute; left: 50%; top: calc(50% - 34px); width: 58px; height: 31px; transform: translate(-50%, -50%); }
+#sneak-eye svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.95)); }
+.eye-white { fill: rgba(0, 0, 0, 0.35); }
+.eye-iris { fill: rgba(243, 240, 232, 0.9); }
+.eye-lid { fill: none; stroke: rgba(243, 240, 232, 0.9); stroke-width: 1.8px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+#sneak-eye.seen .eye-lid { stroke: #fff; }
+#sneak-eye.seen .eye-white { fill: rgba(140, 16, 8, 0.45); }
 #crosshair { position: absolute; left: 50%; top: 50%; width: 15px; height: 5px; transform: translate(-50%, -50%); }
 #crosshair::before, #crosshair::after {
   content: ''; position: absolute; top: 0; width: 4px; height: 4px;
@@ -222,6 +361,7 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #prompt { position: absolute; left: 50%; top: calc(50% + 36px); transform: translateX(-50%); text-align: center; white-space: nowrap; }
 .prompt-action { display: inline-flex; align-items: center; font-size: 20px; letter-spacing: 0.06em; }
 #prompt-name { font-size: 30px; line-height: 1.1; letter-spacing: 0.03em; }
+#prompt-note { font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; color: #e6a093; margin-top: 2px; }
 #message {
   position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); margin: 0;
   width: min(820px, calc(100vw - 48px)); text-align: center; white-space: pre-line;
@@ -229,8 +369,9 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
   opacity: 0; transition: opacity 0.8s;
 }
 #message.shown { opacity: 1; transition-duration: 0.25s; }
+/* Skyrim's help: the controls down the left side for a while at the start. */
 #tips {
-  position: absolute; top: calc(24px + env(safe-area-inset-top, 0px)); left: 24px;
+  position: absolute; left: 24px; top: 50%; transform: translateY(-50%); max-width: min(420px, 38vw);
   display: grid; grid-template-columns: max-content auto; gap: 6px 4px; align-items: center;
   padding: 14px 48px 14px 18px; font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase;
   background: linear-gradient(90deg, var(--shade), transparent);
@@ -238,8 +379,25 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 }
 .tip { display: contents; }
 
+/* ---- Map screen ---- */
+#map-screen { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95); }
+.map-title { position: absolute; top: calc(22px + env(safe-area-inset-top, 0px)); left: 0; right: 0; display: grid; gap: 10px; text-align: center; }
+#map-north {
+  position: absolute; top: calc(26px + env(safe-area-inset-top, 0px)); right: max(28px, 3vw);
+  width: 52px; height: 52px; border-radius: 50%; border: 1px solid rgba(243, 240, 232, 0.7);
+  background: rgba(0, 0, 0, 0.5); display: grid; justify-items: center;
+}
+#map-north span { font: 600 17px/1 var(--font-ui); margin-top: 4px; }
+#map-north::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: translate(-50%, -20%);
+  border: 6px solid transparent; border-bottom: 12px solid rgba(243, 240, 232, 0.85); border-top: 0;
+}
+
 @media (max-width: 720px) {
   #tips { display: none !important; }
+  #minimap-frame { width: 112px; top: calc(52px + env(safe-area-inset-top, 0px)); right: 16px; }
+  #banner { top: calc(12vh + env(safe-area-inset-top, 0px)); }
+  #stamina { width: 22vw; }
   #compass { top: calc(10px + env(safe-area-inset-top, 0px)); }
   .bindings { font-size: 15px; }
   .bindings th { font-size: 12px; letter-spacing: 0.1em; }
@@ -250,4 +408,7 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 @media (prefers-reduced-motion: reduce) {
   #menu::after { animation: none; }
   .option, .option-row, #message { transition: none; }
+  #hud.low-health::after { animation: none; opacity: 0.7; }
+  #banner.shown { animation-name: banner-still; }
+
 }

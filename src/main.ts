@@ -16,18 +16,26 @@ import {
   type FileSource,
 } from './data/files';
 import { ensureReadPermission, loadFolderHandle, pickDirectory, saveFolderHandle, supportsDirectoryPicker } from './data/rememberFolder';
+import { SoundBank } from './audio/sound';
+import { readExeData, type ExeData } from './formats/exe';
 import { parseCol } from './formats/palette';
 import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
+import { unpackExe, UnsupportedExeError } from './formats/pklite';
+import { Dungeon } from './game/dungeon';
 import { buildLevel } from './game/level';
 import { Engine } from './game/engine';
 import { GamepadInput } from './input/gamepad';
+import { CreatureView } from './render/creatureView';
 import { TextureCache } from './render/textures';
 import { buildLevelScene } from './render/levelScene';
+import { MapView } from './render/mapView';
+import { WeaponView } from './render/weaponView';
 import { backdropLevel } from './render/backdrop';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { Hud } from './ui/hud';
 import { MenuNav } from './ui/menu';
+import { Minimap } from './ui/minimap';
 import { bindSettingRows, loadSettings } from './ui/settings';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -39,6 +47,8 @@ const folderError = $('folder-error');
 const mapSelect = $<HTMLSelectElement>('map-select');
 const playButton = $<HTMLButtonElement>('play');
 const resumeButton = $<HTMLButtonElement>('resume');
+const mapButton = $<HTMLButtonElement>('open-map');
+const mapScreen = $('map-screen');
 const canvas = $<HTMLCanvasElement>('view');
 
 const DEFAULT_MAP = 'START.MIF';
@@ -49,20 +59,28 @@ const input = new InputModeWatcher();
 const hud = new Hud(hudEl);
 const settings = loadSettings();
 let data: GameData | undefined;
+/** Creature and weapon tables from the game's program, once read; null when they could not be. */
+let tables: ExeData | null | undefined;
+let sounds: SoundBank | undefined;
+/** Textures of the map being played, freed with it. */
+let textures: TextureCache | undefined;
 let engine: Engine | undefined;
 /** The map being played; undefined while only the backdrop runs. */
 let engineMap: string | undefined;
 let tipsShown = false;
 
-const playing = () => engineMap !== undefined;
+/** True while a map is being played and the player is still in it. */
+const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'controls';
+type Screen = 'folder' | 'play' | 'controls' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
   controls: $('screen-controls'),
+  dead: $('screen-dead'),
+  escaped: $('screen-escaped'),
 };
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
@@ -90,11 +108,12 @@ function showScreen(next: Screen) {
 function updateHints() {
   $('hint-back').hidden = screen !== 'controls' && !playing();
   $('hint-back-label').textContent = screen === 'controls' ? 'Back' : 'Resume';
-  $('hint-change').hidden = screen === 'folder';
+  $('hint-change').hidden = screen !== 'play' && screen !== 'controls';
 }
 
 function updatePlayOptions() {
   resumeButton.hidden = !playing();
+  mapButton.hidden = !playing();
   playButton.textContent = playing() && mapSelect.value === engineMap ? 'Start over' : 'Enter the dungeon';
   updateHints();
 }
@@ -125,21 +144,50 @@ function fillBindings() {
 /** Stops the running engine (map or backdrop) and makes `next` the current one. */
 function setEngine(next?: Engine, map?: string) {
   engine?.dispose();
+  if (engine !== next) {
+    textures?.dispose();
+    textures = undefined;
+  }
   engine = next;
   engineMap = map;
 }
 
 /** Shows the generated hall behind the menu until a real map is loaded. */
 async function showBackdrop() {
-  const { level, textures } = backdropLevel();
-  const scene = await buildLevelScene(level, textures);
+  const { level, textures: provider } = backdropLevel();
+  const scene = await buildLevelScene(level, provider);
   if (engine) return; // a map started while the backdrop was building
-  setEngine(new Engine(renderer, level, scene, { autopilot: true }));
+  setEngine(new Engine(renderer, new Dungeon(level, undefined), scene, { autopilot: true }));
   engine!.start();
 }
 
 function setStatus(text: string) {
   status.textContent = text;
+}
+
+/**
+ * Reads the creature and weapon tables from the game's program, unpacking it
+ * first when it is packed (the CD version's ACD.EXE is). Without them the
+ * dungeons have no monsters, but can still be explored.
+ */
+async function loadTables(game: GameData): Promise<ExeData | null> {
+  for (const name of ['ACD.EXE', 'A.EXE']) {
+    if (!game.has(name)) continue;
+    try {
+      const file = await game.read(name);
+      let image: Uint8Array;
+      try {
+        image = unpackExe(file);
+      } catch (err) {
+        if (!(err instanceof UnsupportedExeError)) throw err;
+        image = file; // not packed
+      }
+      return readExeData(image);
+    } catch (err) {
+      console.warn(`Could not read the creature tables from ${name}:`, err);
+    }
+  }
+  return null;
 }
 
 async function startMap(name: string) {
@@ -154,17 +202,50 @@ async function startMap(name: string) {
     const infName = mif.levels[levelIndex].info;
     const inf = parseInf(await data.read(infName));
     const level = buildLevel(mif, levelIndex, inf);
+    // Arena's first dungeon, under the Imperial Palace.
+    if (name === DEFAULT_MAP) level.name = 'Imperial Dungeons';
     const palette = parseCol(await data.read('PAL.COL'));
-    const scene = await buildLevelScene(level, new TextureCache(data, palette));
-    const next = new Engine(renderer, level, scene, { pad, hud, controls: settings });
+    if (tables === undefined) tables = await loadTables(data);
+    const cache = new TextureCache(data, palette);
+    const dungeon = new Dungeon(level, tables ?? undefined);
+    const scene = await buildLevelScene(level, cache);
+    const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem));
+    const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => cache.screenImages(file));
+    await weapon.use(dungeon.stats.weapon.cif);
+    weapon.useBlood(await cache.screenAnimation('BLOODEXP.CFA'));
+    const next = new Engine(renderer, dungeon, scene, {
+      pad,
+      hud,
+      controls: settings,
+      creatures,
+      weapon,
+      sounds,
+      map: new MapView(dungeon, scene.material, $('map-north')),
+      minimap: new Minimap($<HTMLCanvasElement>('minimap'), dungeon),
+    });
     next.onPause = pause;
+    next.onDeath = died;
+    next.onEscape = escaped;
+    next.onMap = (open) => {
+      mapScreen.hidden = !open;
+      hudEl.hidden = open;
+    };
     setEngine(next, name);
+    textures = cache;
+    $('map-name').textContent = level.name || name;
     if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = next;
     if (scene.skippedFlats.length) {
-      console.info(`Not drawn yet (animated sprites and creatures): ${[...new Set(scene.skippedFlats)].join(', ')}`);
+      console.info(`Not drawn yet (animated sprites): ${[...new Set(scene.skippedFlats)].join(', ')}`);
     }
     setStatus(`${level.name || name} · ${level.width}×${level.depth}`);
+    if (!tables && level.creatures.length) {
+      hud.notify('The monsters could not be read from the game program, so this dungeon is empty');
+    }
+    // Fade in from black, with the place's name across the top, as Skyrim does on arrival.
+    hud.fade(1, 0);
     resume();
+    hud.fade(0, 1.4);
+    hud.banner(level.name || name);
     if (!tipsShown) {
       tipsShown = true;
       hud.showTips();
@@ -186,14 +267,71 @@ function resume() {
   engine.start();
 }
 
-function pause() {
+/** Shows the menu over the game, with the run's progress under the options. */
+function showMenu(next: Screen) {
   engine?.pause();
   if (document.pointerLockElement) document.exitPointerLock();
   hudEl.hidden = true;
+  mapScreen.hidden = true;
   menu.hidden = false;
+  // Out of the black the view faded to when the player died or left.
+  hud.fade(0, 1.2);
   updatePlayOptions();
   nav.opened();
-  showScreen('play');
+  showScreen(next);
+}
+
+function pause() {
+  showMenu('play');
+  const d = engine?.dungeon;
+  if (d && playing()) {
+    const s = d.stats;
+    const potions = s.potions === 1 ? '1 healing potion' : `${s.potions} healing potions`;
+    const goal = d.objective ? `\n${d.quest!.name}: ${d.objective.text}` : '';
+    setStatus(`${d.level.name || engineMap} · Level ${s.level} · ${s.weapon.name} · ${potions} · ${s.gold} gold${goal}`);
+  }
+}
+
+function died() {
+  const d = engine!.dungeon;
+  $('dead-notes').textContent = d.kills
+    ? `You fell after ${d.kills === 1 ? 'one kill' : `${d.kills} kills`}, ${formatTime(d.time)} into the dungeon.`
+    : `You fell ${formatTime(d.time)} into the dungeon.`;
+  showMenu('dead');
+}
+
+function escaped() {
+  const d = engine!.dungeon;
+  const gate = /shift gate/i.test(d.level.triggers.map((t) => t.text ?? '').join(' '));
+  $('escaped-notes').textContent = gate
+    ? 'You step through the Shift Gate and leave the Imperial Dungeons behind. The rest of Tamriel is not in the remake yet.'
+    : `You found the way out of ${d.level.name || engineMap}.`;
+  const explored = d.explored.seen.reduce((n, v) => n + v, 0);
+  const open = d.level.cells.filter((c) => c.kind !== 'wall').length;
+  const rows: Array<[string, string]> = [
+    ['Time', formatTime(d.time)],
+    ['Creatures slain', `${d.kills} of ${d.creatures.length}`],
+    ['Level', String(d.stats.level)],
+    ['Gold', String(d.stats.gold)],
+    ['Weapon', d.stats.weapon.name],
+    ['Explored', `${Math.min(100, Math.round((explored / Math.max(1, open)) * 100))}%`],
+  ];
+  $('run-stats').replaceChildren(
+    ...rows.flatMap(([k, v]) => {
+      const dt = document.createElement('dt');
+      dt.textContent = k;
+      const dd = document.createElement('dd');
+      dd.textContent = v;
+      return [dt, dd];
+    }),
+  );
+  showMenu('escaped');
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return m ? `${m} min ${s} s` : `${s} s`;
 }
 
 /**
@@ -244,6 +382,10 @@ async function useSource(source: FileSource): Promise<boolean> {
   setStatus('Reading GLOBAL.BSA…');
   try {
     data = await GameData.open(source);
+    tables = undefined;
+    sounds = new SoundBank(data);
+    sounds.setVolume(settings.volume);
+    sounds.wake();
   } catch (err) {
     folderError.textContent = `Could not read the game data: ${(err as Error).message}`;
     folderError.hidden = false;
@@ -366,12 +508,24 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-back]')) {
 }
 
 resumeButton.addEventListener('click', resume);
+mapButton.addEventListener('click', () => {
+  if (!engine || !playing()) return;
+  menu.hidden = true;
+  engine.openMap();
+  engine.start();
+});
 playButton.addEventListener('click', () => startMap(mapSelect.value));
+$('try-again').addEventListener('click', () => engineMap && startMap(engineMap));
+$('play-again').addEventListener('click', () => engineMap && startMap(engineMap));
 mapSelect.addEventListener('change', updatePlayOptions);
 // Choosing the map list itself (A on a controller, or Enter) plays the map picked in it.
 mapSelect.addEventListener('choose', () => startMap(mapSelect.value));
 
-bindSettingRows(screens.controls, settings);
+bindSettingRows(screens.controls, settings, (key) => {
+  if (key === 'volume') sounds?.setVolume(settings.volume);
+});
+// Browsers start sound only after a click or key press.
+for (const type of ['pointerdown', 'keydown']) window.addEventListener(type, () => sounds?.wake(), true);
 fillBindings();
 showScreen('folder');
 void showBackdrop();

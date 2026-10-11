@@ -139,6 +139,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Sound starts straight away, even for a player who only uses a controller.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   });
   win.once('ready-to-show', () => win.show());
