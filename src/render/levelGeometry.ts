@@ -86,11 +86,9 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
       const wallKey = `wall:${c.wallTex}`;
 
       if (c.kind === 'wall') {
+        // Beside water or a pit the wall stands at the floor's level; below it are the chasm's own sides.
         for (const s of SIDES) {
-          const n = at(x + s.dx, y + s.dy);
-          // Beside water or a pit the wall goes on down to its surface or floor, its texture lined up with the wall beside.
-          const down = n?.chasm ? chasmDepth(n, h) : 0;
-          if (!solid(n)) sideFace(batch(wallKey), x, y, s.normal, down, h, false, 1, false, down / h);
+          if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(wallKey), x, y, s.normal, 0, h);
         }
         continue;
       }
@@ -103,9 +101,10 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
         horizontal(batch(c.chasm === 'dry' ? key : `liquid:${c.chasm}`), x, y, d, true);
         // Its sides show the top of the chasm's wall texture, as deep as it is: Arena's water and lava
         // textures are stone above the waterline and black below, a pit's the whole height of a room.
+        // As in Arena they are drawn on every side but another chasm's, so a wall that comes down
+        // into the water shows the chasm's stone below the floor's level, not its own.
         for (const s of SIDES) {
-          const n = at(x + s.dx, y + s.dy);
-          if (n && !n.chasm && n.kind !== 'wall') sideFace(batch(key), x, y, s.normal, d, 0, true, 1, false, 1 + d / h);
+          if (!at(x + s.dx, y + s.dy)?.chasm) sideFace(batch(key), x, y, s.normal, d, 0, true, 1, false, 1 + d / h);
         }
       } else if (c.kind !== 'raised') {
         horizontal(batch(`floor:${c.floorTex}`), x, y, 0, true);

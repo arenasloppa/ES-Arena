@@ -5,7 +5,7 @@ import { ARENA_HEIGHT, buildLevel, isBlocking } from '../src/game/level';
 import { airborne, blockedAt, doorInFront, groundUnder, jump, JUMP_HEIGHT, JUMP_TIME, settle, step, type PlayerState } from '../src/game/player';
 import { textLevel } from './helpers/level';
 import * as THREE from 'three';
-import { buildLevelGeometry } from '../src/render/levelGeometry';
+import { buildLevelGeometry, chasmDepth } from '../src/render/levelGeometry';
 import { doorObject, poseDoor } from '../src/render/levelScene';
 import { encryptInf, makeMif } from './helpers/encode';
 
@@ -189,6 +189,17 @@ describe('level geometry', () => {
     expect(g.doors).toHaveLength(1);
     expect(g.batches.has('liquid:wet')).toBe(true);
     for (const b of g.batches.values()) expect(b.positions.length / 3).toBe((b.indices.length / 6) * 4);
+  });
+
+  it("draws water's sides against walls too, with the walls standing at the floor's level", () => {
+    // Water with walls on three sides and the floor on the fourth.
+    const l = textLevel(['####', '#~.#', '####'], { chasmTextures: { wet: 7 } });
+    const g = buildLevelGeometry(l);
+    const heights = (key: string) => g.batches.get(key)!.positions.filter((_, i) => i % 3 === 1);
+    expect(g.batches.get('wall:7')!.indices.length / 6).toBe(4);
+    expect(Math.min(...heights('wall:7'))).toBeCloseTo(chasmDepth(l.cells[5], l.height));
+    expect(Math.max(...heights('wall:7'))).toBe(0);
+    expect(Math.min(...heights('wall:0'))).toBe(0);
   });
 });
 
