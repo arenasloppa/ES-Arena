@@ -59,10 +59,11 @@ screenshots of earlier versions.
 - Level up as in Arena: its experience for each level, your class's hit die for health, and 3 to 6 bonus points a
   level to share out among your attributes on the character sheet. Endurance's health bonus counts for every level you
   have, so raising it late is worth as much as raising it early.
-- Health, stamina and healing potions. Search bodies and chests for gold, potions, weapons and armour, and open locked
-  doors with their key, pick their locks or break them down.
+- Loot by Arena's rules, read from its program: treasure piles, gear spots and bodies hold gold, Arena's potions,
+  magic rings, amulets and other trinkets, and plain, fine and enchanted gear, found unidentified until you use or wear
+  it. Open locked doors with their key, pick their locks or break them down.
 - Skyrim's menus: a menu of menus for your character, items, magic and the map, where you aim at one and let go to
-  open it; an item menu with the game's picture of each piece, where you equip, drink, favourite and drop things; a
+  open it; an item menu with the game's picture of each piece, where you equip, drink, cast from, favourite and drop things; a
   character sheet with Arena's paper doll wearing what you wear; and favourites you can put on number keys or the
   D-pad to use mid-fight.
 - A 3D map that fills in as you explore, a minimap, quest objectives, and markers on the compass for the next
@@ -137,7 +138,7 @@ controller, with the PlayStation button in brackets.
 | Sprint | <kbd>Shift</kbd> | LB (L1) |
 | Sneak | <kbd>C</kbd> | Click the left stick (L3) |
 | Favourites | <kbd>Q</kbd> | Up or down on the D-pad |
-| Use the favourite on a number key | <kbd>1</kbd> to <kbd>8</kbd> (the healing potion starts on <kbd>1</kbd>) | Left or right on the D-pad, for 1 and 2 |
+| Use the favourite on a number key | <kbd>1</kbd> to <kbd>8</kbd> | Left or right on the D-pad, for 1 and 2 |
 | Character, items, magic and map | <kbd>Tab</kbd> | B (○) |
 | Items, magic | <kbd>I</kbd>, <kbd>P</kbd> | |
 | Map | <kbd>M</kbd> | Down from the menu of menus (B) |
@@ -151,8 +152,9 @@ pointing at it.
 In the magic menu (<kbd>P</kbd>, or left from the menu of menus), ready a spell with <kbd>E</kbd> or A, make it a
 favourite with <kbd>F</kbd> or Y, or put it on a number key by pressing the number.
 
-In the item menu, pick a kind of item on the left (LB and RB also change it), then use or equip the picked one with
-<kbd>E</kbd> or A, make it a favourite with <kbd>F</kbd> or Y, and drop it with <kbd>R</kbd> or X. Pressing a number
+In the item menu, pick a kind of item on the left (LB and RB also change it), then use, drink or equip the picked one with
+<kbd>E</kbd> or A, cast the spell of an enchanted piece with <kbd>C</kbd> or RT, make it a favourite with <kbd>F</kbd> or
+Y, and drop it with <kbd>R</kbd> or X. Pressing a number
 key puts it on that key. In the favourites, <kbd>1</kbd> to <kbd>8</kbd>, or left and right on the D-pad, do the same.
 <kbd>Esc</kbd> or B goes back, and <kbd>Tab</kbd> goes straight back to the game.
 

@@ -1,7 +1,7 @@
 import { SPELL_SIZE } from '../../src/formats/spells';
 
 /** One made-up 85-byte spell record; none of these numbers come from the game. */
-export function record(o: { name: string; target?: number; element?: number; effects?: number[]; subs?: number[]; params?: number[][]; cost?: number }): Uint8Array {
+export function record(o: { name: string; target?: number; element?: number; effects?: number[]; subs?: number[]; attributes?: number[]; params?: number[][]; cost?: number }): Uint8Array {
   const b = new Uint8Array(SPELL_SIZE);
   const v = new DataView(b.buffer);
   const effects = o.effects ?? [4];
@@ -12,6 +12,7 @@ export function record(o: { name: string; target?: number; element?: number; eff
   for (let e = 0; e < 3; e++) {
     b[41 + e] = effects[e] ?? 0xff;
     b[44 + e] = o.subs?.[e] ?? 0;
+    b[47 + e] = o.attributes?.[e] ?? 0;
   }
   v.setUint16(50, o.cost ?? 100, true);
   [...o.name].forEach((c, i) => (b[52 + i] = c.charCodeAt(0)));

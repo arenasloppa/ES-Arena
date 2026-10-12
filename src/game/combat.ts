@@ -173,7 +173,6 @@ export interface PlayerStats {
   magicka: number;
   maxMagicka: number;
   gold: number;
-  potions: number;
   /** Key numbers carried; each opens the locks of the same level. */
   keys: Set<number>;
   weapon: Weapon;
@@ -226,8 +225,6 @@ export interface Hero {
   criticalWith: 'melee' | 'bows';
   /** Chance to pick an easy lock; 0 for classes that can't. */
   lockpicking: number;
-  /** Multiplies the gold found. */
-  fortune: number;
   /** Kilograms that can be carried before the player is too laden to run. */
   carry: number;
   /** Spell points; 0 for classes that can't cast spells (see magic.ts). */
@@ -268,7 +265,6 @@ export const DEFAULT_HERO: Hero = {
   critical: 0,
   criticalWith: 'melee',
   lockpicking: 0,
-  fortune: 1,
   carry: 200,
   magicka: 0,
   regainsMagicka: true,
@@ -279,7 +275,6 @@ export const DEFAULT_HERO: Hero = {
   reload: reloadTime(to256(50)),
 };
 
-export const POTION_HEALS = 25;
 const STAMINA_REGEN = 22; // per second, after a short pause
 const STAMINA_PAUSE = 0.8;
 const HEALTH_REGEN = 0.25; // per second, out of a fight
@@ -296,7 +291,6 @@ export function newPlayerStats(weapon: Weapon, hero: Hero = DEFAULT_HERO): Playe
     magicka: hero.magicka,
     maxMagicka: hero.magicka,
     gold: 0,
-    potions: 0,
     keys: new Set(),
     weapon,
     baseHealth: hero.health - hero.healthBonus,
@@ -374,14 +368,6 @@ export function spendStamina(p: PlayerStats, amount: number): boolean {
 export function recover(p: PlayerStats, dt: number, sinceStaminaUse: number, sinceHurt: number, recovery = 1): void {
   if (sinceStaminaUse > STAMINA_PAUSE) p.stamina = Math.min(p.maxStamina, p.stamina + STAMINA_REGEN * recovery * dt);
   if (sinceHurt > HEALTH_PAUSE && p.health > 0) p.health = Math.min(p.maxHealth, p.health + HEALTH_REGEN * dt);
-}
-
-/** Drinks a healing potion if there is one and it would help. */
-export function drinkPotion(p: PlayerStats): boolean {
-  if (p.potions <= 0 || p.health >= p.maxHealth || p.health <= 0) return false;
-  p.potions--;
-  p.health = Math.min(p.maxHealth, p.health + POTION_HEALS);
-  return true;
 }
 
 /** Whether a blow with a bow, or with another weapon, may be a critical hit (see Hero.criticalWith). */

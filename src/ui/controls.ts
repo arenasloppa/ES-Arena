@@ -53,6 +53,7 @@ export type Action =
   | 'use'
   | 'favourite'
   | 'drop'
+  | 'cast'
   | 'setHotkey'
   | 'turnItem'
   | 'zoomItem'
@@ -92,6 +93,7 @@ export const BINDINGS: Record<Action, Binding> = {
   use: { label: 'Use', keys: ['E'], pad: ['A'] },
   favourite: { label: 'Favourite', keys: ['F'], pad: ['Y'] },
   drop: { label: 'Drop', keys: ['R'], pad: ['X'] },
+  cast: { label: 'Cast', keys: ['C'], pad: ['RT'] },
   setHotkey: { label: 'Hotkey', keys: ['1–8'], pad: ['DLeftRight'] },
   turnItem: { label: 'Turn', keys: ['Drag'], pad: ['RStick'] },
   zoomItem: { label: 'Zoom', keys: ['Wheel'], pad: ['RStickPress'] },

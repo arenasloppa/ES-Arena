@@ -18,7 +18,11 @@
  * too (creatures.ts's paralysisFrom). The player's race, class and
  * attributes (the Hero) change how hard they hit, how fast they move and
  * climb, and more. Monster stats, weapon damage, armour and sounds come
- * from the player's own game; the loot rules are the remake's own.
+ * from the player's own game, and so does the loot: what loot spots and
+ * creatures hold is Arena's (loot.ts), with the remake's own standing in
+ * when the game's tables can't be read. Taking from a loot spot takes all
+ * of it, as Skyrim's "take all" does, and the spot is gone, as Arena's is
+ * once emptied.
  *
  * Magic works as in Skyrim's hands with Arena's spells (see magic.ts): a
  * spell readied from the magic menu takes the place of the guard, so the
@@ -33,7 +37,6 @@ import {
   ARENA_TICK,
   bashChance,
   DEFAULT_HERO,
-  drinkPotion,
   elementalDamage,
   knackDamage,
   levelDamage,
@@ -71,6 +74,11 @@ import {
   CAUSE_PARALYSIS,
   CAUSE_POISON,
   chance,
+  CURE,
+  CURE_PARALYSIS,
+  FORTIFY,
+  fortification,
+  usable,
   CONTINUOUS_DAMAGE,
   CONTINUOUS_EVERY,
   CREATE,
@@ -97,7 +105,9 @@ import {
   TRANSFER,
   amount,
 } from './magic';
-import { armourTables, Inventory, itemKey, POTION, randomGear, startingGear, weaponOf, type Item, type NewItem } from './items';
+import { armourTables, ATTRIBUTES, Inventory, itemKey, POTION_WEIGHT, potionKey, randomGear, shownName, startingGear, weaponOf, wearable, type Item, type NewItem } from './items';
+import { creatureLoot, GEAR_CAST_LEVEL, POTION_CAST_LEVEL, spotLoot, type Loot, type LootRules } from './loot';
+import { RESTORE_POWER } from '../formats/loot';
 import type { ArmourTables } from '../formats/armour';
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
@@ -151,7 +161,7 @@ export interface Swing {
 
 export type TargetKind = 'door' | 'exit' | 'item' | 'body';
 
-/** One line in the item menus: a piece of gear, the healing potions, or the keys. */
+/** One line in the item menus: a piece of gear, a trinket, the potions of a kind, or the keys. */
 export interface MenuEntry {
   /** What use(), favourite() and setHotkey() take. */
   key: string;
@@ -322,6 +332,14 @@ const CLIMB_WATER = 0.35;
 const CLIMB_PIT = 4;
 /** Seconds after casting before another spell can be cast. */
 const CAST_TIME = 0.7;
+/** Spell points a potion of Restore Power gives back (Arena's program, at 0x2A563). */
+const RESTORED_POWER = 25;
+/** Casting from gear wears it by the spell's cost over this (0x2A525). */
+const GEAR_WEAR = 15;
+/** Health the remake's own healing potion restores, when the game's potions can't be read. */
+const HEALING_POTION = 25;
+/** An Acrobat's jumps, which gear of Jumping gives too (Arena's program, at 0x28523). */
+const JUMPING_LEAP = 2;
 /** Spell bolts fly this many voxels a second, and give up this far away. */
 const BOLT_SPEED = 7;
 const BOLT_RANGE = 25;
@@ -351,6 +369,8 @@ export const SNEAK_SHOT = 2;
 export interface Bolt {
   id: number;
   spell: SpellRecord;
+  /** The caster's level it was cast at. */
+  level: number;
   x: number;
   y: number;
   dx: number;
@@ -376,6 +396,7 @@ export interface Arrow {
 interface Affliction {
   creature: Creature;
   spell: SpellRecord;
+  level: number;
   /** Damage of each blow: a fixed number, or the effect to roll. */
   damage: number | SpellRecord['effects'][number];
   every: number;
@@ -470,8 +491,23 @@ export class Dungeon {
   /** Seconds of play until a paralysing blow wears off. */
   private paralysedUntil = 0;
 
-  /** What the player's character brings; worked out again when they share out bonus points (see applyAttributes). */
+  /** What the player's character brings, with what they wear; worked out again when they share out bonus points (see applyAttributes) and when what they wear changes. */
   hero: Hero;
+  /**
+   * Works the character out again with bonuses to their attributes, Strength
+   * to Luck (from enchanted gear, trinkets and Fortify spells); the game sets
+   * it. Without it, attribute bonuses change nothing.
+   */
+  heroWith?: (bonus: number[]) => Hero;
+  /** The character without what they wear. */
+  private baseHero: Hero;
+  private readonly spells: SpellRecord[];
+  /** Arena's loot, when the game's tables can be read. */
+  private readonly lootRules?: LootRules;
+  /** What each creature carries, by its id, from when it appeared. */
+  private readonly carried = new Map<number, Loot>();
+  /** Fortify spells working on the player: points added to an attribute, lost a few at a time. */
+  private readonly fortified: Array<{ attribute: number; points: number; loss: number; every: number; next: number; until: number }> = [];
 
   /**
    * `hero` is what the player's character brings; without one, the player
@@ -486,6 +522,8 @@ export class Dungeon {
     spells: SpellRecord[] = [],
   ) {
     this.hero = hero;
+    this.baseHero = hero;
+    this.spells = spells;
     this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0, z: 0, vz: 0 };
     this.messages = tables?.messages ?? {};
     this.encounters = tables?.encounters;
@@ -493,6 +531,9 @@ export class Dungeon {
     this.weaponTable = tables?.weapons ?? [];
     this.armourTable = armourTables(tables?.armour);
     this.undead = tables?.hits?.undead ?? [];
+    if (tables?.loot && this.weaponTable.length) {
+      this.lootRules = { tables: tables.loot, weapons: this.weaponTable, armour: this.armourTable, classes: tables.character?.classes };
+    }
     this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
     const held = this.inventory.weapon;
@@ -514,7 +555,7 @@ export class Dungeon {
     if (tables) {
       for (const s of level.creatures) {
         const info = tables.creatures[s.type];
-        if (info) this.creatures.push(spawnCreature(this.creatures.length, info, s.x, s.y, random));
+        if (info) this.creatures.push(this.outfit(spawnCreature(this.creatures.length, info, s.x, s.y, random)));
       }
     }
     this.explored = new Exploration(level);
@@ -619,6 +660,32 @@ export class Dungeon {
    * attribute at 100), Arena heals the player instead: `heal`.
    */
   applyAttributes(hero: Hero, heal = false): void {
+    this.baseHero = hero;
+    this.setHero(this.geared(hero), heal);
+    this.stats.bonusPoints = 0;
+  }
+
+  /** What the character wears and the Fortify spells on them changed: works the hero out again. */
+  private refreshHero(): void {
+    this.setHero(this.geared(this.baseHero));
+  }
+
+  /** The hero with the attribute bonuses of what is worn and of Fortify spells (heroWith), and Jumping. */
+  private geared(hero: Hero): Hero {
+    const bonus = this.attributeBonus();
+    if (this.heroWith && bonus.some((b) => b !== 0)) hero = this.heroWith(bonus);
+    return this.inventory.jumping() ? { ...hero, leap: Math.max(hero.leap, JUMPING_LEAP) } : hero;
+  }
+
+  /** What worn enchantments, trinkets and Fortify spells add to each attribute, Strength to Luck. */
+  attributeBonus(): number[] {
+    const bonus = this.inventory.attributeBonus();
+    for (const f of this.fortified) if (f.attribute < ATTRIBUTES) bonus[f.attribute] += Math.max(0, f.points);
+    return bonus;
+  }
+
+  /** Takes up a new hero: Endurance counts back over every level, and what each of health, stamina and spell points gains is had at once. */
+  private setHero(hero: Hero, heal = false): void {
     const s = this.stats;
     const health = maxHealthFor(s, hero.healthBonus);
     s.health = heal ? health : raiseTo(s.health, s.maxHealth, health);
@@ -627,7 +694,6 @@ export class Dungeon {
     s.maxStamina = hero.stamina;
     s.magicka = raiseTo(s.magicka, s.maxMagicka, hero.magicka);
     s.maxMagicka = hero.magicka;
-    s.bonusPoints = 0;
     this.hero = hero;
   }
 
@@ -742,7 +808,7 @@ export class Dungeon {
     for (let i = 0; i < found.count; i++) {
       const at = spawnSpot(this.level, this.player.x, this.player.y, this.random, this.creatures);
       if (!at) break;
-      const creature = spawnCreature(this.creatures.length, info, at.x, at.y, this.random);
+      const creature = this.outfit(spawnCreature(this.creatures.length, info, at.x, at.y, this.random));
       this.creatures.push(creature);
       this.events.push({ type: 'spawned', creature });
     }
@@ -791,7 +857,7 @@ export class Dungeon {
     let strafe = clamp(input.strafe, -1, 1);
     const moving = forward !== 0 || strafe !== 0;
     // Too laden to run, as in Skyrim.
-    const laden = this.inventory.weight(this.stats.potions) > this.hero.carry;
+    const laden = this.inventory.weight() > this.hero.carry;
     if (laden && input.sprint && moving && !this.sprintHeld) this.events.push({ type: 'notify', text: 'You are carrying too much to run' });
     this.sprintHeld = input.sprint && moving;
     let run = input.sprint && moving && this.stats.stamina > 0 && !this.blocking && !laden && !this.swimming;
@@ -1286,6 +1352,7 @@ export class Dungeon {
     if (this.invisible) list.push('Invisible');
     if (this.time < this.light.until) list.push('Light');
     if (this.time < this.regen.until) list.push('Regenerating');
+    for (const f of this.fortified) list.push(`Fortified (+${f.points})`);
     return list;
   }
 
@@ -1296,15 +1363,28 @@ export class Dungeon {
 
   /** Casts a spell, if there are spell points enough and it has something to work on. */
   cast(spell: SpellRecord): boolean {
-    if (this.outcome || this.paralysed || this.swing || this.sinceCast < CAST_TIME) return false;
-    const notify = (text: string) => this.events.push({ type: 'notify', text });
+    if (!this.mayCast()) return false;
     if (!castable(spell)) return false;
     const cost = this.spellCost(spell);
     if (this.stats.magicka < cost) {
-      this.events.push({ type: 'noMagicka' });
-      notify(`You need ${cost} spell points to cast ${spell.name}`);
+      this.events.push({ type: 'noMagicka' }, { type: 'notify', text: `You need ${cost} spell points to cast ${spell.name}` });
       return false;
     }
+    return this.release(spell, this.stats.level, () => (this.stats.magicka -= cost));
+  }
+
+  /** Not dead or out, held still, swinging, or just after casting. */
+  private mayCast(): boolean {
+    return !this.outcome && !this.paralysed && !this.swing && this.sinceCast >= CAST_TIME;
+  }
+
+  /**
+   * Casts the spell at a caster's `level`, if it has something to work on:
+   * `pay` is called once it is sure to go (spell points, a charge, wear).
+   * Says in a note why not when it can't.
+   */
+  private release(spell: SpellRecord, level: number, pay: () => void): boolean {
+    const notify = (text: string) => this.events.push({ type: 'notify', text });
     // In sanctuary, a caster may not cast offensive spells.
     if (this.time < this.sanctuary.until && spell.target !== 'caster') {
       notify('You can’t cast that in sanctuary');
@@ -1325,33 +1405,32 @@ export class Dungeon {
       return false;
     }
 
-    this.stats.magicka -= cost;
+    pay();
     this.sinceCast = 0;
     this.events.push({ type: 'cast', spell }, { type: 'sound', name: spell.target === 'caster' ? 'BURST5.VOC' : 'SLOWBALL.VOC', volume: 0.7 });
     const p = this.player;
     switch (spell.target) {
       case 'caster':
-        this.onCaster(spell, door?.kind === 'door' ? door.cell : undefined);
+        this.onCaster(spell, door?.kind === 'door' ? door.cell : undefined, level);
         break;
       case 'touch':
-        this.burst(spell, { x: touched!.x, y: touched!.y }, touched);
+        this.burst(spell, { x: touched!.x, y: touched!.y }, level, touched);
         break;
       case 'areaCaster':
-        this.burst(spell, { x: p.x, y: p.y }, undefined, AREA_AROUND_CASTER);
+        this.burst(spell, { x: p.x, y: p.y }, level, undefined, AREA_AROUND_CASTER);
         break;
       default: {
         // From just in front of the eyes, the way the player faces.
         const dx = Math.cos(p.yaw);
         const dy = Math.sin(p.yaw);
-        this.bolts.push({ id: this.nextBolt++, spell, x: p.x + dx * 0.3, y: p.y + dy * 0.3, dx, dy, travelled: 0 });
+        this.bolts.push({ id: this.nextBolt++, spell, level, x: p.x + dx * 0.3, y: p.y + dy * 0.3, dx, dy, travelled: 0 });
       }
     }
     return true;
   }
 
-  /** A spell on the caster: healing, a shield, sanctuary, invisibility, light, opening a lock or regenerating. */
-  private onCaster(spell: SpellRecord, door: number | undefined): void {
-    const level = this.stats.level;
+  /** A spell on the caster: healing, a shield, sanctuary, invisibility, light, opening a lock, regenerating, curing paralysis or fortifying an attribute. */
+  private onCaster(spell: SpellRecord, door: number | undefined, level: number): void {
     const s = this.stats;
     for (const e of spell.effects) {
       switch (e.effect) {
@@ -1387,27 +1466,39 @@ export class Dungeon {
             this.openDoor(door);
           } else this.events.push({ type: 'notify', text: 'The lock holds' }, { type: 'sound', name: 'LOCK.VOC', at: cellCentre(this.level, door) });
           break;
+        case CURE:
+          // Nothing in the dungeons poisons or diseases the player; paralysis can be cured.
+          if (e.sub === CURE_PARALYSIS && this.paralysed && this.random() * 100 < chance(e, level)) this.paralysedUntil = this.time;
+          break;
+        case FORTIFY: {
+          const f = fortification(e);
+          const lasts = duration(e, level);
+          if (f.points <= 0 || lasts <= 0) break;
+          const every = f.everyRounds * ROUND;
+          this.fortified.push({ attribute: e.attribute, points: f.points, loss: f.loss, every, next: this.time + every, until: this.time + lasts });
+          this.refreshHero();
+          break;
+        }
       }
     }
   }
 
-  /** A spell bursting at `at`: on `hit`, or on every creature in `radius` that the burst can reach. */
-  private burst(spell: SpellRecord, at: { x: number; y: number }, hit?: Creature, radius = spell.target === 'areaTarget' ? AREA_RADIUS : 0): void {
+  /** A spell cast at `level` bursting at `at`: on `hit`, or on every creature in `radius` that the burst can reach. */
+  private burst(spell: SpellRecord, at: { x: number; y: number }, level: number, hit?: Creature, radius = spell.target === 'areaTarget' ? AREA_RADIUS : 0): void {
     this.events.push({ type: 'burst', spell, at, radius }, { type: 'sound', name: radius ? 'EXPLODE.VOC' : 'BURST5.VOC', at });
     if (radius === 0) {
-      if (hit) this.onCreature(spell, hit);
+      if (hit) this.onCreature(spell, hit, level);
       return;
     }
     for (const c of this.creatures) {
       if (!isAlive(c) || Math.hypot(c.x - at.x, c.y - at.y) > radius + CREATURE_RADIUS) continue;
       if (!lineOfSight(this.level, at.x, at.y, c.x, c.y, this.openDoors)) continue;
-      this.onCreature(spell, c);
+      this.onCreature(spell, c, level);
     }
   }
 
-  /** A spell's effects on a creature it reached. */
-  private onCreature(spell: SpellRecord, c: Creature): void {
-    const level = this.stats.level;
+  /** A spell's effects on a creature it reached, cast at `level`. */
+  private onCreature(spell: SpellRecord, c: Creature, level: number): void {
     let damage = 0;
     for (const e of spell.effects) {
       switch (e.effect) {
@@ -1416,7 +1507,7 @@ export class Dungeon {
           break;
         case CONTINUOUS_DAMAGE:
           if (e.sub !== DAMAGE_HEALTH) break;
-          this.afflict(c, spell, e, CONTINUOUS_EVERY * ROUND, duration(e, level));
+          this.afflict(c, spell, level, e, CONTINUOUS_EVERY * ROUND, duration(e, level));
           break;
         case TRANSFER: {
           const taken = Math.min(e.params[0], c.health);
@@ -1434,7 +1525,7 @@ export class Dungeon {
             this.events.push({ type: 'notify', text: `The ${c.info.name} is paralyzed` });
           } else if (e.sub === CAUSE_POISON) {
             const p = poisonDamage(e);
-            this.afflict(c, spell, p.damage, p.everyRounds * ROUND, duration(e, level));
+            this.afflict(c, spell, level, p.damage, p.everyRounds * ROUND, duration(e, level));
             this.events.push({ type: 'notify', text: `The ${c.info.name} is poisoned` });
           }
           break;
@@ -1444,9 +1535,9 @@ export class Dungeon {
     this.hurtByMagic(c, damage);
   }
 
-  private afflict(c: Creature, spell: SpellRecord, damage: Affliction['damage'], every: number, lasts: number): void {
+  private afflict(c: Creature, spell: SpellRecord, level: number, damage: Affliction['damage'], every: number, lasts: number): void {
     if (lasts <= 0) return;
-    this.afflictions.push({ creature: c, spell, damage, every, next: this.time + every, until: this.time + lasts });
+    this.afflictions.push({ creature: c, spell, level, damage, every, next: this.time + every, until: this.time + lasts });
   }
 
   private hurtByMagic(c: Creature, damage: number): void {
@@ -1465,9 +1556,23 @@ export class Dungeon {
       }
       if (this.time < a.next) continue;
       a.next += a.every;
-      const damage = typeof a.damage === 'number' ? a.damage : magnitude(a.damage, this.stats.level, this.random);
+      const damage = typeof a.damage === 'number' ? a.damage : magnitude(a.damage, a.level, this.random);
       this.hurtByMagic(a.creature, damage);
     }
+    let fortified = false;
+    for (const f of [...this.fortified]) {
+      // Fortify wears off a few points at a time.
+      while (f.loss > 0 && f.points > 0 && this.time >= f.next) {
+        f.points -= f.loss;
+        f.next += f.every;
+        fortified = true;
+      }
+      if (f.points <= 0 || this.time >= f.until) {
+        this.fortified.splice(this.fortified.indexOf(f), 1);
+        fortified = true;
+      }
+    }
+    if (fortified) this.refreshHero();
     const r = this.regen;
     if (r.until > 0) {
       while (this.time >= r.next && r.next <= r.until) {
@@ -1491,13 +1596,13 @@ export class Dungeon {
       const hit = this.creatures.find((c) => isAlive(c) && Math.hypot(c.x - nx, c.y - ny) < CREATURE_RADIUS + BOLT_RADIUS);
       if (hit) {
         remove();
-        this.burst(b.spell, { x: nx, y: ny }, hit);
+        this.burst(b.spell, { x: nx, y: ny }, b.level, hit);
         return;
       }
       const cell = cellIndex(this.level, nx, ny);
       if (cell < 0 || isBlocking(this.level.cells[cell], this.openDoors, cell)) {
         remove();
-        this.burst(b.spell, { x: b.x, y: b.y });
+        this.burst(b.spell, { x: b.x, y: b.y }, b.level);
         return;
       }
       b.x = nx;
@@ -1642,21 +1747,30 @@ export class Dungeon {
 
   private useItem(item: DungeonItem): void {
     const notify = (text: string) => this.events.push({ type: 'notify', text });
+    if (item.kind === 'key') {
+      this.stats.keys.add(item.key ?? 0);
+      item.taken = true;
+      notify('Key added');
+      return;
+    }
+    if (this.lootRules) {
+      // Every other item in a level is a loot spot, filled as it is first opened; taking all of it leaves nothing there.
+      item.taken = true;
+      const loot = spotLoot(this.lootRules, this.level.floor ?? 0, this.random, this.hero.cls);
+      if (!this.addLoot(loot)) notify('Nothing of value');
+      return;
+    }
+    // The remake's own loot, for a game whose tables can't be read.
     switch (item.kind) {
-      case 'key':
-        this.stats.keys.add(item.key ?? 0);
-        item.taken = true;
-        notify('Key added');
-        return;
       case 'treasure':
         item.taken = true;
-        if (this.random() < 0.3) this.addPotion();
+        if (this.random() < 0.3) this.addItem(healingPotion());
         else this.addGold(roll(this.random, 10, 40));
         return;
       case 'equipment': {
         item.taken = true;
-        if (this.weaponTable.length && this.random() < 0.75) this.addGear(randomGear(this.weaponTable, this.stats.level, this.random, this.armourTable));
-        else if (this.random() < 0.5) this.addPotion();
+        if (this.weaponTable.length && this.random() < 0.75) this.addItem(randomGear(this.weaponTable, this.stats.level, this.random, this.armourTable));
+        else if (this.random() < 0.5) this.addItem(healingPotion());
         else this.addGold(roll(this.random, 5, 25));
         return;
       }
@@ -1668,34 +1782,109 @@ export class Dungeon {
       case 'chest':
         item.searched = true;
         this.addGold(roll(this.random, 20, 80));
-        if (this.random() < 0.4) this.addPotion();
-        if (this.weaponTable.length && this.random() < 0.3) this.addGear(randomGear(this.weaponTable, this.stats.level + 1, this.random, this.armourTable));
+        if (this.random() < 0.4) this.addItem(healingPotion());
+        if (this.weaponTable.length && this.random() < 0.3) this.addItem(randomGear(this.weaponTable, this.stats.level + 1, this.random, this.armourTable));
         return;
     }
   }
 
+  /** Gives a creature what it carries as it appears, by Arena's rules. */
+  private outfit(c: Creature): Creature {
+    if (this.lootRules && c.info.id !== undefined) this.carried.set(c.id, creatureLoot(this.lootRules, c.info.id, c.info.level, this.random));
+    return c;
+  }
+
   private searchBody(c: Creature): void {
     this.searchedBodies.add(c.id);
+    if (this.lootRules) {
+      const loot = this.carried.get(c.id);
+      this.carried.delete(c.id);
+      if (!loot || !this.addLoot(loot)) this.events.push({ type: 'notify', text: this.messages.nothingUsable?.replace('%s', c.info.name) ?? 'Nothing of value' });
+      return;
+    }
     // Tougher creatures carry more.
     if (this.random() < Math.min(0.6, 0.15 * c.info.level)) this.addGold(roll(this.random, 1, 10 * c.info.level));
     else this.events.push({ type: 'notify', text: 'Nothing of value' });
   }
 
+  /** Takes all of it; false when there was nothing. */
+  private addLoot(loot: Loot): boolean {
+    if (loot.gold > 0) this.addGold(loot.gold);
+    for (const item of loot.items) this.addItem(item);
+    return loot.gold > 0 || loot.items.length > 0;
+  }
+
   private addGold(n: number): void {
-    // Lucky characters find more.
-    n = Math.max(1, Math.round(n * this.hero.fortune));
     this.stats.gold += n;
     this.events.push({ type: 'notify', text: `${n} gold added` });
   }
 
-  private addPotion(): void {
-    this.stats.potions++;
-    this.events.push({ type: 'notify', text: 'Healing potion added' });
+  private addItem(gear: NewItem): void {
+    const item = this.inventory.add(gear);
+    this.events.push({ type: 'notify', text: `${shownName(item)} added` });
+    if (item.kind === 'weapon' || item.kind === 'armour' || item.kind === 'shield') this.events.push({ type: 'sound', name: 'CLANK.VOC', volume: 0.6 });
   }
 
-  private addGear(gear: NewItem): void {
-    const item = this.inventory.add(gear);
-    this.events.push({ type: 'notify', text: `${item.name} added` }, { type: 'sound', name: 'CLANK.VOC', volume: 0.6 });
+  /** The game's spell in that place in its list. */
+  spellRecord(index: number | undefined): SpellRecord | undefined {
+    return index === undefined ? undefined : this.spells.find((s) => s.index === index);
+  }
+
+  /**
+   * Drinks a potion: it casts its spell on the player at level 15, as in
+   * Arena, and every potion of its kind is known from then on. A potion of
+   * Restore Power gives back 25 spell points instead. One whose magic the
+   * remake can't do yet (Levitation) is kept.
+   */
+  private drink(potion: Item): string {
+    const s = this.stats;
+    const name = shownName(potion);
+    if (potion.heals !== undefined) {
+      if (s.health >= s.maxHealth) return 'Your health is full';
+      s.health = Math.min(s.maxHealth, s.health + potion.heals);
+    } else if (potion.spell === RESTORE_POWER) {
+      s.magicka = Math.min(s.maxMagicka, s.magicka + RESTORED_POWER);
+    } else {
+      const spell = this.spellRecord(potion.spell);
+      if (!spell || !usable(spell)) return `What the ${name} does isn’t in the game yet`;
+      this.onCaster(spell, undefined, potion.castLevel ?? POTION_CAST_LEVEL);
+    }
+    this.inventory.identify(potion);
+    this.inventory.remove(potion);
+    return `${potion.name} drunk`;
+  }
+
+  /**
+   * Casts the spell a trinket or a piece of gear holds, at its level and for
+   * no spell points: a trinket spends a charge, and gear a 15th of the spell's
+   * cost in wear, as in Arena. Arena calls one with nothing left broken.
+   */
+  private castFrom(item: Item): string | undefined {
+    const name = shownName(item);
+    const spell = this.spellRecord(item.spell);
+    if (!spell) return `The ${name} has no spell to cast`;
+    if (!usable(spell)) return `What the ${name} casts isn’t in the game yet`;
+    if (!this.mayCast()) return undefined;
+    const broken = () => (this.messages.broken ?? 'The %s is worn out').replace('%s', name);
+    const level = item.castLevel ?? GEAR_CAST_LEVEL;
+    const wear = Math.floor(magickaCost(spell, level) / GEAR_WEAR);
+    if (item.charges !== undefined && item.charges <= 0) return broken();
+    if (item.charges === undefined && item.condition !== undefined && wear > item.condition) {
+      item.condition = 0;
+      return broken();
+    }
+    const cast = this.release(spell, level, () => {
+      if (item.charges !== undefined) item.charges--;
+      else if (item.condition !== undefined) item.condition -= wear;
+    });
+    if (!cast) return undefined;
+    this.inventory.identify(item);
+    return `${spell.name} cast with the ${shownName(item)}`;
+  }
+
+  /** Whether the item casts a spell when used: trinkets that do, and enchanted gear. */
+  private casts(item: Item): boolean {
+    return item.spell !== undefined && item.kind !== 'potion';
   }
 
   // ---- The item menus ----
@@ -1713,16 +1902,23 @@ export class Dungeon {
       favourite: inv.isFavourite(key),
       hotkey: inv.hotkeyOf(key),
     });
-    const list = inv.items.map((item) => entry(itemKey(item), item.name, item.kind === 'weapon' ? 'weapons' : 'apparel', 1, item));
-    if (this.stats.potions > 0) list.push(entry(POTION, 'Healing Potion', 'potions', this.stats.potions));
+    const list: MenuEntry[] = [];
+    // Potions are counted by kind, the rest listed one by one.
+    const potions = new Map<number, Item[]>();
+    for (const item of inv.items) {
+      if (item.kind === 'potion') potions.set(item.type, [...(potions.get(item.type) ?? []), item]);
+      else list.push(entry(itemKey(item), shownName(item), categoryOf(item), 1, item));
+    }
+    for (const [type, kind] of potions) list.push(entry(potionKey(type), shownName(kind[0]), 'potions', kind.length, kind[0]));
     if (this.stats.keys.size) list.push(entry('keys', 'Key', 'misc', this.stats.keys.size));
     return list;
   }
 
   /**
-   * Uses an entry from the item or magic menus: equips a piece of gear or
-   * takes it off, drinks a healing potion, or readies a spell or puts it
-   * away. Returns what happened, to tell the player.
+   * Uses an entry from the item or magic menus: equips a piece of gear or a
+   * trinket or takes it off, drinks a potion, casts a trinket's spell, or
+   * readies a spell or puts it away. Gear and trinkets turn out to be what
+   * they are once worn or used. Returns what happened, to tell the player.
    */
   use(key: string): string | undefined {
     if (this.outcome) return undefined;
@@ -1735,14 +1931,10 @@ export class Dungeon {
       this.readied = spell;
       return `${spell.name} readied`;
     }
-    if (key === POTION) {
-      if (this.stats.potions <= 0) return 'No healing potions';
-      if (this.stats.health >= this.stats.maxHealth) return 'Your health is full';
-      drinkPotion(this.stats);
-      return 'Healing potion drunk';
-    }
     const item = this.inventory.byKey(key);
     if (!item) return undefined;
+    if (item.kind === 'potion') return this.drink(item);
+    if (!wearable(item)) return this.castFrom(item);
     const wasOn = this.inventory.isEquipped(item);
     const before = this.inventory.weapon;
     const result = this.inventory.toggle(item);
@@ -1754,8 +1946,23 @@ export class Dungeon {
       this.swing = undefined;
       this.armedAt = this.queued = undefined;
     }
+    if (!wasOn) this.inventory.identify(item);
+    this.refreshHero();
     const done = wasOn ? `${item.name} removed` : `${item.name} equipped`;
     return result.message ? `${done}. ${result.message}` : done;
+  }
+
+  /** Casts the spell of a piece of gear, as Arena's "use" does; returns what happened. */
+  castWith(key: string): string | undefined {
+    if (this.outcome) return undefined;
+    const item = this.inventory.byKey(key);
+    return item && this.casts(item) ? this.castFrom(item) : undefined;
+  }
+
+  /** Whether the entry's item casts a spell: a trinket that does, or enchanted gear. */
+  castsSpell(key: string): boolean {
+    const item = this.inventory.byKey(key);
+    return !!item && this.casts(item);
   }
 
   /**
@@ -1768,8 +1975,10 @@ export class Dungeon {
     const item = this.inventory.byKey(key);
     if (!item) return undefined;
     if (item === this.inventory.weapon) return 'Equip another weapon before you drop this one';
+    const worn = this.inventory.isEquipped(item);
     this.inventory.remove(item);
-    return `${item.name} dropped`;
+    if (worn) this.refreshHero();
+    return `${shownName(item)} dropped`;
   }
 
   /** Adds the entry to the favourites or takes it off; true when it is one now. Only gear, potions and spells can be. */
@@ -1784,7 +1993,7 @@ export class Dungeon {
   }
 
   private favourable(key: string): boolean {
-    return key === POTION || !!this.inventory.byKey(key) || !!this.spellByKey(key);
+    return !!this.inventory.byKey(key) || !!this.spellByKey(key);
   }
 
   /** Uses what is on number key n + 1 (0 for 1), with a note to say what happened. */
@@ -1794,7 +2003,10 @@ export class Dungeon {
     // A spell's key readies it, as in Skyrim, rather than putting it away again.
     const spell = key === undefined ? undefined : this.spellByKey(key);
     if (spell && this.readied === spell) return;
-    const text = key === undefined ? `Nothing is on ${n + 1}: choose a favourite and press ${n + 1} to put it there` : this.use(key);
+    // Worn gear that casts a spell casts it, as Arena's "use" does; to take it off, use the item menu.
+    const item = key === undefined ? undefined : this.inventory.byKey(key);
+    const casting = item && wearable(item) && this.casts(item) && this.inventory.isEquipped(item);
+    const text = key === undefined ? `Nothing is on ${n + 1}: choose a favourite and press ${n + 1} to put it there` : casting ? this.castFrom(item) : this.use(key);
     if (text) this.events.push({ type: 'notify', text });
   }
 
@@ -1815,6 +2027,17 @@ export class Dungeon {
     }
     return undefined;
   }
+}
+
+/** Which list of the item menu an item is in: trinkets that cast are used rather than worn, so they go with the rest. */
+function categoryOf(item: Item): MenuEntry['category'] {
+  if (item.kind === 'weapon') return 'weapons';
+  return wearable(item) ? 'apparel' : 'misc';
+}
+
+/** The remake's own healing potion, for a game whose potions can't be read. */
+function healingPotion(): NewItem {
+  return { kind: 'potion', name: 'Healing Potion', type: -1, heals: HEALING_POTION, weight: POTION_WEIGHT, value: 25 };
 }
 
 const ITEM_PROMPTS: Record<DungeonItem['kind'], { name: string; verb: string }> = {

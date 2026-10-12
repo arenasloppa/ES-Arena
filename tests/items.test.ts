@@ -16,7 +16,6 @@ import {
   makeWeapon,
   materialFor,
   PLATE,
-  POTION,
   randomGear,
   startingGear,
   usableWeapons,
@@ -53,16 +52,17 @@ function cls(overrides: Partial<ClassInfo> = {}): ClassInfo {
 }
 
 describe('gear', () => {
-  it('makes weapons from the game’s table, in a material that changes their damage, weight and value', () => {
+  it('makes weapons from the game’s table, in a material that changes their damage and value as Arena’s do', () => {
     expect(makeWeapon(WEAPONS, 3, 1)).toEqual({ kind: 'weapon', name: 'Steel Broadsword', type: 3, material: 1, damage: [4, 13], twoHanded: false, weight: 2.5, value: 23 });
     const ebony = makeWeapon(WEAPONS, 3, 7);
-    expect(ebony).toMatchObject({ name: 'Ebony Broadsword', damage: [4, 25], weight: 3.3, value: 460 });
-    expect(makeWeapon(WEAPONS, 0, 0).damage).toEqual([1, 9]);
+    // Iron takes 2 off the most it does; other metals add a fifth of their protection to both ends.
+    expect(ebony).toMatchObject({ name: 'Ebony Broadsword', damage: [8, 17], weight: 2.5, value: 460 });
+    expect(makeWeapon(WEAPONS, 0, 0).damage).toEqual([1, 8]);
   });
 
   it('makes armour and shields from the game’s tables, with only plate and shields in metals that protect better', () => {
-    expect(makeArmour(PLATE, 0, 1, ARMOUR)).toEqual({ kind: 'armour', name: 'Steel Plate Cuirass', type: 0, armour: PLATE, material: 1, protection: 52, weight: 13, value: 90 });
-    expect(makeArmour(PLATE, 5, 7, ARMOUR)).toMatchObject({ name: 'Ebony Plate Helm', protection: 78, weight: 9, value: 21000 });
+    expect(makeArmour(PLATE, 0, 1, ARMOUR)).toEqual({ kind: 'armour', name: 'Steel Cuirass', type: 0, armour: PLATE, material: 1, protection: 52, weight: 13, value: 90 });
+    expect(makeArmour(PLATE, 5, 7, ARMOUR)).toMatchObject({ name: 'Ebony Helm', protection: 78, weight: 9, value: 21000 });
     expect(makeArmour(PLATE, 5, undefined, ARMOUR)).toMatchObject({ name: 'Plate Helm', material: undefined, protection: 52, value: 70 });
     expect(makeArmour(CHAIN, 5, 0, ARMOUR)).toMatchObject({ name: 'Chain Helm', material: undefined, protection: 33, weight: 5, value: 35 });
     expect(makeArmour(LEATHER, 6, 7, ARMOUR)).toMatchObject({ name: 'Leather Boots', material: undefined, protection: 17, weight: 2 });
@@ -169,11 +169,10 @@ describe('the inventory', () => {
     expect(inv.weapon).toBe(claymore);
   });
 
-  it('keeps favourites and puts them on number keys, the potion first', () => {
+  it('keeps favourites and puts them on number keys', () => {
     const inv = new Inventory();
     const sword = inv.add(makeWeapon(WEAPONS, 2, 1));
-    expect(inv.favourites).toEqual([POTION]);
-    expect(inv.hotkeyOf(POTION)).toBe(0);
+    expect(inv.favourites).toEqual([]);
     expect(inv.toggleFavourite(itemKey(sword))).toBe(true);
     inv.setHotkey(2, itemKey(sword));
     inv.setHotkey(4, itemKey(sword));
@@ -200,6 +199,7 @@ describe('the inventory', () => {
     const inv = new Inventory();
     inv.add(makeWeapon(WEAPONS, 2, 1));
     inv.add(makeArmour(LEATHER, 0, 1));
-    expect(inv.weight(2)).toBe(2 + 2.4 + 1);
+    inv.add({ kind: 'potion', name: 'Test Draught', type: 3, weight: 0.5, value: 1 });
+    expect(inv.weight()).toBe(2 + 2.4 + 0.5);
   });
 });

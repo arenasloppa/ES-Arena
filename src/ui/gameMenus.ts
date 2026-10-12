@@ -13,11 +13,11 @@
  * or right) to use without opening a menu. The game waits while any of them
  * is open.
  */
-import { experienceFor, knackDamage, POTION_HEALS } from '../game/combat';
-import type { Character, CreationData } from '../game/character';
+import { experienceFor, knackDamage } from '../game/combat';
+import { FALLBACK_ATTRIBUTES, type Character, type CreationData } from '../game/character';
 import type { Dungeon, MenuEntry } from '../game/dungeon';
 import type { GameMenu } from '../game/engine';
-import { ARMOUR_TYPES, armourRating, HOTKEYS, itemFrame, POTION } from '../game/items';
+import { ARMOUR_TYPES, armourRating, HOTKEYS, itemFrame, wearable, type Item } from '../game/items';
 import { describe as describeSpell, elementName, targetWords } from '../game/magic';
 import { spellColour } from '../render/spellView';
 import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
@@ -256,6 +256,7 @@ export class GameMenus {
     if (pad.take('A')) this.choose();
     if (pad.take('Y')) this.toggleFavourite();
     if (pad.take('X') && which === 'items') this.drop();
+    if (pad.take('RT') && which === 'items') this.cast();
     if (which === 'items') {
       if (pad.take('LB')) this.moveCategory(-1);
       if (pad.take('RB')) this.moveCategory(1);
@@ -375,9 +376,18 @@ export class GameMenus {
   private toggleFavourite(): void {
     const d = this.host.run()?.dungeon;
     const entry = this.picked();
-    if (!d || !entry || (entry.key !== POTION && !entry.item && !entry.spell)) return;
+    if (!d || !entry || (!entry.item && !entry.spell)) return;
     const now = d.favourite(entry.key);
     this.showMessage(`${entry.name} ${now ? 'added to' : 'taken off'} the favourites`);
+    this.render();
+  }
+
+  /** Casts the spell of the picked piece of gear or trinket. */
+  private cast(): void {
+    const d = this.host.run()?.dungeon;
+    const entry = this.selected();
+    if (!d || !entry || this.column !== 'list' || !d.castsSpell(entry.key)) return;
+    this.showMessage(d.castWith(entry.key) ?? '');
     this.render();
   }
 
@@ -393,7 +403,7 @@ export class GameMenus {
   private setHotkey(n: number): void {
     const d = this.host.run()?.dungeon;
     const entry = this.which === 'items' && this.column !== 'list' ? undefined : this.picked();
-    if (!d || !entry || (entry.key !== POTION && !entry.item && !entry.spell)) return;
+    if (!d || !entry || (!entry.item && !entry.spell)) return;
     d.setHotkey(n, entry.key);
     const where = this.input.mode === 'gamepad' && n < 2 ? `the D-pad's ${n === 0 ? 'left' : 'right'}` : String(n + 1);
     this.showMessage(`${entry.name} put on ${where}`);
@@ -533,14 +543,15 @@ export class GameMenus {
     this.renderBar(run, false);
     const hints: Hint[] = [];
     if (picked && this.column === 'list') {
-      const verb = picked.key === POTION ? 'Drink' : picked.item ? (picked.equipped ? 'Unequip' : 'Equip') : undefined;
+      const verb = picked.item ? verbFor(picked.item, picked.equipped) : undefined;
       if (verb) hints.push({ action: 'use', label: verb, run: () => this.use(picked) });
-      if (picked.key === POTION || picked.item) {
+      if (picked.item && wearable(picked.item) && run.dungeon.castsSpell(picked.key)) hints.push({ action: 'cast', label: 'Cast', run: () => this.cast() });
+      if (picked.item) {
         hints.push({ action: 'favourite', label: picked.favourite ? 'Unfavourite' : 'Favourite', run: () => this.toggleFavourite() });
+        if (picked.item.kind !== 'potion') hints.push({ action: 'drop', label: 'Drop', run: () => this.drop() });
       }
-      if (picked.item) hints.push({ action: 'drop', label: 'Drop', run: () => this.drop() });
       // The item's picture is there to turn, where the screen is wide enough to show it.
-      if (picked.item && !matchMedia('(max-width: 720px)').matches) {
+      if (picked.item && itemFrame(picked.item) !== undefined && !matchMedia('(max-width: 720px)').matches) {
         hints.push({ action: 'turnItem', label: 'Turn', run: () => this.itemView.spin() }, { action: 'zoomItem', label: 'Zoom', run: () => this.itemView.toggleZoom() });
       }
     } else if (this.column === 'categories' && shown.length) hints.push({ action: 'use', label: 'Select', run: () => this.choose() });
@@ -587,18 +598,29 @@ export class GameMenus {
     const rows: Array<[string, string]> = [];
     const item = entry.item;
     let note = '';
+    let effects: string[] = [];
     if (item) {
+      const known = !item.unidentified;
       if (item.kind === 'weapon' && item.damage) rows.push(['Damage', `${item.damage[0]}–${item.damage[1]}`]);
-      else rows.push(['Armour', String(armourRating(item))]);
+      else if (item.kind === 'armour' || item.kind === 'shield' || item.trinket === 'protective') rows.push(['Armour', String(armourRating(item))]);
+      if (item.heals) rows.push(['Heals', String(item.heals)]);
+      if (known && item.attribute !== undefined && item.boost) rows.push([FALLBACK_ATTRIBUTES[item.attribute] ?? 'Attribute', `+${item.boost}`]);
+      if (known && item.charges !== undefined) rows.push(['Charges', String(item.charges)]);
+      if (known && item.condition !== undefined) rows.push(['Condition', String(item.condition)]);
+      if (item.kind === 'potion') rows.push(['Count', String(entry.count)]);
       rows.push(['Weight', weight(item.weight)], ['Value', String(item.value)]);
-      const kind = item.kind === 'armour' ? `${ARMOUR_TYPES[item.armour ?? 0]} armour` : item.kind === 'shield' ? 'Shield' : item.twoHanded ? 'Two-handed' : 'One-handed';
-      note = run.dungeon.inventory.forbidden(item) ?? (entry.equipped ? `${kind}, equipped` : kind);
-      this.card.classList.toggle('forbidden', !!run.dungeon.inventory.forbidden(item));
-      if (this.pictureKey !== entry.key) void this.showPicture(itemFrame(item), run.character.gender, entry.key);
-    } else if (entry.key === POTION) {
-      rows.push(['Heals', String(POTION_HEALS)], ['Count', String(entry.count)]);
-      note = 'Restores health';
-      this.card.classList.remove('forbidden');
+      if (known && item.spell !== undefined) {
+        const spell = run.dungeon.spellRecord(item.spell);
+        if (spell) effects = describeSpell(spell, item.castLevel ?? 1);
+        else if (item.kind === 'potion') effects = ['Restores spell points'];
+      }
+      if (known && item.jumping) effects.push('Jump as far as an Acrobat');
+      const forbidden = run.dungeon.inventory.forbidden(item);
+      const kind = kindWords(item);
+      note = item.unidentified ? `${kind}, not yet identified` : (forbidden ?? (entry.equipped ? `${kind}, equipped` : kind));
+      this.card.classList.toggle('forbidden', !!forbidden);
+      const frame = itemFrame(item);
+      if (frame !== undefined && this.pictureKey !== entry.key) void this.showPicture(frame, run.character.gender, entry.key);
     } else {
       rows.push(['Count', String(entry.count)]);
       note = 'Opens a locked door in this dungeon';
@@ -611,7 +633,7 @@ export class GameMenus {
         return [dt, dd];
       }),
     );
-    this.cardNote.textContent = note;
+    this.cardNote.textContent = [note, ...effects].join('. ');
   }
 
   /** Shows the item's picture from the game as a model to turn, if it is still the one picked when it loads. */
@@ -713,7 +735,7 @@ export class GameMenus {
       ['Damage', `${low}–${high}${bonus}`],
       ['Experience', `${s.experience} / ${next}`],
       ['Gold', String(s.gold)],
-      ['Carrying', `${weight(d.inventory.weight(s.potions))} / ${hero.carry}`],
+      ['Carrying', `${weight(d.inventory.weight())} / ${hero.carry}`],
     ];
     if (hero.critical > 0) rows.push(['Critical strikes', `${Math.round(hero.critical * 100)}%${hero.criticalWith === 'bows' ? ' with bows' : ''}`]);
     if (hero.lockpicking > 0) rows.push(['Lock picking', `${Math.round(Math.min(0.95, hero.lockpicking + 0.05 * (s.level - 1)) * 100)}%`]);
@@ -779,7 +801,7 @@ export class GameMenus {
         stat('Stamina', `${Math.floor(s.stamina)}/${s.maxStamina}`),
       );
     } else {
-      const carried = d.inventory.weight(s.potions);
+      const carried = d.inventory.weight();
       const load = stat('Weight', `${weight(carried)}/${d.hero.carry}`);
       load.classList.toggle('over', carried > d.hero.carry);
       this.bar.append(stat('Armour', String(d.inventory.armourRating())), load, stat('Gold', String(s.gold)));
@@ -853,6 +875,11 @@ export class GameMenus {
       this.toggleFavourite();
       return;
     }
+    if (code === 'KeyC' && which === 'items') {
+      handled();
+      this.cast();
+      return;
+    }
     if (code === 'KeyR' && which === 'items') {
       handled();
       this.drop();
@@ -884,6 +911,29 @@ const KEY_DIRECTIONS = new Map<string, Direction>([
   ['ArrowRight', 'right'],
   ['KeyD', 'right'],
 ]);
+
+/** What using an item does, for its hint. */
+function verbFor(item: Item, equipped: boolean): string {
+  if (item.kind === 'potion') return 'Drink';
+  if (!wearable(item)) return 'Use';
+  return equipped ? 'Unequip' : 'Equip';
+}
+
+/** The sort of thing an item is, for its card. */
+function kindWords(item: Item): string {
+  switch (item.kind) {
+    case 'armour':
+      return `${ARMOUR_TYPES[item.armour ?? 0]} armour`;
+    case 'shield':
+      return 'Shield';
+    case 'weapon':
+      return item.twoHanded ? 'Two-handed' : 'One-handed';
+    case 'potion':
+      return 'Potion';
+    default:
+      return item.trinket === 'spell' ? 'Casts a spell' : 'Worn';
+  }
+}
 
 /** Moves through a list of `length`, stopping at the ends. */
 function step(index: number, delta: number, length: number): number {

@@ -32,19 +32,25 @@ import { roll, type Random } from './combat';
 export const CAUSE = 0;
 export const CONTINUOUS_DAMAGE = 1;
 export const CREATE = 2;
+export const CURE = 3;
 export const DAMAGE = 4;
 export const NON_TARGET = 5;
+export const ELEMENTAL_RESISTANCE = 10;
+export const FORTIFY = 11;
 export const HEAL = 12;
 export const TRANSFER = 13;
 export const INVISIBILITY = 15;
+export const LEVITATE = 16;
 export const LIGHT = 17;
 export const OPEN = 19;
 export const REGENERATE = 20;
 export const SILENCE = 21;
+export const SPELL_REFLECTION = 23;
 
 /** Sub-effects. */
 export const CAUSE_POISON = 1;
 export const CAUSE_PARALYSIS = 2;
+export const CURE_PARALYSIS = 2;
 export const CREATE_SHIELD = 0;
 export const HEALTH = 1;
 export const STAMINA = 0;
@@ -78,8 +84,10 @@ export type EffectSupport = 'works' | 'harmless' | 'missing';
 /**
  * Whether the remake can do an effect yet. Some do nothing to the
  * creatures of the dungeons, which have no stamina, spell points or spells
- * of their own; a spell with only those can't be cast, but they don't stop
- * one that also does something else.
+ * of their own, and nothing in them casts spells at the player, poisons or
+ * diseases them, so resisting, reflecting and curing those do nothing
+ * either; a spell with only those can't be cast, but they don't stop one
+ * that also does something else.
  */
 export function effectSupport(e: SpellEffect): EffectSupport {
   switch (e.effect) {
@@ -94,8 +102,14 @@ export function effectSupport(e: SpellEffect): EffectSupport {
       return e.sub === CAUSE_PARALYSIS || e.sub === CAUSE_POISON ? 'works' : 'missing';
     case CREATE:
       return e.sub === CREATE_SHIELD ? 'works' : 'missing';
+    case CURE:
+      return e.sub === CURE_PARALYSIS ? 'works' : 'harmless';
     case SILENCE:
+    case ELEMENTAL_RESISTANCE:
+    case SPELL_REFLECTION:
       return 'harmless';
+    case FORTIFY:
+      return e.attribute < 8 ? 'works' : 'missing';
     case NON_TARGET:
     case INVISIBILITY:
     case LIGHT:
@@ -112,6 +126,15 @@ export function castable(spell: SpellRecord): boolean {
   if (spell.target === 'walls') return false;
   const support = spell.effects.map(effectSupport);
   return support.includes('works') && !support.includes('missing');
+}
+
+/**
+ * True when a potion, trinket or enchanted gear can cast the spell: as
+ * castable, but one that only does harmless things may be used up too, as a
+ * potion of fire resistance is drunk in Arena whether or not there is fire.
+ */
+export function usable(spell: SpellRecord): boolean {
+  return spell.target !== 'walls' && !spell.effects.map(effectSupport).includes('missing');
 }
 
 /** Spell points it costs a caster of `level` to cast the spell. */
@@ -207,9 +230,20 @@ export function durationRounds(e: SpellEffect, level: number): number {
       return p5 * level;
     case REGENERATE:
       return p4 * level;
+    case FORTIFY:
+      // "+%0 pts of %c for %5 rnds per level, loss %1 pts per %4 rnds"
+      return p5 * level;
+    case ELEMENTAL_RESISTANCE:
+    case SPELL_REFLECTION:
+      return p5 * per(level, p2);
     default:
       return 0;
   }
+}
+
+/** Fortify: points added to the attribute, and how many it loses every so many rounds. */
+export function fortification(e: SpellEffect): { points: number; loss: number; everyRounds: number } {
+  return { points: e.params[0], loss: e.params[1], everyRounds: Math.max(1, e.params[4]) };
 }
 
 /** Seconds an effect lasts at the caster's level. */
@@ -252,6 +286,10 @@ const TARGET_WORDS: Record<SpellTarget, string> = {
 };
 
 const POOLS = ['health', 'fatigue', 'spell points'];
+const ATTRIBUTE_NAMES = ['Strength', 'Intelligence', 'Willpower', 'Agility', 'Speed', 'Endurance', 'Personality', 'Luck'];
+/** What Cure and Elemental Resistance work against, by sub-effect. */
+const CURES = ['disease', 'poison', 'paralysis'];
+const RESISTED: Record<number, string> = { 0: 'fire', 1: 'cold', 2: 'shock', 4: 'poison' };
 
 /** A line for each effect of the spell at the caster's level, as the magic menu shows them. */
 export function describe(spell: SpellRecord, level: number): string[] {
@@ -293,6 +331,16 @@ export function describe(spell: SpellRecord, level: number): string[] {
       }
       case SILENCE:
         return `${chance(e, level)}% chance to silence for ${rounds(e)}`;
+      case CURE:
+        return `${chance(e, level)}% chance to cure ${CURES[e.sub] ?? 'ailments'}`;
+      case ELEMENTAL_RESISTANCE:
+        return `Resist ${RESISTED[e.sub] ?? 'the elements'} by ${amount(e, level)}% for ${rounds(e)}`;
+      case SPELL_REFLECTION:
+        return `${chance(e, level)}% chance to reflect spells for ${rounds(e)}`;
+      case FORTIFY: {
+        const f = fortification(e);
+        return `${ATTRIBUTE_NAMES[e.attribute] ?? 'An attribute'} +${f.points}, losing ${f.loss} every ${f.everyRounds} rounds, for up to ${rounds(e)}`;
+      }
       default:
         return EFFECT_NAMES[e.effect] ?? 'Unknown';
     }

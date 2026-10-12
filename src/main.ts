@@ -29,6 +29,7 @@ import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
 import { attributeRoom, creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
 import { Dungeon, type Vision } from './game/dungeon';
+import { ATTRIBUTE_MAX } from './game/items';
 import { buildLevel } from './game/level';
 import { Engine, type GameMenu } from './game/engine';
 import { GamepadInput } from './input/gamepad';
@@ -411,6 +412,12 @@ async function startMap(name: string, character: Character) {
     if (spells === undefined) spells = await loadSpells(data);
     const cache = new TextureCache(data, palette);
     const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
+    // Enchanted gear, trinkets and Fortify raise attributes for a while; the character is worked out again with them.
+    dungeon.heroWith = (bonus) => {
+      const c = runCharacter ?? character;
+      const raised = { ...c, attributes: c.attributes.map((a, i) => Math.min(ATTRIBUTE_MAX, a + (bonus[i] ?? 0))) };
+      return heroFor(raised, made.classes[c.cls], { levelled: dungeon.stats.level > 1 });
+    };
     const scene = await buildLevelScene(level, cache);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem), level);
     // A bow's arrow is a CFA, the swing sets CIFs.

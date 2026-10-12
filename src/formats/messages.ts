@@ -52,6 +52,10 @@ export interface GameMessages {
   distributeAll?: string;
   /** What the game says when the player gains a level. */
   levelUp?: string;
+  /** "The %s has nothing usable.": a body with nothing on it. */
+  nothingUsable?: string;
+  /** "Your %s is broken.": gear worn out by casting its spell, or a trinket out of charges. */
+  broken?: string;
 }
 
 /** A piece of each message's text to find it by. */
@@ -79,6 +83,8 @@ const KEYS: Record<keyof GameMessages, string> = {
   rerollStats: 'eroll stats',
   distributeAll: 'You must distribute all your bonus',
   levelUp: 'level of experience',
+  nothingUsable: 'has nothing usable',
+  broken: 's is broken.',
 };
 
 export function readMessages(image: Uint8Array): GameMessages {

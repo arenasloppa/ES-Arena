@@ -202,6 +202,6 @@ describe('controls', () => {
   });
 
   it('gives each thing to do in the item menus its own key and its own button', () => {
-    expect(distinct(['use', 'favourite', 'drop', 'setHotkey', 'back'])).toEqual([true, true]);
+    expect(distinct(['use', 'favourite', 'drop', 'cast', 'setHotkey', 'back'])).toEqual([true, true]);
   });
 });

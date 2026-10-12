@@ -9,7 +9,6 @@ import {
   elementalDamage,
   FIRE,
   hitChance,
-  drinkPotion,
   experienceFor,
   gainExperience,
   knackDamage,
@@ -160,17 +159,6 @@ describe('combat rules', () => {
     expect(p.health).toBe(10);
     recover(p, 4, 2, 10);
     expect(p.health).toBe(11);
-  });
-
-  it('drinks potions only when they help', () => {
-    const p = newPlayerStats(SWORD);
-    p.potions = 1;
-    expect(drinkPotion(p)).toBe(false);
-    p.health = 3;
-    expect(drinkPotion(p)).toBe(true);
-    expect(p.health).toBe(28);
-    expect(p.potions).toBe(0);
-    expect(drinkPotion(p)).toBe(false);
   });
 
   it('raises the player’s level with experience, in Arena’s steps', () => {
@@ -762,7 +750,8 @@ describe('the character in the dungeon', () => {
     // A class sixth or later in the game's list gets a shortsword; one without a place, the first it may use.
     const d = new Dungeon(arena(), TABLES, always(0), hero({ cls: { ...TINKER, id: 7, weapons: [1, 2, 3] }, health: 33, gold: 120 }));
     expect(d.inventory.wornItems().map((i) => i.name)).toEqual(['Shortsword']);
-    expect(d.stats).toMatchObject({ health: 33, potions: 0, gold: 120, experience: 700, weapon: { name: 'Shortsword' } });
+    expect(d.inventory.items.filter((i) => i.kind === 'potion')).toEqual([]);
+    expect(d.stats).toMatchObject({ health: 33, gold: 120, experience: 700, weapon: { name: 'Shortsword' } });
     expect(new Dungeon(arena(), TABLES, always(0), hero({ cls: TINKER })).stats.weapon.name).toBe('Dagger');
   });
 
@@ -901,24 +890,22 @@ describe('the character in the dungeon', () => {
     expect(d.player.x).toBeLessThan(4);
   });
 
-  it('moves at the character’s own pace, and finds more gold with more luck', () => {
-    const level = textLevel(['############', '#@.........#', '############'], { items: [{ x: 2.5, y: 1.5, name: 'CHEST.IMG', kind: 'chest' }] });
-    const quick = new Dungeon(level, TABLES, always(0), hero({ pace: 1.5, fortune: 2 }));
-    quick.activate();
-    expect(notes(quick.events)[0]).toBe('40 gold added');
+  it('moves at the character’s own pace', () => {
+    const quick = new Dungeon(textLevel(['############', '#@.........#', '############']), TABLES, always(0), hero({ pace: 1.5 }));
     tick(quick, 1, input({ forward: 1 }));
     expect(quick.player.x).toBeCloseTo(1.5 + 2.2 * 1.5, 1);
   });
 
-  it('uses what is on the number keys: the healing potion on 1 to begin with', () => {
+  it('uses what is on the number keys', () => {
     const d = new Dungeon(arena(), TABLES, always(0));
-    d.hotkey(0);
-    d.stats.potions = 1;
-    d.hotkey(0);
+    const draught = d.inventory.add({ kind: 'potion', name: 'Test Draught', type: -1, heals: 7, weight: 0.5, value: 1 });
+    d.setHotkey(0, itemKey(draught));
     d.stats.health = 10;
     d.hotkey(0);
+    d.hotkey(0);
     d.hotkey(3);
-    expect(notes(d.events)).toEqual(['No healing potions', 'Your health is full', 'Healing potion drunk', expect.stringMatching(/^Nothing is on 4/)]);
+    expect(d.stats.health).toBe(17);
+    expect(notes(d.events)).toEqual(['Test Draught drunk', expect.stringMatching(/^Nothing is on 1/), expect.stringMatching(/^Nothing is on 4/)]);
     const dagger = d.inventory.add({ kind: 'weapon', name: 'Test Dagger', type: 1, damage: [1, 3], weight: 1, value: 1 });
     d.setHotkey(1, `item:${dagger.id}`);
     d.hotkey(1);
@@ -950,7 +937,7 @@ describe('bows', () => {
   /** A player with the made-up short bow in hand. */
   const archer = (level: ReturnType<typeof textLevel>, h: Partial<Hero> = {}) => {
     const d = new Dungeon(level, BOW_TABLES, always(0), hero(h));
-    expect(d.use(itemKey(d.inventory.add(makeWeapon(BOW_TABLES.weapons!, 16, 1, true))))).toBe('Short Bow equipped');
+    expect(d.use(itemKey(d.inventory.add(makeWeapon(BOW_TABLES.weapons!, 16))))).toBe('Short Bow equipped');
     return d;
   };
   const hits = (d: Dungeon) => d.events.flatMap((e) => (e.type === 'hit' ? [e] : []));

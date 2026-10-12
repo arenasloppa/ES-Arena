@@ -401,7 +401,7 @@ export function heroFor(character: Character, cls: ClassInfo, { levelled = false
   const s = saves(a, levelled);
   // The remake's own rules turn the sheet's steps into chances: a step is five points of Agility or Luck.
   // Arena keeps what Luck does hidden; UESP says it nudges nearly everything (fights, locks, bargains), so here
-  // it adds a little to picking locks, critical hits and the gold found.
+  // it adds a little to picking locks and critical hits.
   const step = (i: number) => Math.trunc((a[i] - 50) / 5);
   return {
     cls,
@@ -430,7 +430,6 @@ export function heroFor(character: Character, cls: ClassInfo, { levelled = false
     // Arena's Archers land critical hits only with bows, and every other class only with other weapons.
     criticalWith: cls.id === ARCHER ? 'bows' : 'melee',
     lockpicking: cls.thief ? Math.max(0.1, 0.35 + 0.05 * d.toHit + 0.02 * step(LUCK)) : 0,
-    fortune: Math.max(0.5, 1 + 0.05 * step(LUCK)),
     carry: d.maxKilos,
     magicka: startingMagicka(cls, a[INTELLIGENCE]),
     regainsMagicka: regainsMagicka(cls),

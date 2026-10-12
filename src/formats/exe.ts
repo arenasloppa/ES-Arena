@@ -30,12 +30,14 @@
  * 18 u16 weights in 1/256 kg, 18 bytes of prices, 18 more (unused here) and
  * 3 bytes; the weights and prices are read only when that is so.
  *
- * The character tables (classes, races, creation texts) are in classes.ts.
+ * The character tables (classes, races, creation texts) are in classes.ts,
+ * armour's in armour.ts and what turns up as loot in loot.ts.
  */
 import { readArmourTables, readHitTables, type ArmourTables, type HitTables } from './armour';
 import { readCalendar, type Calendar } from './calendar';
 import { readCharacterTables, type CharacterTables } from './classes';
 import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
+import { readLootTables, type LootTables } from './loot';
 import { readMessages, type GameMessages } from './messages';
 
 export { ExeLayoutError };
@@ -121,6 +123,8 @@ export interface ExeData {
   armour?: Partial<ArmourTables>;
   /** Where blows land and which creatures are undead; missing when they could not be read. */
   hits?: HitTables;
+  /** What turns up in loot spots and on creatures, and the magic items; missing when any of it could not be read. */
+  loot?: LootTables;
 }
 
 /** Creatures that can appear in levels; the final boss is left out. */
@@ -139,6 +143,7 @@ export function readExeData(image: Uint8Array): ExeData {
     calendar: readCalendar(image),
     armour: readArmourTables(image),
     hits: readHitTables(image),
+    loot: readLootTables(image),
   };
   try {
     data.character = readCharacterTables(image);

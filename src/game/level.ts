@@ -126,6 +126,8 @@ export interface LevelTrigger {
 
 export interface Level {
   name: string;
+  /** Which of its MIF's levels it is, from 0: deeper floors hold more gold. */
+  floor?: number;
   width: number;
   depth: number;
   /** Room height in voxel widths (1 = cubic voxels). */
@@ -327,6 +329,7 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile, platf
 
   return {
     name: ml.name,
+    floor: levelIndex,
     width,
     depth,
     height: (inf.ceilingHeight ?? DEFAULT_CEILING_UNITS) * ARENA_HEIGHT,
