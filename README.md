@@ -3,7 +3,7 @@
 [![Support ES Arena on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
 [![Support ES Arena on Patreon](https://img.shields.io/badge/Support%20ES%20Arena%20on-Patreon-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/cw/Arenasloppa)
 
-**The Elder Scrolls: Arena (1994), remade by AI in Three.js.**
+**The Elder Scrolls: Arena (1994), remade in Three.js.**
 
 ES Arena is an unofficial remake of Bethesda's first Elder Scrolls game. It runs as a desktop app on Mac and Windows,
 or in a web browser. It is written in TypeScript with Three.js by AI: Claude, made by Anthropic, and ChatGPT, made
@@ -84,7 +84,7 @@ Coming later: cities and the wilderness, the Mages Guild and the spellmaker, and
 
 ## Play it
 
-You need your own copy of Arena; it's free on Steam.
+You need your own copy of Arena; it's free on Steam and GOG.
 
 ### Download the app
 
