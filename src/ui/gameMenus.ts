@@ -608,7 +608,8 @@ export class GameMenus {
       if (known && item.charges !== undefined) rows.push(['Charges', String(item.charges)]);
       if (known && item.condition !== undefined) rows.push(['Condition', String(item.condition)]);
       if (item.kind === 'potion') rows.push(['Count', String(entry.count)]);
-      rows.push(['Weight', weight(item.weight)], ['Value', String(item.value)]);
+      // What it's worth would give away what it is.
+      rows.push(['Weight', weight(item.weight)], ['Value', known ? String(item.value) : '?']);
       if (known && item.spell !== undefined) {
         const spell = run.dungeon.spellRecord(item.spell);
         if (spell) effects = describeSpell(spell, item.castLevel ?? 1);

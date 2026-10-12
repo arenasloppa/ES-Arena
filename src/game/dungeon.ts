@@ -1873,11 +1873,16 @@ export class Dungeon {
       item.condition = 0;
       return broken();
     }
+    const before = this.events.length;
     const cast = this.release(spell, level, () => {
       if (item.charges !== undefined) item.charges--;
       else if (item.condition !== undefined) item.condition -= wear;
     });
-    if (!cast) return undefined;
+    if (!cast) {
+      // Says why where the player is looking: the item menu, or the game for a number key.
+      const why = this.events.findIndex((e, i) => i >= before && e.type === 'notify');
+      return why < 0 ? undefined : (this.events.splice(why, 1)[0] as { text: string }).text;
+    }
     this.inventory.identify(item);
     return `${spell.name} cast with the ${shownName(item)}`;
   }

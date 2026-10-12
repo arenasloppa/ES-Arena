@@ -255,6 +255,15 @@ describe('loot in the dungeon', () => {
     expect(d.use(itemKey(charm))).toBe('The Charm of Darts is worn out');
   });
 
+  it('says why a trinket’s spell can’t go, and keeps the charge', () => {
+    const d = new Dungeon(textLevel(['#######', '#@....#', '#######']), EXE, always(0), hero(), SPELLS);
+    const charm = d.inventory.add({ kind: 'trinket', trinket: 'spell', name: 'Charm of Darts', type: 0, spell: 0, castLevel: 4, charges: 3, weight: 0, value: 1 });
+    (d as unknown as { sanctuary: { until: number } }).sanctuary.until = Infinity;
+    expect(d.use(itemKey(charm))).toBe('You can’t cast that in sanctuary');
+    expect(notes(d.events)).toEqual([]);
+    expect(charm.charges).toBe(3);
+  });
+
   it('raises attributes while trinkets and Fortify spells are on the player, and works the character out again', () => {
     const d = new Dungeon(textLevel(['####', '#@.#', '####']), EXE, always(0), hero({ carry: 100 }), SPELLS);
     d.heroWith = (bonus) => hero({ carry: 100 + bonus[0] * 2 + bonus[1] });
