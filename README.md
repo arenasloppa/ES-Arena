@@ -220,7 +220,7 @@ checking against the original game.
 
 ## Support
 
-ES Arena is free. If you enjoy it, you can support it on Ko-fi.
+ES Arena is free. If you enjoy it, you can support it on Ko-fi or Patreon.
 
 Your support helps buy the AI tokens that Claude and ChatGPT use to write the game, which means more time spent working
 on it and more of Arena, sooner. Every little bit helps. Thank you!

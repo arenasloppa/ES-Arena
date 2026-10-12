@@ -162,21 +162,26 @@ h2 {
 .bindings td:first-child { text-transform: uppercase; letter-spacing: 0.12em; }
 .bindings [data-glyph] { margin-right: 0; }
 
-/* The Ko-fi link in the main menu's top corner. */
-#kofi {
+/* The Ko-fi and Patreon links in the main menu's top corner, one under the other. */
+#support {
   position: fixed; top: calc(18px + env(safe-area-inset-top, 0px)); right: 20px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+}
+.support-link {
   display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px;
   font: 400 15px/1 var(--font-ui); letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--dim); text-decoration: none; border: 1px solid transparent; border-radius: 999px;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
-#kofi:hover, #kofi:focus-visible { color: var(--ink); outline: none; border-color: var(--line); background: rgba(0, 0, 0, 0.45); }
-#kofi svg { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.8)); }
+.support-link:hover, .support-link:focus-visible { color: var(--ink); outline: none; border-color: var(--line); background: rgba(0, 0, 0, 0.45); }
+.support-link svg { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.8)); }
 .kofi-disc { fill: #29abe0; }
 .kofi-cup { fill: #fff; }
 .kofi-handle { fill: none; stroke: #fff; stroke-width: 2; }
 .kofi-heart { fill: #ff5e5b; }
-#menu:not([data-screen='folder']):not([data-screen='play']) #kofi { display: none; }
+.patreon-disc { fill: #ff424d; }
+.patreon-mark { fill: #fff; }
+#menu:not([data-screen='folder']):not([data-screen='play']) #support { display: none; }
 
 /* Button hints along the bottom of the menu. */
 .hints {
@@ -707,8 +712,9 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   .gm-items .gm-list { left: calc(var(--left) + var(--kinds) + 8px); width: auto; right: 16px; }
   .gm-magic .gm-list { width: auto; right: 16px; }
   .gm-right { display: none; }
-  #kofi { top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; font-size: 13px; }
-  #kofi span { display: none; }
+  #support { top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; }
+  .support-link { font-size: 13px; }
+  .support-link span { display: none; }
   #minimap-frame { width: 112px; top: calc(52px + env(safe-area-inset-top, 0px)); right: 16px; }
   #banner { top: calc(12vh + env(safe-area-inset-top, 0px)); }
   #stamina, #magicka { width: 22vw; }

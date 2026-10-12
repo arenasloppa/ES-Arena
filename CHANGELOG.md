@@ -15,6 +15,7 @@ Every release of ES Arena, newest first. Each one is on the
 - Blood no longer splashes across your view when a spell, or now an arrow, hits a monster across the room.
 - Lizard Men and Spiders can paralyse you, as in Arena: now and then a blow that lands holds you for one to six rounds, by Arena's own sums from your Endurance. While it lasts you can look about, but not move, fight, cast or use things.
 - Armour and shields protect, weigh and cost what Arena's do. As in Arena, only plate and shields come in the metals, Iron to Ebony, and the menus show each piece's armour rating as Arena does, a fifth of how much it keeps blows off.
+- A Patreon button sits under the Ko-fi one in the main menu's corner, for anyone who would like to support the project there.
 - Behind the main menu, a film of the first dungeon now plays: the camera glides down its halls, skims low over the water, closes in on the rats and goblins as they go about, and now and then one runs at it. Shots dissolve into one another and sometimes dip to black, as a film's do, and the creatures are never hurt. Without your game files the menu keeps its plain hall.
 
 ## 0.4.3 (2026-10-11)
