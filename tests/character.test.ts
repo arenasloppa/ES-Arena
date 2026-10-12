@@ -162,6 +162,8 @@ describe('character creation', () => {
     expect([9, 12, 13].map((id) => heroFor(CHARACTER, { ...TINKER, id }).evasive)).toEqual([true, true, false]);
     // Arena's base speed for Speed 30: 20 + 76 * 20 / 256, against the remake's 30.
     expect(hero.pace).toBeCloseTo(25 / 30);
+    // Speed 30 is 77 on Arena's scale, so a bow is ready again after 4 + 179 / 16 of Arena's ticks.
+    expect(hero.reload).toBeCloseTo(15 / 18.2);
     expect(hero.critical).toBeCloseTo(0.14);
     const sage = heroFor({ ...CHARACTER, attributes: CHARACTER.attributes.map((v, i) => (i === WILLPOWER ? 90 : v)) }, SAGE);
     expect(sage).toMatchObject({ critical: 0, lockpicking: 0, gold: undefined });

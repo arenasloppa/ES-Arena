@@ -20,6 +20,7 @@ import {
   randomGear,
   startingGear,
   usableWeapons,
+  weaponOf,
 } from '../src/game/items';
 import { always } from './helpers/level';
 
@@ -82,15 +83,23 @@ describe('gear', () => {
     expect(itemFrame(makeArmour(LEATHER, 6, 1) as never)).toBe(42);
   });
 
-  it('turns up better materials at higher levels, and never bows', () => {
-    expect(usableWeapons(WEAPONS)).toEqual([...Array(16).keys()]);
+  it('turns up better materials at higher levels, and bows among the weapons', () => {
+    expect(usableWeapons(WEAPONS)).toEqual([...Array(18).keys()]);
+    // A weapon table longer than Arena's: nothing to fight with past the long bow.
+    expect(usableWeapons([...WEAPONS, { name: 'Sling', damage: [1, 2], twoHanded: false }])).toHaveLength(18);
     expect(materialFor(1, always(0.999))).toBe(2);
     expect(materialFor(9, always(0.999))).toBe(7);
-    for (let i = 0; i < 200; i++) {
-      const r = ((i * 37) % 100) / 100;
-      const gear = randomGear(WEAPONS, 3, () => r);
-      if (gear.kind === 'weapon') expect(gear.type).toBeLessThan(16);
-    }
+    const rolls = [0.1, 0, 0.5, 0.95];
+    const bow = randomGear(WEAPONS, 3, () => rolls.shift() ?? 0);
+    expect(bow).toMatchObject({ kind: 'weapon', type: 17, name: 'Iron Long Bow' });
+  });
+
+  it('makes a bow shoot rather than swing', () => {
+    const inv = new Inventory();
+    const bow = inv.add(makeWeapon(WEAPONS, 16, 1));
+    const sword = inv.add(makeWeapon(WEAPONS, 3, 1));
+    expect(weaponOf(bow)).toMatchObject({ name: 'Steel Short Bow', cif: 'ARROWHLF.CFA', bow: true });
+    expect(weaponOf(sword)).toMatchObject({ cif: 'SWORD.CIF', bow: false });
   });
 
   it('starts a class with one plain weapon by its place in the list, as Arena does', () => {

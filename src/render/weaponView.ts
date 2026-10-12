@@ -9,6 +9,8 @@
  *   20-24   cut down from the upper left
  *   25-29   thrust
  *   30-32   raise from below; 32 is the weapon at rest
+ * Arena draws no bow, only an arrow: ARROWHLF.CFA, the arrow on the string,
+ * then none once it is loosed until the next is nocked.
  * Blood from Arena's BLOODEXP.CFA splashes on the view when a blow lands.
  */
 import type { Swing, SwingKind } from '../game/dungeon';
@@ -17,31 +19,41 @@ import type { ScreenImage } from './textures';
 export const VIEW_WIDTH = 320;
 export const VIEW_HEIGHT = 147;
 
-const REST = 32;
-const SWINGS: Record<SwingKind, [number, number]> = {
-  chop: [0, 4],
-  downRight: [5, 9],
-  right: [10, 14],
-  left: [15, 19],
-  downLeft: [20, 24],
-  thrust: [25, 29],
+/** Where the pictures are in one weapon's set. */
+export interface FrameSet {
+  rest: number;
+  /** Frames that bring the weapon back up after a swing, and when it is first drawn. */
+  raise: number[];
+  /**
+   * The guard: the weapon held up across the body. Arena has no block, so
+   * this is the top of the cut from the upper left, moved in toward the
+   * middle with its end kept at the bottom of the view. None with a bow.
+   */
+  guard?: number;
+  swings: Partial<Record<SwingKind, [number, number]>>;
+}
+
+const SWING_SET: FrameSet = {
+  rest: 32,
+  raise: [30, 31],
+  guard: 20,
+  swings: { chop: [0, 4], downRight: [5, 9], right: [10, 14], left: [15, 19], downLeft: [20, 24], thrust: [25, 29] },
 };
-/** Frames that bring the weapon back up after a swing, and when it is first drawn. */
-const RAISE = [30, 31];
+const BOW_SET: FrameSet = { rest: 0, raise: [], swings: { shoot: [1, 1] } };
 const RAISE_TIME = 0.16;
 const SPLASH_FRAME_TIME = 0.06;
-/**
- * The guard: the weapon held up across the body. Arena has no block, so this
- * is the top of the cut from the upper left, moved in toward the middle with
- * its end kept at the bottom of the view.
- */
-const GUARD = 20;
 const GUARD_RIGHT = 196;
 
-/** The frame of the swing set to show for a swing in progress, or the resting frame. */
-export function swingFrame(swing: Swing | undefined): number {
-  if (!swing) return REST;
-  const [first, last] = SWINGS[swing.kind];
+/** The layout of a weapon's pictures: a bow's arrow (a CFA) or a swing set (a CIF). */
+export function frameSet(file: string): FrameSet {
+  return /\.CFA$/i.test(file) ? BOW_SET : SWING_SET;
+}
+
+/** The frame of the set to show for a swing in progress, or the resting frame. */
+export function swingFrame(swing: Swing | undefined, set: FrameSet = SWING_SET): number {
+  const range = swing && set.swings[swing.kind];
+  if (!swing || !range) return set.rest;
+  const [first, last] = range;
   const n = last - first + 1;
   return first + Math.min(n - 1, Math.floor((swing.time / swing.duration) * n));
 }
@@ -112,18 +124,19 @@ export class WeaponView {
       this.swinging = false;
       this.raising = 0;
     }
-    let index = swingFrame(swing);
+    const set = frameSet(this.file);
+    let index = swingFrame(swing, set);
     if (!swing) {
       this.raising += dt;
-      if (this.raising < RAISE_TIME) index = RAISE[Math.floor((this.raising / RAISE_TIME) * RAISE.length)];
+      if (this.raising < RAISE_TIME && set.raise.length) index = set.raise[Math.floor((this.raising / RAISE_TIME) * set.raise.length)];
       else this.raising = Infinity;
     }
     let dx = 0;
     let dy = 0;
-    if (guard && !swing) {
-      index = GUARD;
+    if (guard && !swing && set.guard !== undefined) {
+      index = set.guard;
       this.raising = Infinity;
-      const raised = this.frames[GUARD];
+      const raised = this.frames[set.guard];
       if (raised) {
         dx = Math.max(0, GUARD_RIGHT - (raised.x + raised.image.width));
         dy = VIEW_HEIGHT - (raised.y + raised.image.height);

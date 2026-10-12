@@ -702,8 +702,8 @@ export class GameMenus {
     data.attributes.forEach((name, i) => attributes.append(el('dt', '', name), el('dd', '', String(c.attributes[i] ?? 0))));
     const next = experienceFor(s.level + 1, hero.experience);
     const [low, high] = s.weapon.damage;
-    // Strength, the race's knack and a Ranger's level, as they add to a blow now.
-    const added = hero.damageBonus + knackDamage(hero.knack, s.level, false) + (hero.levelDamage ? s.level : 0);
+    // Strength, the race's knack with the weapon in hand and a Ranger's level, as they add to a blow now.
+    const added = hero.damageBonus + knackDamage(hero.knack, s.level, s.weapon.bow === true) + (hero.levelDamage ? s.level : 0);
     const bonus = added ? ` ${added > 0 ? '+' : '−'}${Math.abs(added)}` : '';
     const rows: Array<[string, string]> = [
       ['Health', `${Math.ceil(s.health)} / ${s.maxHealth}`],

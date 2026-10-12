@@ -6,9 +6,9 @@
  * formats/exe.ts). Whether a creature's blow lands is Arena's own rule: the
  * levels on both sides, the armour on the body part it strikes and both
  * sides' Agility (see hitChance). The player's swings always connect, as in
- * Skyrim. Spells of an element are saved against as in Arena (see
- * elementalDamage). What the character's race, class and attributes add is
- * worked out in character.ts.
+ * Skyrim, and so do arrows that reach a creature. Spells of an element are
+ * saved against as in Arena (see elementalDamage). What the character's
+ * race, class and attributes add is worked out in character.ts.
  */
 import type { ClassInfo } from '../formats/classes';
 
@@ -128,15 +128,38 @@ export function elementalDamage(damage: number, element: number, t: SpellDefence
 export interface Weapon {
   name: string;
   damage: [number, number];
-  /** First-person swing frames: SWORD.CIF, AXE.CIF, ... */
+  /** First-person pictures: a swing set such as SWORD.CIF or AXE.CIF, or a bow's ARROWHLF.CFA. */
   cif: string;
+  /** A bow, which shoots arrows rather than swinging. */
+  bow?: boolean;
 }
 
-/** Which first-person swing set each of Arena's 18 weapons uses (by its place in the game's weapon list). */
+/** The short and long bow's places in the game's weapon list. */
+export const BOWS = [16, 17];
+
+/**
+ * Which first-person pictures each of Arena's 18 weapons uses (by its place
+ * in the game's weapon list), as its program names them: a swing set, or
+ * for the bows ARROWHLF.CFA, an arrow on the string and then none once it
+ * is loosed (Arena draws no bow).
+ */
 export function weaponCif(index: number): string | undefined {
   if (index === 0) return 'STAFF.CIF';
   if (index <= 10) return 'SWORD.CIF';
+  if (BOWS.includes(index)) return 'ARROWHLF.CFA';
   return ['MACE.CIF', 'STAR.CIF', 'HAMMER.CIF', 'AXE.CIF', 'AXE.CIF'][index - 11];
+}
+
+/** Arena's steps of play, about 18.2 a second, as the remake counts them. */
+export const ARENA_TICK = 1 / 18.2;
+
+/**
+ * Seconds before a bow shoots again, as Arena's program works it out (at
+ * 0x393D): 4 ticks, and a 16th of what Speed, on its 0 to 256 scale, falls
+ * short of 256.
+ */
+export function reloadTime(speed256: number): number {
+  return (Math.floor((256 - Math.min(256, speed256)) / 16) + 4) * ARENA_TICK;
 }
 
 export interface PlayerStats {
@@ -218,6 +241,8 @@ export interface Hero {
   climbPace: number;
   /** How many times as high, and as long, the character's jumps go: an Acrobat's twice. */
   leap: number;
+  /** Seconds before a bow can shoot again, quicker with more Speed (see reloadTime). */
+  reload: number;
   /** Endurance's heal mod, for healing while camping (camping.ts). */
   healMod?: number;
   /** Gold rolled at creation, when the character has some. */
@@ -251,6 +276,7 @@ export const DEFAULT_HERO: Hero = {
   swimTiring: 1,
   climbPace: 1,
   leap: 1,
+  reload: reloadTime(to256(50)),
 };
 
 export const POTION_HEALS = 25;

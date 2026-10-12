@@ -39,6 +39,7 @@ import { MapView } from './render/mapView';
 import { Portraits } from './render/portrait';
 import { WeaponView } from './render/weaponView';
 import { SpellView } from './render/spellView';
+import { ArrowView } from './render/arrowView';
 import { backdropLevel } from './render/backdrop';
 import { FilmView } from './render/film';
 import { Director, Film } from './game/flythrough';
@@ -412,7 +413,8 @@ async function startMap(name: string, character: Character) {
     const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
     const scene = await buildLevelScene(level, cache);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem), level);
-    const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => cache.screenImages(file));
+    // A bow's arrow is a CFA, the swing sets CIFs.
+    const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => (file.endsWith('.CFA') ? cache.screenAnimation(file) : cache.screenImages(file)));
     await weapon.use(dungeon.stats.weapon.cif);
     weapon.useBlood(await cache.screenAnimation('BLOODEXP.CFA'));
     const next = new Engine(renderer, dungeon, scene, {
@@ -425,6 +427,7 @@ async function startMap(name: string, character: Character) {
       map: new MapView(dungeon, scene.material, $('map-north')),
       minimap: new Minimap($<HTMLCanvasElement>('minimap'), dungeon),
       spells: new SpellView(),
+      arrows: new ArrowView(cache.cfaFrames('ARROW02.CFA')),
     });
     next.onPause = pause;
     next.onMenu = openGameMenu;

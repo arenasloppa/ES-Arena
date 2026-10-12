@@ -9,13 +9,16 @@
  * and does double damage, and every swing hits whatever is in front within
  * reach. Blocking takes most of the sting out of blows from the front for
  * stamina, and attacking while blocking bashes. Striking a creature that
- * has not noticed the player sneaking does triple damage. Whether a monster's
- * blow lands is Arena's rule: the levels on both sides, the armour on the
- * body part it strikes and both sides' Agility (combat.ts's hitChance); a
- * Lizard Man's or Spider's may paralyse too (creatures.ts's paralysisFrom).
- * The player's race, class and attributes (the Hero) change how hard they
- * hit, how fast they move and climb, and more. Monster stats, weapon damage, armour and sounds
- * come from the player's own game; the loot rules are the remake's own.
+ * has not noticed the player sneaking does triple damage. A bow shoots
+ * arrows instead, flying as Arena's do and as quickly as the character's
+ * Speed lets them nock the next (see shoot); one loosed from hiding does
+ * double. Whether a monster's blow lands is Arena's rule: the levels on
+ * both sides, the armour on the body part it strikes and both sides'
+ * Agility (combat.ts's hitChance); a Lizard Man's or Spider's may paralyse
+ * too (creatures.ts's paralysisFrom). The player's race, class and
+ * attributes (the Hero) change how hard they hit, how fast they move and
+ * climb, and more. Monster stats, weapon damage, armour and sounds come
+ * from the player's own game; the loot rules are the remake's own.
  *
  * Magic works as in Skyrim's hands with Arena's spells (see magic.ts): a
  * spell readied from the magic menu takes the place of the guard, so the
@@ -27,6 +30,7 @@
 import type { ExeData, WeaponInfo } from '../formats/exe';
 import type { SpellRecord } from '../formats/spells';
 import {
+  ARENA_TICK,
   bashChance,
   DEFAULT_HERO,
   drinkPotion,
@@ -130,7 +134,8 @@ export interface DungeonItem extends LevelItem {
   searched?: boolean;
 }
 
-export type SwingKind = 'right' | 'left' | 'downRight' | 'downLeft' | 'chop' | 'thrust';
+/** The ways a weapon swings, and a bow's shot: its arrow leaves at once, and the shot lasts until the next is nocked. */
+export type SwingKind = 'right' | 'left' | 'downRight' | 'downLeft' | 'chop' | 'thrust' | 'shoot';
 
 export interface Swing {
   kind: SwingKind;
@@ -183,7 +188,8 @@ export type DungeonEvent =
   | { type: 'hurt'; damage: number }
   /** A blow taken on the player's guard; `damage` is what got through. */
   | { type: 'blocked'; damage: number }
-  | { type: 'hit'; creature: Creature; damage: number; killed: boolean }
+  /** A blow, arrow or spell landing on a creature; `far` when it struck from a distance, so no blood splashes on the view. */
+  | { type: 'hit'; creature: Creature; damage: number; killed: boolean; far?: boolean }
   | { type: 'bashed'; creature: Creature }
   /** A level gained: how much more health there can be, and the bonus points to share out among the attributes. */
   | { type: 'levelUp'; level: number; health: number; points: number }
@@ -326,6 +332,20 @@ export const AREA_AROUND_CASTER = 2.5;
 /** Touch spells, and the Open spell, reach this far. */
 const TOUCH_REACH = 1.4;
 const OPEN_REACH = 2.5;
+/**
+ * Arrows as Arena's program flies them (at 0x2A06F and 0x2A131), in its
+ * units of 128 to a voxel: one sets off 100 in front of the player, flies 50
+ * a step (about 7 voxels a second) and falls after 30 steps. A wall or a
+ * shut door stops it, and the first creature it reaches takes the blow.
+ * How near it must pass is the remake's own.
+ */
+const ARROW_START = 100 / 128;
+const ARROW_SPEED = 50 / 128 / ARENA_TICK;
+const ARROW_REACH = ARROW_START + (30 * 50) / 128;
+export const ARROW_RADIUS = 0.1;
+const ARROW_STEP = 0.1;
+/** An arrow loosed from hiding at a creature that hasn't noticed the player does double damage, as a bow's sneak attack does in Skyrim. */
+export const SNEAK_SHOT = 2;
 
 /** A spell flying through the dungeon. */
 export interface Bolt {
@@ -336,6 +356,20 @@ export interface Bolt {
   dx: number;
   dy: number;
   travelled: number;
+}
+
+/** An arrow in flight. */
+export interface Arrow {
+  id: number;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  travelled: number;
+  /** The bow it left, for the blow it strikes. */
+  weapon: Weapon;
+  /** Loosed while sneaking: a sneak attack if it strikes a creature that hasn't noticed the player. */
+  sneak: boolean;
 }
 
 /** Harm a spell keeps doing to a creature: poison or continuous damage, a blow every so many seconds. */
@@ -386,6 +420,8 @@ export class Dungeon {
   readied?: SpellRecord;
   /** Spells in flight. */
   readonly bolts: Bolt[] = [];
+  /** Arrows in flight. */
+  readonly arrows: Arrow[] = [];
   /** Game seconds since the game began; time passes 13 times as fast as play, and in steps of 20 minutes while camping. */
   clock = 0;
   /** Resting: hours left (or, until healed, hours so far) and the time to the clock's next step. */
@@ -421,6 +457,7 @@ export class Dungeon {
   private cleared = false;
   private sprintHeld = false;
   private nextBolt = 0;
+  private nextArrow = 0;
   private sinceCast = Infinity;
   private castHeld = false;
   private readonly afflictions: Affliction[] = [];
@@ -523,6 +560,7 @@ export class Dungeon {
       if (this.hero.regainsMagicka) recoverMagicka(this.stats, dt, this.sinceCast, this.hero.recovery);
       this.sinceCast += dt;
       this.updateMagic(dt);
+      for (const a of [...this.arrows]) this.flyArrow(a, ARROW_SPEED * dt);
       this.sinceStamina += dt;
       this.sinceHurt += dt;
       this.lookTimer -= dt;
@@ -1014,6 +1052,10 @@ export class Dungeon {
       if (castPressed) this.cast(this.readied);
       input = { ...input, block: false };
     }
+    if (this.stats.weapon.bow) {
+      this.updateBow(dt, input.attack);
+      return;
+    }
     const a = input.attack;
     if (input.block) {
       // Attacking with the guard up is a bash.
@@ -1084,15 +1126,8 @@ export class Dungeon {
       return;
     }
     if (target) {
-      // As Arena works it out (its program at 0x2AEB5): the weapon's roll, Strength and the race's knack,
-      // doubled for a critical hit, then a Ranger's level; then the remake's power attacks and sneak attacks.
-      const bonus = this.hero.damageBonus + knackDamage(this.hero.knack, this.stats.level, false);
-      let damage = Math.max(1, roll(this.random, ...this.stats.weapon.damage) + bonus);
-      if (mayCrit(this.hero, false) && this.random() < this.hero.critical) {
-        damage *= 2;
-        this.events.push({ type: 'notify', text: 'Critical strike!' });
-      }
-      damage += levelDamage(this.hero, this.stats.level, target.info.id, this.undead);
+      // Arena's blow, then the remake's power attacks and sneak attacks.
+      let damage = this.blowDamage(this.stats.weapon, target);
       if (s.power) damage *= 2;
       if (this.sneaking && isCalm(target)) {
         damage *= SNEAK_ATTACK;
@@ -1113,6 +1148,88 @@ export class Dungeon {
         this.openDoor(ahead.cell);
       }
     } else this.events.push({ type: 'sound', name: 'NHIT.VOC', at: ahead.at, volume: 0.6 });
+  }
+
+  /**
+   * A blow's damage as Arena works it out (its program at 0x2AEB5), from a
+   * swing or an arrow: the weapon's roll, Strength and the race's knack,
+   * doubled for a critical hit, then a Ranger's level.
+   */
+  private blowDamage(weapon: Weapon, target: Creature): number {
+    const bow = weapon.bow === true;
+    const bonus = this.hero.damageBonus + knackDamage(this.hero.knack, this.stats.level, bow);
+    let damage = Math.max(1, roll(this.random, ...weapon.damage) + bonus);
+    if (mayCrit(this.hero, bow) && this.random() < this.hero.critical) {
+      damage *= 2;
+      this.events.push({ type: 'notify', text: 'Critical strike!' });
+    }
+    return damage + levelDamage(this.hero, this.stats.level, target.info.id, this.undead);
+  }
+
+  /**
+   * A bow in hand: an arrow is loosed whenever the attack button is down and
+   * the last one is gone, as in Arena. There is no guard, bash or power
+   * attack with a bow.
+   */
+  private updateBow(dt: number, attack: DungeonInput['attack']): void {
+    this.blocking = false;
+    this.armedAt = this.queued = undefined;
+    const s = this.swing;
+    if (s) {
+      s.time += dt;
+      if (s.time >= s.duration) this.swing = undefined;
+    }
+    if (!this.swing && (attack.held || attack.pressed)) this.shoot();
+  }
+
+  /** Looses an arrow the way the player faces; the bow is ready again once the character's reload time is up. */
+  private shoot(): void {
+    const p = this.player;
+    this.swing = { kind: 'shoot', power: false, time: 0, duration: this.hero.reload, struck: true };
+    this.events.push({ type: 'swing', swing: this.swing }, { type: 'sound', name: 'ARROWFR.VOC' });
+    const arrow: Arrow = { id: this.nextArrow++, x: p.x, y: p.y, dx: Math.cos(p.yaw), dy: Math.sin(p.yaw), travelled: 0, weapon: this.stats.weapon, sneak: this.sneaking };
+    this.arrows.push(arrow);
+    // It sets off a little in front, striking anything nearer on the way.
+    this.flyArrow(arrow, ARROW_START);
+  }
+
+  /** Moves an arrow `distance` on: into the first creature in its way, unless a wall or shut door stops it first or it falls. */
+  private flyArrow(a: Arrow, distance: number): void {
+    const gone = () => this.arrows.splice(this.arrows.indexOf(a), 1);
+    for (let left = distance; left > 0; left -= ARROW_STEP) {
+      const step = Math.min(ARROW_STEP, left);
+      const nx = a.x + a.dx * step;
+      const ny = a.y + a.dy * step;
+      const hit = this.creatures.find((c) => isAlive(c) && Math.hypot(c.x - nx, c.y - ny) < CREATURE_RADIUS + ARROW_RADIUS);
+      if (hit) {
+        gone();
+        this.arrowStrikes(a, hit);
+        return;
+      }
+      const cell = cellIndex(this.level, nx, ny);
+      if (cell < 0 || isBlocking(this.level.cells[cell], this.openDoors, cell)) {
+        gone();
+        return;
+      }
+      a.x = nx;
+      a.y = ny;
+      a.travelled += step;
+      if (a.travelled >= ARROW_REACH) {
+        gone();
+        return;
+      }
+    }
+  }
+
+  private arrowStrikes(a: Arrow, target: Creature): void {
+    let damage = this.blowDamage(a.weapon, target);
+    if (a.sneak && isCalm(target)) {
+      damage *= SNEAK_SHOT;
+      this.events.push({ type: 'notify', text: `Sneak attack for ${SNEAK_SHOT}x damage!` });
+    }
+    const killed = hurtCreature(target, damage, this.world);
+    this.events.push({ type: 'hit', creature: target, damage, killed, far: true }, { type: 'sound', name: 'ARROWHT.VOC', at: { x: target.x, y: target.y } });
+    if (killed) this.killed(target);
   }
 
   private killed(c: Creature): void {
@@ -1334,7 +1451,7 @@ export class Dungeon {
 
   private hurtByMagic(c: Creature, damage: number): void {
     const killed = hurtCreature(c, damage, this.world);
-    if (damage > 0) this.events.push({ type: 'hit', creature: c, damage, killed }, { type: 'sound', name: 'EHIT.VOC', at: { x: c.x, y: c.y } });
+    if (damage > 0) this.events.push({ type: 'hit', creature: c, damage, killed, far: true }, { type: 'sound', name: 'EHIT.VOC', at: { x: c.x, y: c.y } });
     if (killed) this.killed(c);
   }
 
@@ -1627,10 +1744,16 @@ export class Dungeon {
     const item = this.inventory.byKey(key);
     if (!item) return undefined;
     const wasOn = this.inventory.isEquipped(item);
+    const before = this.inventory.weapon;
     const result = this.inventory.toggle(item);
     if (!result.ok) return result.message;
     const held = this.inventory.weapon;
-    if (held) this.stats.weapon = weaponOf(held);
+    if (held && held !== before) {
+      this.stats.weapon = weaponOf(held);
+      // A new weapon cuts short a swing or a shot.
+      this.swing = undefined;
+      this.armedAt = this.queued = undefined;
+    }
     const done = wasOn ? `${item.name} removed` : `${item.name} equipped`;
     return result.message ? `${done}. ${result.message}` : done;
   }

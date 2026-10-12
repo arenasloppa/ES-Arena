@@ -1,4 +1,4 @@
-import { LEATHER, makeArmour } from '../src/game/items';
+import { itemKey, LEATHER, makeArmour, makeWeapon } from '../src/game/items';
 import { describe, expect, it } from 'vitest';
 import type { ExeData } from '../src/formats/exe';
 import {
@@ -19,6 +19,7 @@ import {
   newPlayerStats,
   POISON,
   recover,
+  reloadTime,
   roll,
   spendStamina,
   weaponCif,
@@ -35,10 +36,10 @@ import {
   type Creature,
   type CreatureWorld,
 } from '../src/game/creatures';
-import { Dungeon, IDLE_INPUT, type DungeonEvent, type DungeonInput } from '../src/game/dungeon';
+import { Dungeon, IDLE_INPUT, SNEAK_SHOT, type DungeonEvent, type DungeonInput } from '../src/game/dungeon';
 import type { Hero } from '../src/game/combat';
 import type { ClassInfo } from '../src/formats/classes';
-import { swingFrame } from '../src/render/weaponView';
+import { frameSet, swingFrame } from '../src/render/weaponView';
 import { Exploration } from '../src/game/explore';
 import type { Level } from '../src/game/level';
 import { always, fakeCreature, textLevel } from './helpers/level';
@@ -125,8 +126,8 @@ describe('combat rules', () => {
     expect(levelDamage(DEFAULT_HERO, 6, 2, [5, 8])).toBe(0);
   });
 
-  it('picks a swing for each kind of weapon in the game’s list', () => {
-    expect([0, 1, 10, 11, 12, 13, 14, 15, 16].map(weaponCif)).toEqual([
+  it('picks a swing for each kind of weapon in the game’s list, and the arrow for the bows', () => {
+    expect([0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(weaponCif)).toEqual([
       'STAFF.CIF',
       'SWORD.CIF',
       'SWORD.CIF',
@@ -135,8 +136,14 @@ describe('combat rules', () => {
       'HAMMER.CIF',
       'AXE.CIF',
       'AXE.CIF',
+      'ARROWHLF.CFA',
+      'ARROWHLF.CFA',
       undefined,
     ]);
+  });
+
+  it('nocks the next arrow sooner the more Speed there is, as Arena does', () => {
+    expect([0, 128, 255, 256].map((speed) => Math.round(reloadTime(speed) * 18.2))).toEqual([20, 12, 4, 4]);
   });
 
   it('spends and recovers stamina, and heals slowly when left alone', () => {
@@ -389,7 +396,18 @@ const TABLES: ExeData = {
     { name: 'Dagger', damage: [1, 3], twoHanded: false },
     { name: 'Shortsword', damage: [4, 4], twoHanded: false },
     { name: 'Broadsword', damage: [5, 9], twoHanded: false },
-    { name: 'Short Bow', damage: [9, 20], twoHanded: true },
+    { name: 'Saber', damage: [9, 20], twoHanded: false },
+  ],
+};
+
+/** A made-up weapon list as long as the game's, with its bows in their places; none of these numbers come from the game. */
+const BOW_TABLES: ExeData = {
+  ...TABLES,
+  weapons: [
+    ...TABLES.weapons!,
+    ...Array.from({ length: 11 }, (_, i) => ({ name: `Blade ${i}`, damage: [2, 2] as [number, number], twoHanded: false })),
+    { name: 'Short Bow', damage: [3, 3], twoHanded: true },
+    { name: 'Long Bow', damage: [5, 7], twoHanded: true },
   ],
 };
 
@@ -531,8 +549,8 @@ describe('a run through a dungeon', () => {
 
   it('puts the gear it finds in the pack, for the player to equip', () => {
     const level = textLevel(['#####', '#@..#', '#####'], { items: [{ x: 2.5, y: 1.5, name: 'EQUIPMEN.IMG', kind: 'equipment' }] });
-    // Gear (0), a weapon (0), Steel (0.5, 0.5 of the three materials at level 1), the fourth usable weapon (0.8).
-    const d = new Dungeon(level, TABLES, sequence(0, 0, 0.5, 0.5, 0.8));
+    // Gear (0), a weapon (0), Steel (0.5, 0.5 of the three materials at level 1), the fourth of five weapons (0.7).
+    const d = new Dungeon(level, TABLES, sequence(0, 0, 0.5, 0.5, 0.7));
     // The plain shortsword every character starts with.
     expect(d.stats.weapon.name).toBe('Shortsword');
     d.activate();
@@ -714,13 +732,22 @@ describe('the quest', () => {
 });
 
 describe('the weapon in hand', () => {
-  const swing = (kind: 'chop' | 'thrust', time: number) => ({ kind, power: false, time, duration: 1, struck: false });
+  const swing = (kind: 'chop' | 'thrust' | 'shoot', time: number) => ({ kind, power: false, time, duration: 1, struck: false });
 
   it('rests on the last frame of the swing set and chops from the first', () => {
     expect(swingFrame(undefined)).toBe(32);
     expect(swingFrame(swing('chop', 0))).toBe(0);
     expect(swingFrame(swing('chop', 0.99))).toBe(4);
     expect(swingFrame(swing('thrust', 0.5))).toBe(27);
+  });
+
+  it('shows a bow’s arrow on the string, and none from the shot until the next is nocked', () => {
+    const bow = frameSet('ARROWHLF.CFA');
+    expect(swingFrame(undefined, bow)).toBe(0);
+    expect(swingFrame(swing('shoot', 0.5), bow)).toBe(1);
+    expect(bow.guard).toBeUndefined();
+    // A shot with a swing set in hand (the weapon changed under it) shows the weapon at rest.
+    expect(swingFrame(swing('shoot', 0.5), frameSet('AXE.CIF'))).toBe(32);
   });
 });
 
@@ -912,5 +939,99 @@ describe('the character in the dungeon', () => {
     expect(d.inventory.favourites).not.toContain(cuirass);
     expect(d.inventory.hotkeys[2]).toBeUndefined();
     expect(d.drop('item:999')).toBeUndefined();
+  });
+});
+
+describe('bows', () => {
+  const hero = (overrides: Partial<Hero> = {}): Hero => ({ ...DEFAULT_HERO, ...overrides });
+  /** A corridor with a creature `at` voxels along it, or none. */
+  const range = (at?: number, length = 20) =>
+    textLevel(['#'.repeat(length), `#@${'.'.repeat(length - 3)}#`, '#'.repeat(length)], { creatures: at === undefined ? [] : [{ x: at, y: 1.5, type: 0 }] });
+  /** A player with the made-up short bow in hand. */
+  const archer = (level: ReturnType<typeof textLevel>, h: Partial<Hero> = {}) => {
+    const d = new Dungeon(level, BOW_TABLES, always(0), hero(h));
+    expect(d.use(itemKey(d.inventory.add(makeWeapon(BOW_TABLES.weapons!, 16, 1, true))))).toBe('Short Bow equipped');
+    return d;
+  };
+  const hits = (d: Dungeon) => d.events.flatMap((e) => (e.type === 'hit' ? [e] : []));
+  const shots = (d: Dungeon) => sounds(d.events).filter((s) => s === 'ARROWFR.VOC').length;
+  const sneakClick = input({ sneaking: true, attack: { held: false, pressed: true, released: true } });
+
+  it('looses an arrow that flies as Arena’s do and strikes the first creature in its way', () => {
+    const d = archer(range(8.5));
+    d.creatures[0].health = d.creatures[0].maxHealth = 20;
+    d.update(0.05, click);
+    expect(shots(d)).toBe(1);
+    expect(d.swing).toMatchObject({ kind: 'shoot' });
+    // It sets off 100 of Arena's units (128 to a voxel) in front of the player and flies 50 a tick.
+    expect(d.arrows).toHaveLength(1);
+    expect(d.arrows[0].x).toBeCloseTo(1.5 + 100 / 128 + (50 / 128) * 18.2 * 0.05, 1);
+    tick(d, 1.5);
+    expect(hits(d)).toEqual([expect.objectContaining({ damage: 3, killed: false, far: true })]);
+    expect(sounds(d.events)).toContain('ARROWHT.VOC');
+    expect(d.arrows).toHaveLength(0);
+    expect(d.creatures[0].health).toBe(17);
+  });
+
+  it('nocks the next arrow once the reload time is up, shooting on while the button is held', () => {
+    const d = archer(range(), { reload: 0.5 });
+    d.update(0.05, press);
+    tick(d, 0.4, hold);
+    expect(shots(d)).toBe(1);
+    tick(d, 0.2, hold);
+    expect(shots(d)).toBe(2);
+    // A click while the next arrow is still being nocked is lost, as in Arena.
+    d.update(0.05, click);
+    expect(shots(d)).toBe(2);
+    // There is no guard with a bow.
+    tick(d, 0.2, input({ block: true }));
+    expect(d.blocking).toBe(false);
+  });
+
+  it('stops arrows at walls and shut doors, and lets them fall after about 12 voxels', () => {
+    const walled = archer(textLevel(['########', '#@..D..#', '########'], { creatures: [{ x: 5.5, y: 1.5, type: 0 }] }));
+    walled.update(0.05, click);
+    tick(walled, 0.5);
+    expect(walled.arrows).toHaveLength(0);
+    expect(hits(walled)).toHaveLength(0);
+    const d = archer(range());
+    d.update(0.05, click);
+    tick(d, 1.5);
+    expect(d.arrows).toHaveLength(1);
+    // It falls 30 of Arena's ticks after setting off, 100 + 30 * 50 units from where it was loosed.
+    tick(d, 0.3);
+    expect(d.arrows).toHaveLength(0);
+  });
+
+  it('strikes with the bow’s damage, the Wood Elf’s knack and an Archer’s critical hits, and double from hiding', () => {
+    const first = (h: Partial<Hero>, i = click) => {
+      // Point blank: the arrow strikes on its way out.
+      const d = archer(range(2.7), h);
+      d.stats.level = 6;
+      d.creatures[0].health = d.creatures[0].maxHealth = 30;
+      d.update(0.05, i);
+      return { hit: hits(d)[0], notes: notes(d.events) };
+    };
+    expect(first({}).hit).toMatchObject({ damage: 3, far: true });
+    expect(first({ knack: { levels: 3, weapons: 'bows' } }).hit).toMatchObject({ damage: 3 + 2 });
+    expect(first({ knack: { levels: 3, weapons: 'melee' } }).hit).toMatchObject({ damage: 3 });
+    const crit = first({ critical: 1, criticalWith: 'bows' });
+    expect(crit.hit).toMatchObject({ damage: 3 * 2 });
+    expect(crit.notes).toContain('Critical strike!');
+    expect(first({ critical: 1 }).hit).toMatchObject({ damage: 3 });
+    const sneaky = first({}, sneakClick);
+    expect(sneaky.hit).toMatchObject({ damage: 3 * SNEAK_SHOT });
+    expect(sneaky.notes).toContain(`Sneak attack for ${SNEAK_SHOT}x damage!`);
+  });
+
+  it('cuts a shot short when the weapon changes, and swings again with a blade', () => {
+    const d = archer(range(2.7));
+    d.creatures[0].health = d.creatures[0].maxHealth = 30;
+    d.update(0.05, click);
+    const sword = d.inventory.items.find((i) => i.name === 'Shortsword')!;
+    expect(d.use(itemKey(sword))).toBe('Shortsword equipped');
+    expect(d.swing).toBeUndefined();
+    tick(d, 0.3, click);
+    expect(hits(d).map((e) => e.far)).toEqual([true, undefined]);
   });
 });

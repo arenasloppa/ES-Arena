@@ -14,7 +14,7 @@
 import type { CharacterTables, ClassInfo, CreationTexts, RaceInfo } from '../formats/classes';
 import type { ClassChooser, Question } from '../formats/creation';
 import type { GameMessages } from '../formats/messages';
-import { COLD, MAGIC, POISON, to256, type Hero, type Random, type WeaponKnack } from './combat';
+import { COLD, MAGIC, POISON, reloadTime, to256, type Hero, type Random, type WeaponKnack } from './combat';
 import { regainsMagicka, startingMagicka } from './magic';
 
 export type Gender = 'male' | 'female';
@@ -441,6 +441,7 @@ export function heroFor(character: Character, cls: ClassInfo, { levelled = false
     climbPace: race === KHAJIIT || cls.id === ACROBAT ? 4 : 1,
     // An Acrobat's jumps go twice as high and last twice as long, as in Arena's program (0x2852B).
     leap: cls.id === ACROBAT ? 2 : 1,
+    reload: reloadTime(to256(a[SPEED])),
     gold: character.gold,
   };
 }

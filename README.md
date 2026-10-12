@@ -46,7 +46,8 @@ screenshots of earlier versions.
   and fight, landing their blows by Arena's rule: the armour where they strike, your Agility against theirs and the
   levels on both sides decide whether a blow lands. Lizard Men and Spiders can paralyse you, as in Arena.
 - Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
-  three times the damage. While you sneak, an eye shows how close the creatures nearby are to noticing you.
+  three times the damage. Bows shoot Arena's arrows, as quickly as your Speed lets you nock the next, and do double
+  damage from hiding. While you sneak, an eye shows how close the creatures nearby are to noticing you.
 - Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
   Medusa's Gaze and the rest of the Mages Guild's list that the remake can do so far (30 of its 64). Spellcasting
   classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Ready a
@@ -129,7 +130,7 @@ controller, with the PlayStation button in brackets.
 | Move | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Left stick |
 | Look | Mouse (click the view to capture it) | Right stick |
 | Turn and walk | Arrow keys | |
-| Attack, hold for a power attack | Left mouse button | RT (R2) |
+| Attack, hold for a power attack; with a bow, shoot (hold to keep shooting) | Left mouse button | RT (R2) |
 | Block, attack while blocking to bash; with a spell readied, cast it | Right mouse button | LT (L2) |
 | Use, take, open | <kbd>E</kbd> | A (✕) |
 | Jump | <kbd>Space</kbd> | Y (△) |

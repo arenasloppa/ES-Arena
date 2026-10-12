@@ -6,6 +6,7 @@ import type { FilmView } from '../render/film';
 import { poseDoor, type LevelScene } from '../render/levelScene';
 import type { MapView } from '../render/mapView';
 import { spellColour, type SpellView } from '../render/spellView';
+import type { ArrowView } from '../render/arrowView';
 import type { WeaponView } from '../render/weaponView';
 import type { Minimap } from '../ui/minimap';
 import { isAlive } from './creatures';
@@ -141,6 +142,7 @@ export interface EngineOptions {
   map?: MapView;
   minimap?: Minimap;
   spells?: SpellView;
+  arrows?: ArrowView;
 }
 
 /**
@@ -233,6 +235,7 @@ export class Engine {
     this.scene.add(levelScene.group);
     if (options.creatures) this.scene.add(options.creatures.group);
     if (options.spells) this.scene.add(options.spells.group);
+    if (options.arrows) this.scene.add(options.arrows.group);
     this.resize();
 
     window.addEventListener('resize', this.resize);
@@ -284,6 +287,7 @@ export class Engine {
     window.removeEventListener('mouseup', this.onMouseUp);
     this.options.map?.dispose();
     this.options.spells?.dispose();
+    this.options.arrows?.dispose();
     this.options.film?.dispose();
     const textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
@@ -489,8 +493,11 @@ export class Engine {
           break;
         case 'hit':
           hud?.enemy(e.creature.info.name, e.creature.health, e.creature.maxHealth);
-          this.options.weapon?.splash();
-          this.rumble(80, 0.1, 0.3);
+          // Blood splashes on the view only for a blow struck close by.
+          if (!e.far) {
+            this.options.weapon?.splash();
+            this.rumble(80, 0.1, 0.3);
+          }
           break;
         case 'bashed':
           hud?.enemy(e.creature.info.name, e.creature.health, e.creature.maxHealth);
@@ -594,6 +601,7 @@ export class Engine {
     this.camera.lookAt(p.x + Math.cos(p.yaw) * cp, eye + Math.sin(p.pitch), p.y + Math.sin(p.yaw) * cp);
     this.face(this.camera);
     this.options.spells?.update(d.bolts, eye * 0.85, dt);
+    this.options.arrows?.update(d.arrows, eye * 0.85, dt);
     // A Light spell lets the player see further into the dark.
     const fog = this.scene.fog as THREE.Fog;
     const reach = d.lightReach;

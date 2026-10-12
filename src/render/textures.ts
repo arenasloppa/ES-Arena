@@ -62,6 +62,23 @@ export class TextureCache {
     return p;
   }
 
+  /** Every frame of an animation in a CFA, such as an arrow in flight, with transparency; empty when it can't be read. */
+  cfaFrames(file: string): Promise<THREE.DataTexture[]> {
+    let p = this.animCache.get(file);
+    if (!p) {
+      p = (async () => {
+        if (!this.data.has(file)) return [];
+        const cfa = parseCfa(await this.data.read(file));
+        return cfa.frames.map((pixels) => toTexture({ width: cfa.width, height: cfa.height, xOffset: 0, yOffset: 0, pixels }, this.palette, false, true));
+      })().catch((err) => {
+        console.warn(`Could not load ${file}:`, err);
+        return [];
+      });
+      this.animCache.set(file, p);
+    }
+    return p;
+  }
+
   /**
    * Animated liquid frames from WATERANI.RCI / LAVAANI.RCI. Arena draws these
    * in screen space; we cut a 64x64 tile from the near (bottom) part of each

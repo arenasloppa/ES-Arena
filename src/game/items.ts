@@ -16,7 +16,7 @@
 import type { ArmourTables } from '../formats/armour';
 import type { ClassInfo } from '../formats/classes';
 import type { WeaponInfo } from '../formats/exe';
-import { weaponCif, type Random, type Weapon } from './combat';
+import { BOWS, weaponCif, type Random, type Weapon } from './combat';
 
 export interface Material {
   name: string;
@@ -81,8 +81,6 @@ export function armourTables(read?: Partial<ArmourTables>): ArmourTables {
 const WEAPON_WEIGHT = [2.2, 0.6, 2.6, 3.7, 3.3, 4.1, 6.3, 0.9, 2.3, 3.6, 5.8, 4.6, 5.1, 7.2, 5.3, 7.6, 1.3, 1.9];
 const WEAPON_VALUE = [12, 14, 35, 55, 48, 70, 95, 22, 45, 85, 120, 40, 52, 66, 58, 88, 60, 90];
 export const POTION_WEIGHT = 0.5;
-/** Arena's dungeons have bows, but no way to shoot them here yet. */
-const BOWS = new Set(['Short Bow', 'Long Bow']);
 
 export type ItemKind = 'weapon' | 'armour' | 'shield';
 
@@ -177,12 +175,12 @@ export function armourRating(item: Pick<Item, 'protection'>): number {
 
 /** The weapon as the fighting rules and the first-person view need it. */
 export function weaponOf(item: Item): Weapon {
-  return { name: item.name, damage: item.damage ?? [1, 2], cif: weaponCif(item.type) ?? 'SWORD.CIF' };
+  return { name: item.name, damage: item.damage ?? [1, 2], cif: weaponCif(item.type) ?? 'SWORD.CIF', bow: BOWS.includes(item.type) };
 }
 
-/** The weapons that can be used, by place in the game's list: all but the bows. */
+/** The weapons that can be used, by place in the game's list: every one Arena has pictures to fight with, the bows too. */
 export function usableWeapons(weapons: WeaponInfo[]): number[] {
-  return weapons.flatMap((w, i) => (BOWS.has(w.name) || i >= 16 ? [] : [i]));
+  return weapons.flatMap((_, i) => (weaponCif(i) ? [i] : []));
 }
 
 /** The frame of the item's picture in the game's equipment pictures (0EQUIP.CIF for men, 1EQUIP.CIF for women). */
