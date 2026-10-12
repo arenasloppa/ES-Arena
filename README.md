@@ -83,7 +83,7 @@ Coming later: cities and the wilderness, the Mages Guild and the spellmaker, and
 
 ## Play it
 
-You need your own copy of Arena; it's free on Steam.
+You need your own copy of Arena; it's free on Steam and GOG.
 
 ### Download the app
 
