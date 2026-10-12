@@ -3,7 +3,9 @@
 Every release of ES Arena, newest first. Each one is on the
 [Releases page](https://github.com/arenasloppa/ES-Arena/releases) with its downloads.
 
-## Unreleased
+## 0.4.4 (2026-10-12)
+
+Arena's loot and magic items; races, classes and monsters' blows as in Arena; bows that shoot; character creation in Skyrim's order; a film of the first dungeon behind the main menu; and the stone of the chasm's sides below water and pits.
 
 - The item menu's pictures turn, as Skyrim's items do. Drag the picked piece with the mouse, or push the right stick, to turn it round, and roll the mouse wheel or press the right stick to bring it closer. Each one is Arena's own picture given depth, thin at its edges and swelling towards the middle, so a blade stays thin while a cuirass or a shield bulges, and the light falls from your side as it turns.
 - Where a wall comes down into water or a pit, the stone of the chasm's sides now shows below the floor's level, as in Arena.
