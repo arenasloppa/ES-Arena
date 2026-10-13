@@ -6,9 +6,27 @@
 **The Elder Scrolls: Arena (1994), remade in Three.js.**
 
 ES Arena is an unofficial remake of Bethesda's first Elder Scrolls game. It runs as a desktop app on Mac and Windows,
-or in a web browser. It is written in TypeScript with Three.js.
+or in a web browser. It is written in TypeScript with Three.js by AI: Claude, made by Anthropic, and ChatGPT, made
+by OpenAI.
 You play it with your own copy of Arena: the game reads the original maps, textures, creatures, sounds and text from your
 `ARENA` folder while it runs, so none of Bethesda's files are in this repository.
+
+## Screenshots
+
+![A goblin raises its axe at the player in the Imperial Dungeons, with its health under the compass, the minimap at the top right and the player's health at the bottom](docs/screenshots/goblin.png)
+
+| | |
+|---|---|
+| ![Choosing a race on Arena's map of Tamriel, with Skyrim picked and the provinces listed beside the map](docs/screenshots/race.png)<br>Choosing a race on the map of Tamriel | ![Sharing out bonus points among the attributes, beside the paper doll of a Nord warrior](docs/screenshots/attributes.png)<br>Sharing out bonus points |
+| ![The item menu, with the broadsword the character starts with picked, its picture from the game and its damage, weight and value](docs/screenshots/items.png)<br>The item menu | ![The character sheet, with the paper doll beside the attributes, health, damage and experience](docs/screenshots/character.png)<br>The character sheet |
+| ![The cell where the game begins, with the dungeon's name across the top and the first objective in the corner](docs/screenshots/cell.png)<br>Arriving in the cell where Arena begins | ![Sneaking up behind a rat, with the eye that shows how close it is to noticing](docs/screenshots/sneak.png)<br>Sneaking up on a rat |
+| ![The 3D map of the Imperial Dungeons, showing the parts explored so far](docs/screenshots/map.png)<br>The map fills in as you explore | ![The main menu, over a hall the remake draws itself](docs/screenshots/menu.png)<br>The main menu |
+| ![The wait menu, with Arena's time and date over the hours to rest and Arena's two ways to camp](docs/screenshots/wait.png)<br>Waiting, with the date and time in Arena | ![The character sheet after two levels gained, with bonus points to share out and some already on Endurance](docs/screenshots/level.png)<br>A level gained, with bonus points to share out |
+| ![The menu of menus, Skyrim's separated plus, with the items arm and its name lit as the player aims at it](docs/screenshots/tween.png)<br>The menu of menus, aiming at the items | |
+
+The screenshots are taken from the game as it stands with `npm run screenshots` and retaken for every release.
+They show Arena's own art, which the remake reads from a copy of the game. The [gallery](docs/gallery.md) keeps the
+screenshots of earlier versions.
 
 ## What works so far
 
@@ -27,7 +45,7 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 - Monsters with Arena's own pictures and stats. They wander, notice you when they see you, chase you round corners
   and fight, landing their blows by Arena's rule: the armour where they strike, your Agility against theirs and the
   levels on both sides decide whether a blow lands. Lizard Men and Spiders can paralyse you, as in Arena.
-- Combat with Arena weapons and swings: power attacks, blocking, bashing, and sneak attacks for
+- Combat in Skyrim's style with Arena's weapons and swings: power attacks, blocking, bashing, and sneak attacks for
   three times the damage. Bows shoot Arena's arrows, as quickly as your Speed lets you nock the next, and do double
   damage from hiding. While you sneak, an eye shows how close the creatures nearby are to noticing you.
 - Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
@@ -177,7 +195,7 @@ files a played copy creates (`SAVEGAME.0x`, `WILD00x.0x`, `AUTOMAP.0x`, `*.$$$`,
 | `src/ui/` | The Skyrim-style menu and HUD: moving through the menu, character creation, the menus over the game, the compass, the minimap, button prompts and the settings. |
 | `src/render/` | Turning a level into Three.js meshes and textures, the creatures, the weapon in hand, the 3D map, the paper doll and item pictures, the film of the first dungeon behind the main menu, and the stand-in hall shown there without the game, whose textures the remake draws itself. |
 | `electron/` | The desktop app: a window that shows the built game and can read the `ARENA` folder you pick, and nothing else on your computer. |
-| `scripts/` | Release-note generation used by the GitHub release workflow. |
+| `scripts/` | Tools for working on the remake: redrawing the app icon, saving the game's images as PNGs, and taking the screenshots. |
 | `tests/` | Unit tests. `tests/helpers/encode.ts` builds fake archives, maps and compressed data, so the tests never need the real game files. |
 
 ```sh
@@ -186,10 +204,14 @@ npm run typecheck
 npm run build       # static build in dist/
 npm run app         # build, then open the desktop app
 npm run dist        # build the desktop app for this computer into release/
+npx tsx scripts/icon.ts   # redraw the app icon, build/icon.png
+npx tsx scripts/inspect.ts <ARENA folder> <out dir> WALLA.SET TITLE.IMG   # save images as PNGs to check the decoders
+npm run screenshots -- <ARENA folder>   # retake the screenshots in docs/screenshots, keeping the old ones for the gallery (then npm run build)
 ```
 
 Every release is logged in [CHANGELOG.md](CHANGELOG.md). Releases are built on GitHub by
-`.github/workflows/release.yml`: add the version's entry to the update log, raise the version in `package.json`, then run the Release workflow from the Actions tab (or push a tag such as `v0.3.0`). The release notes
+`.github/workflows/release.yml`: add the version's entry to the update log, raise the version in `package.json`, retake
+the screenshots, then run the Release workflow from the Actions tab (or push a tag such as `v0.3.0`). The release notes
 come from the log. It builds the Mac and Windows zips and
 publishes them on the Releases page. The Mac app is ad-hoc signed rather than signed with a paid Apple certificate,
 which is why macOS asks before opening it the first time.
@@ -202,7 +224,8 @@ checking against the original game.
 
 ES Arena is free. If you enjoy it, you can support it on Ko-fi or Patreon.
 
-Your support helps fund continued development. Thank you!
+Your support helps buy the AI tokens that Claude and ChatGPT use to write the game, which means more time spent working
+on it and more of Arena, sooner. Every little bit helps. Thank you!
 
 [![Support ES Arena on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/N0C328KVIG)
 [![Support ES Arena on Patreon](https://img.shields.io/badge/Support%20ES%20Arena%20on-Patreon-FF424D?logo=patreon&logoColor=white)](https://www.patreon.com/cw/Arenasloppa)
@@ -212,4 +235,5 @@ Your support helps fund continued development. Thank you!
 This is an unofficial fan project, not affiliated with or endorsed by Bethesda Softworks or ZeniMax Media.
 The Elder Scrolls and Arena are trademarks of their owners. Arena is free to download, but its license allows
 personal use only, so this repository never contains the game's files; the remake reads them from your own copy.
+The screenshots show the game's art as the remake draws it from a copy of the game.
 The menu's fonts, Cinzel and Barlow Condensed, are used under the SIL Open Font License.
