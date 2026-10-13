@@ -122,52 +122,47 @@ npm run app     # or open it as the desktop app
 
 ### Controls
 
-The controls follow Skyrim's. Any controller the browser or app recognises works, including Xbox, PlayStation and
-Switch Pro controllers, and the on-screen prompts show its own buttons. Below, buttons are named as on an Xbox
-controller, with the PlayStation button in brackets.
+Xbox button names are shown below, with PlayStation equivalents in brackets. On-screen prompts follow the controller being used.
 
 | Action | Keyboard and mouse | Controller |
 |---|---|---|
 | Move | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Left stick |
 | Look | Mouse (click the view to capture it) | Right stick |
-| Turn and walk | Arrow keys | |
-| Attack, hold for a power attack; with a bow, shoot (hold to keep shooting) | Left mouse button | RT (R2) |
-| Block, attack while blocking to bash; with a spell readied, cast it | Right mouse button | LT (L2) |
-| Use, take, open | <kbd>E</kbd> | A (✕) |
+| Walk and turn | Up/down arrows walk; left/right arrows turn | |
+| Attack or shoot; hold to charge a power attack or draw the bow | Left mouse button | RT (R2) |
+| Block; attack while blocking to shove | Right mouse button; casts a readied spell instead when one is selected | LT (L2) |
+| Interact: use, take or open | <kbd>E</kbd> | A (✕) |
 | Jump | <kbd>Space</kbd> | Y (△) |
-| Sprint | <kbd>Shift</kbd> | LB (L1) |
-| Sneak | <kbd>C</kbd> | Click the left stick (L3) |
-| Favourites | <kbd>Q</kbd> | Up or down on the D-pad |
-| Use the favourite on a number key | <kbd>1</kbd> to <kbd>8</kbd> | Left or right on the D-pad, for 1 and 2 |
-| Character, items, magic and map | <kbd>Tab</kbd> | B (○) |
-| Items, magic | <kbd>I</kbd>, <kbd>P</kbd> | |
-| Map | <kbd>M</kbd> | Down from the menu of menus (B) |
-| Wait: camp for some hours or until healed (again to wake) | <kbd>T</kbd> | View (Share) |
-| Pause menu | <kbd>Esc</kbd> | Start (Options) |
+| Sprint | Hold <kbd>Shift</kbd> | Click the left stick (L3) to toggle while moving |
+| Toggle sneak | <kbd>C</kbd> | Click the right stick (R3) |
+| Use hotbar slot 1 | <kbd>1</kbd> | D-pad left |
+| Use hotbar slot 2 | <kbd>2</kbd> | D-pad up |
+| Use hotbar slot 3 | <kbd>3</kbd> | D-pad right |
+| Use hotbar slot 4 | <kbd>4</kbd> | X (□) |
+| Use hotbar slot 5 | <kbd>5</kbd> | B (○) |
+| Use hotbar slot 6 | <kbd>6</kbd> | LB (L1) |
+| Use hotbar slot 7 | <kbd>7</kbd> | RB (R1) |
+| Character, items, magic and map | <kbd>Tab</kbd> | View (Share/Create) |
+| Open items or magic directly | <kbd>I</kbd> or <kbd>P</kbd> | Choose from the menu of menus |
+| Open map | <kbd>M</kbd> | Down from the menu of menus |
+| Wait: camp for some hours or until healed; press again to wake | <kbd>T</kbd> | D-pad down |
+| Pause | <kbd>Esc</kbd> | Start (Options) |
 
-In the menu of menus, push a way with the arrow keys, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, the left stick
-or the D-pad to light it, and let go to open it; <kbd>Enter</kbd> or A opens the lit one, and the mouse lights one by
-pointing at it.
+In the menu of menus, use the arrow keys, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, the left stick or D-pad to highlight a section, then release the direction to open it. <kbd>Enter</kbd> or A also opens the highlighted section. The mouse highlights a section by pointing at it.
 
-In the magic menu (<kbd>P</kbd>, or left from the menu of menus), ready a spell with <kbd>E</kbd> or A, make it a
-favourite with <kbd>F</kbd> or Y, or put it on a number key by pressing the number.
+In the item and magic menus, <kbd>E</kbd>, <kbd>Enter</kbd> or A uses, equips or readies the selected entry. LB/RB change item categories. <kbd>C</kbd> or RT casts an enchanted item's spell, and <kbd>R</kbd> drops the selected item. Drag the item preview or use the right stick to rotate it; the mouse wheel or clicking the right stick changes its zoom. <kbd>Esc</kbd> or B goes back; <kbd>Tab</kbd> returns directly to the game.
 
-In the item menu, pick a kind of item on the left (LB and RB also change it), then use, drink or equip the picked one with
-<kbd>E</kbd> or A, cast the spell of an enchanted piece with <kbd>C</kbd> or RT, make it a favourite with <kbd>F</kbd> or
-Y, and drop it with <kbd>R</kbd> or X. Pressing a number
-key puts it on that key. In the favourites, <kbd>1</kbd> to <kbd>8</kbd>, or left and right on the D-pad, do the same.
-<kbd>Esc</kbd> or B goes back, and <kbd>Tab</kbd> goes straight back to the game.
+The hotbar accepts spells and usable items, not weapons. Select an entry in Items or Magic and press <kbd>H</kbd> or Y to open the assignment picker. Press <kbd>1</kbd>–<kbd>7</kbd> or the controller button for the desired slot to assign it. You can also highlight a slot and confirm with <kbd>Enter</kbd> or A. <kbd>Esc</kbd> or Y cancels assignment. Pressing a number directly while an assignable entry is selected also assigns that slot.
 
-On the map, move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the left stick, drag with the mouse or use
-the right stick to turn it, and zoom with the mouse wheel or the triggers.
+When looting, choose entries with up/down, the left stick or D-pad. <kbd>E</kbd>, <kbd>Enter</kbd> or A takes the selected entry; <kbd>R</kbd> or Y takes all; <kbd>Esc</kbd>, <kbd>Tab</kbd> or B closes the list.
 
-In the main menu and character creation, move with the arrow keys, the D-pad or the left stick, choose with
-<kbd>Enter</kbd> or A, change a setting with left and right, and go back with <kbd>Esc</kbd> or B. The Settings screen
-sets look speed, inverted look, sound and music volume, whether the opening plays and vibration, and changes the
-ARENA folder.
+On the map, move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the left stick, drag with the mouse or use the right stick to turn it, and zoom with the mouse wheel or LT/RT. Keyboard map rotation uses <kbd>Q</kbd>/<kbd>E</kbd> and <kbd>R</kbd>/<kbd>F</kbd>; <kbd>-</kbd>/<kbd>+</kbd> zoom. <kbd>M</kbd>, <kbd>Esc</kbd>, <kbd>Tab</kbd> or B closes the map.
 
-In a cutscene, <kbd>Enter</kbd>, <kbd>Space</kbd>, a click or A goes on to the next picture or line, and <kbd>Esc</kbd>,
-B or Start skips the rest.
+In the main menu and character creation, use the arrow keys, D-pad or left stick to move, <kbd>Enter</kbd> or A to choose, and <kbd>Esc</kbd> or B to go back. Settings control look speed, inverted look, sound/music volume, opening playback, vibration and the ARENA folder.
+
+In a cutscene, <kbd>Enter</kbd>, <kbd>Space</kbd>, a click or A advances; <kbd>Esc</kbd>, B or Start skips the rest.
+
+In Effect Testing, <kbd>F6</kbd> adds a buff, <kbd>F7</kbd> adds a debuff, <kbd>F8</kbd> clears effects, and <kbd>F9</kbd>/<kbd>F10</kbd> toggle automatic buff/debuff cycling.
 
 ### Files it reads
 

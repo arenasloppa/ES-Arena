@@ -3,6 +3,19 @@
 Every release of ES Arena, newest first. Each one is on the
 [Releases page](https://github.com/arenasloppa/ES-Arena/releases) with its downloads.
 
+## 0.5.0 (2026-10-13)
+
+3D weapons, expanded combat and spell effects, a redesigned HUD, and combat and effect testing.
+
+- Steel weapons and the Silver Dagger use textured 3D models, including rotatable inventory previews. Other weapon variants retain their existing artwork.
+- Weapon swings, charged attacks, blocking and shoves use weapon-specific timing and placement. Bows draw and release arrows, the flail has constrained chain motion, and arrows respond to world surfaces and can be recovered.
+- The HUD includes a character portrait, health/magicka/stamina bars, effect icons with duration displays, a spell/item hotbar, an experience bar and a quest tracker beneath the minimap.
+- The Test Area includes weapon and effect testing, supplies the weapon inventory and spells, keeps the player immortal, and cycles through the monster roster.
+- Expanded spell effects, monster casting, disease effects, material defenses and monster regeneration. Full monster and dungeon parity remains in progress.
+- Loot can be taken individually or with Take All. Improved controller menus, enemy health displays, impact effects and water-tunnel traversal and rendering.
+
+Players provide their own Arena game files; original game data is not bundled with the downloads.
+
 ## 0.4.4 (2026-10-12)
 
 Arena's loot and magic items; races, classes and monsters' blows as in Arena; bows that shoot; character creation in Skyrim's order; a film of the first dungeon behind the main menu; and the stone of the chasm's sides below water and pits.
