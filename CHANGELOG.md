@@ -14,6 +14,13 @@ Every release of ES Arena, newest first. Each one is on the
 - Expanded spell effects, monster casting, disease effects, material defenses and monster regeneration. Full monster and dungeon parity remains in progress.
 - Loot can be taken individually or with Take All. Improved controller menus, enemy health displays, impact effects and water-tunnel traversal and rendering.
 
+- A searchable Guidebook explains equipment affixes, spell enchantments, elite monster properties, champions and auras, with controller navigation.
+- Randomized loot adds 211 prefixes and 145 suffixes, quality colours, 33 named relics, four equipment sets, real equipped effects and character-specific equipment/progression saves.
+- Named elite encounters and champion packs add elemental strikes, resistance, curses, auras, spell volleys, teleporting, retainers and improved drops. Weapon Testing cycles through original monsters, champions and named affixes.
+- Floating enemy damage numbers distinguish critical hits and damage types.
+- Original / Remake graphics presets, with Remake as default. New pixel-art textures and modelled dungeon surfaces, bump/specular lighting, ambient occlusion, volumetric light, glow and visible sprite/object shadows.
+- Inventory stat labels and values are aligned, long descriptions scroll with a controller, and the startup controls overlay has been removed.
+
 Players provide their own Arena game files; original game data is not bundled with the downloads.
 
 ## 0.4.4 (2026-10-12)

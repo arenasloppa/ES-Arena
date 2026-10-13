@@ -168,7 +168,7 @@ describe('settings', () => {
   it('keeps settings between visits, within range', () => {
     const storage = memoryStorage();
     saveSettings({ lookSpeed: 1.6, invertLook: true, vibration: false, volume: 0.3, music: 0.5, intro: false }, storage);
-    expect(loadSettings(storage)).toEqual({ lookSpeed: 1.6, invertLook: true, vibration: false, volume: 0.3, music: 0.5, intro: false });
+    expect(loadSettings(storage)).toEqual({ ...DEFAULT_SETTINGS, lookSpeed: 1.6, invertLook: true, vibration: false, volume: 0.3, music: 0.5, intro: false });
     expect(loadSettings(memoryStorage('{"volume": 7}')).volume).toBe(1);
     expect(loadSettings(memoryStorage('{"volume": 0}')).volume).toBe(0);
     expect(loadSettings(memoryStorage('{"lookSpeed": 40}')).lookSpeed).toBe(2);

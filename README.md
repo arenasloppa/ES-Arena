@@ -23,6 +23,8 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 | ![The 3D map of the Imperial Dungeons, showing the parts explored so far](docs/screenshots/map.png)<br>The map fills in as you explore | ![The main menu, over a hall the remake draws itself](docs/screenshots/menu.png)<br>The main menu |
 | ![The wait menu, with Arena's time and date over the hours to rest and Arena's two ways to camp](docs/screenshots/wait.png)<br>Waiting, with the date and time in Arena | ![The character sheet after two levels gained, with bonus points to share out and some already on Endurance](docs/screenshots/level.png)<br>A level gained, with bonus points to share out |
 | ![The menu of menus, Skyrim's separated plus, with the items arm and its name lit as the player aims at it](docs/screenshots/tween.png)<br>The menu of menus, aiming at the items | |
+| ![The Guidebook lists weapon affixes with their damage ranges and equipment restrictions](docs/screenshots/guidebook-weapons.png)<br>Weapon affixes in the Guidebook | ![The Guidebook explains the Stormbound monster affix](docs/screenshots/guidebook-monsters.png)<br>Monster affixes and abilities |
+| ![A named elite goblin with its properties beneath the health bar in Weapon Testing](docs/screenshots/elite.png)<br>Named elite encounters | ![A named relic with a rotatable Steel Broadsword model and its equipment properties](docs/screenshots/loot.png)<br>Randomized loot and relics |
 
 The screenshots are taken from the game as it stands with `npm run screenshots` and retaken for every release.
 They show Arena's own art, which the remake reads from a copy of the game. The [gallery](docs/gallery.md) keeps the
@@ -30,6 +32,17 @@ screenshots of earlier versions.
 
 ## What works so far
 
+- A searchable Guidebook in the main and pause menus explains weapon and equipment affixes, spell enchantments,
+  elite monster properties, champion types and auras. It supports keyboard, mouse and controller browsing.
+- Randomized equipment with 211 prefixes and 145 suffixes, quality colours, named relics and equipment sets.
+  Level and item restrictions govern each roll, and equipped bonuses affect combat, resources, resistances and loot.
+  Item rolls, identification, equipment, spell charges and character progression are saved between sessions.
+- Named elite monsters and champion groups have stronger stats, special abilities and better loot. Weapon Testing
+  cycles through ordinary monsters, champions and elite affixes, one opponent at a time.
+- Floating damage numbers show actual damage over enemies, with distinct colours for critical hits and damage types.
+- Original / Remake graphics: Original uses the original dungeon textures and no added lighting effects; Remake is
+  the default, with new pixel-art textures and 3D dungeon surfaces, bump maps, specular lighting, glow, ambient
+  occlusion, volumetric light and dynamic shadows for creatures and objects.
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
 - Textured 3D Steel weapons and the Silver Dagger, with weapon-specific swings, power attacks, blocks and shoves,
   bow drawing, arrow surface impacts and recovery, and constrained flail motion. Other material variants keep their existing artwork.
@@ -57,8 +70,8 @@ screenshots of earlier versions.
   damage from hiding. While you sneak, an eye shows how close the creatures nearby are to noticing you.
 - Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
   Medusa's Gaze and all 64 spells in the Mages Guild's spell list. Spellcasting
-  classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Ready a
-  spell in the magic menu and cast it with the block button, as with a spell in Skyrim's left hand; bolts fly, area
+  classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Assign a
+  spell from the magic menu to the hotbar, then cast it with its assigned key or controller button; bolts fly, area
   spells burst, and paralysis, poison, shields and light last as many rounds as the game says.
 - Camp as in Arena, from a wait menu like Skyrim's: rest some hours or until healed, by Arena's healing sums and in its
   words, though not with monsters near, and monsters may come upon you while you sleep. The first rest after reaching
@@ -66,9 +79,9 @@ screenshots of earlier versions.
 - Level up as in Arena: its experience for each level, your class's hit die for health, and 3 to 6 bonus points a
   level to share out among your attributes on the character sheet. Endurance's health bonus counts for every level you
   have, so raising it late is worth as much as raising it early.
-- Loot by Arena's rules, read from its program: treasure piles, gear spots and bodies hold gold, Arena's potions,
-  magic rings, amulets and other trinkets, and plain, fine and enchanted gear, found unidentified until you use or wear
-  it. Open locked doors with their key, pick their locks or break them down.
+- Treasure piles, gear spots and bodies use Arena's base drop and material tables with randomized equipment
+  properties and quality rolls. Open the loot list to take individual drops or Take All; closing it leaves the
+  remaining loot available. Open locked doors with their key, pick their locks or break them down.
 - Skyrim's menus: a menu of menus for your character, items, magic and the map, where you aim at one and let go to
   open it; an item menu where you equip, drink, cast from and drop things; and a character sheet with Arena's paper doll
   wearing what you wear. Spells and usable items can be assigned to the seven-slot hotbar for keyboard or controller use.
@@ -81,13 +94,13 @@ screenshots of earlier versions.
 - Arena's cutscenes: the opening with the book, the title and the scroll; the story of the Emperor's betrayal before
   you make a character; and Ria Silmane's visions, spoken by the CD version's voices with the words beneath, when you
   wake in your cell and when you die.
-- The original wall, floor and ceiling textures, animated water and lava, raised platforms, doors that slide open,
+- Original or remade wall, floor and ceiling surfaces, animated water and lava, raised platforms, doors that slide open,
   barred doors you can see through, decorations such as chains and barrels, and the dungeon's own messages when you
   reach their squares.
 - Play with a controller or the keyboard and mouse, with Skyrim's controls, menu and HUD: a compass, button prompts
   that match your controller, jumping, sneaking and sprinting, and the dungeon's name as you arrive.
 
-Coming later: cities and the wilderness, the Mages Guild and the spellmaker, and saving.
+Coming later: cities and the wilderness, the Mages Guild and the spellmaker, and full world saves.
 
 ## Play it
 
@@ -136,7 +149,7 @@ Xbox button names are shown below, with PlayStation equivalents in brackets. On-
 | Look | Mouse (click the view to capture it) | Right stick |
 | Walk and turn | Up/down arrows walk; left/right arrows turn | |
 | Attack or shoot; hold to charge a power attack or draw the bow | Left mouse button | RT (R2) |
-| Block; attack while blocking to shove | Right mouse button; casts a readied spell instead when one is selected | LT (L2) |
+| Block; attack while blocking to shove | Right mouse button | LT (L2) |
 | Interact: use, take or open | <kbd>E</kbd> | A (✕) |
 | Jump | <kbd>Space</kbd> | Y (△) |
 | Sprint | Hold <kbd>Shift</kbd> | Click the left stick (L3) to toggle while moving |
@@ -156,7 +169,7 @@ Xbox button names are shown below, with PlayStation equivalents in brackets. On-
 
 In the menu of menus, use the arrow keys, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>, the left stick or D-pad to highlight a section, then release the direction to open it. <kbd>Enter</kbd> or A also opens the highlighted section. The mouse highlights a section by pointing at it.
 
-In the item and magic menus, <kbd>E</kbd>, <kbd>Enter</kbd> or A uses, equips or readies the selected entry. LB/RB change item categories. <kbd>C</kbd> or RT casts an enchanted item's spell, and <kbd>R</kbd> drops the selected item. Drag the item preview or use the right stick to rotate it; the mouse wheel or clicking the right stick changes its zoom. <kbd>Esc</kbd> or B goes back; <kbd>Tab</kbd> returns directly to the game.
+In the item menu, <kbd>F</kbd> or X identifies the selected unidentified item. <kbd>E</kbd>, <kbd>Enter</kbd> or A uses or equips the selected item. In the magic menu, these buttons open hotbar assignment for the selected spell. LB/RB change item categories. <kbd>C</kbd> or RT casts an enchanted item's spell, and <kbd>R</kbd> drops the selected item. Drag the item preview or use the right stick to rotate it; the mouse wheel or clicking the right stick changes its zoom. <kbd>Page Up</kbd>/<kbd>Page Down</kbd> or LT + right stick scroll long item descriptions. <kbd>Esc</kbd> or B goes back; <kbd>Tab</kbd> returns directly to the game.
 
 The hotbar accepts spells and usable items, not weapons. Select an entry in Items or Magic and press <kbd>H</kbd> or Y to open the assignment picker. Press <kbd>1</kbd>–<kbd>7</kbd> or the controller button for the desired slot to assign it. You can also highlight a slot and confirm with <kbd>Enter</kbd> or A. <kbd>Esc</kbd> or Y cancels assignment. Pressing a number directly while an assignable entry is selected also assigns that slot.
 
@@ -165,6 +178,8 @@ When looting, choose entries with up/down, the left stick or D-pad. <kbd>E</kbd>
 On the map, move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the left stick, drag with the mouse or use the right stick to turn it, and zoom with the mouse wheel or LT/RT. Keyboard map rotation uses <kbd>Q</kbd>/<kbd>E</kbd> and <kbd>R</kbd>/<kbd>F</kbd>; <kbd>-</kbd>/<kbd>+</kbd> zoom. <kbd>M</kbd>, <kbd>Esc</kbd>, <kbd>Tab</kbd> or B closes the map.
 
 In the main menu and character creation, use the arrow keys, D-pad or left stick to move, <kbd>Enter</kbd> or A to choose, and <kbd>Esc</kbd> or B to go back. Settings control look speed, inverted look, sound/music volume, opening playback, vibration and the ARENA folder.
+
+In the Guidebook, search by name or effect and select an entry to read its description. LB/RB switch sections, the D-pad or left stick browses entries, the right stick scrolls details, and B returns to the menu.
 
 In a cutscene, <kbd>Enter</kbd>, <kbd>Space</kbd>, a click or A advances; <kbd>Esc</kbd>, B or Start skips the rest.
 

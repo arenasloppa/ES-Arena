@@ -7,7 +7,9 @@ How ES Arena has looked from one release to the next, newest first. The screensh
 
 | | |
 |---|---|
-| ![The main menu](screenshots/menu.png)<br>The main menu | ![Choosing gender, race and face, with the map of Tamriel](screenshots/race.png)<br>Choosing gender, race and face, with the map of Tamriel |
+| ![The main menu](screenshots/menu.png)<br>The main menu | ![Weapon affixes in the Guidebook](screenshots/guidebook-weapons.png)<br>Weapon affixes in the Guidebook |
+| ![Monster affixes in the Guidebook](screenshots/guidebook-monsters.png)<br>Monster affixes in the Guidebook | ![Randomized loot and equipment properties](screenshots/loot.png)<br>Randomized loot and equipment properties |
+| ![A named elite in Weapon Testing](screenshots/elite.png)<br>A named elite in Weapon Testing | ![Choosing gender, race and face, with the map of Tamriel](screenshots/race.png)<br>Choosing gender, race and face, with the map of Tamriel |
 | ![Sharing out bonus points, beside the paper doll](screenshots/attributes.png)<br>Sharing out bonus points, beside the paper doll | ![Arriving in the cell where Arena begins](screenshots/cell.png)<br>Arriving in the cell where Arena begins |
 | ![A goblin raises its axe](screenshots/goblin.png)<br>A goblin raises its axe | ![Sneaking up on a rat](screenshots/sneak.png)<br>Sneaking up on a rat |
 | ![The menu of menus, aiming at the items](screenshots/tween.png)<br>The menu of menus, aiming at the items | ![The item menu](screenshots/items.png)<br>The item menu |

@@ -36,6 +36,7 @@ export class FilmView {
   /** Draws the film; `face` turns the sprites and creatures towards the camera it is given. */
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, face: (camera: THREE.Camera) => void): void {
     const frame = this.shown ?? this.film.frame();
+    const destination = renderer.getRenderTarget();
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const aspect = size.x / Math.max(1, size.y);
     const fading = frame.fading && frame.fading.weight > 0.002 ? frame.fading : undefined;
@@ -51,7 +52,7 @@ export class FilmView {
       face(this.before);
       renderer.setRenderTarget(this.target);
       renderer.render(scene, this.before);
-      renderer.setRenderTarget(null);
+      renderer.setRenderTarget(destination);
     }
     place(this.camera, frame.current.shot.pose(frame.current.t), aspect);
     face(this.camera);

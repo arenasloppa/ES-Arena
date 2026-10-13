@@ -13,6 +13,7 @@
  * then none once it is loosed until the next is nocked.
  * Blood from Arena's BLOODEXP.CFA splashes on the view when a blow lands.
  */
+import { normalMapFor } from './normalMaps';
 import { WEAPON_MOTION_FOV } from './weaponMotion';
 import type { Swing, SwingKind } from '../game/dungeon';
 import type { ScreenImage } from './textures';
@@ -222,8 +223,16 @@ export class WeaponView {
     this.rig?.terrainImpact(material, bash);
   }
   /** Viewmodels have their own close camera and render after the dungeon's depth pass. */
-  render(renderer: THREE.WebGLRenderer): void {
+  render(renderer: THREE.WebGLRenderer, bumpMaps = true): void {
     if (!this.rig) return;
+    this.scene.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) if (material instanceof THREE.MeshStandardMaterial && material.map) {
+        const desired = bumpMaps ? normalMapFor(material.map) : undefined;
+        if (material.normalMap !== (desired ?? null)) { material.normalMap = desired ?? null; material.normalScale.setScalar(0.4); material.needsUpdate = true; }
+      }
+    });
     const size = renderer.getSize(new THREE.Vector2());
     this.camera.aspect = size.x / size.y;
     this.rig.viewportAspect=this.camera.aspect;

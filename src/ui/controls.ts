@@ -29,6 +29,7 @@ type PadInput =
   | 'DLeftRight';
 
 export type Action =
+  | 'identify'
   | 'move'
   | 'look'
   | 'attack'
@@ -59,6 +60,9 @@ export type Action =
   | 'setHotkey'
   | 'turnItem'
   | 'zoomItem'
+  | 'scrollItem'
+  | 'guideTabs'
+  | 'guideScroll'
   | 'close'
   | 'assignHotbar' | 'cancelHotbar' | 'lootTakeAll'
   | 'ability1' | 'ability2' | 'ability3' | 'ability4' | 'ability5' | 'ability6' | 'quickslot'
@@ -71,6 +75,7 @@ interface Binding {
 }
 
 export const BINDINGS: Record<Action, Binding> = {
+  identify:{label:'Identify',keys:['F'],pad:['X']},
   lootTakeAll:{label:'Take all loot',keys:['R'],pad:['Y']},
   assignHotbar:{label:'Assign hotbar',keys:['H'],pad:['Y']},
   cancelHotbar:{label:'Cancel assignment',keys:['Esc'],pad:['Y']},
@@ -89,7 +94,7 @@ export const BINDINGS: Record<Action, Binding> = {
   move: { label: 'Move', keys: ['W', 'A', 'S', 'D'], pad: ['LStick'] },
   look: { label: 'Look', keys: ['Mouse'], pad: ['RStick'] },
   attack: { label: 'Attack, hold to power attack', keys: ['Click'], pad: ['RT'] },
-  block: { label: 'Block and bash (right mouse casts a readied spell)', keys: ['RClick'], pad: ['LT'] },
+  block: { label: 'Block and shove', keys: ['RClick'], pad: ['LT'] },
   activate: { label: 'Use, take, open', keys: ['E'], pad: ['A'] },
   jump: { label: 'Jump', keys: ['Space'], pad: ['Y'] },
   sprint: { label: 'Sprint', keys: ['Shift'], pad: ['LStickPress'] },
@@ -116,11 +121,14 @@ export const BINDINGS: Record<Action, Binding> = {
   cast: { label: 'Cast', keys: ['C'], pad: ['RT'] },
   setHotkey: { label: 'Assign D-pad Up favourite', keys: ['1'], pad: ['DLeft'] },
   turnItem: { label: 'Turn', keys: ['Drag'], pad: ['RStick'] },
+  guideTabs:{keys:['←','→'],pad:['LB','RB'],label:'Sections'},
+  guideScroll:{keys:['Wheel'],pad:['RStick'],label:'Scroll details'},
+  scrollItem:{keys:['PageUp','PageDown'],pad:['LT','RStick'],label:'Scroll details'},
   zoomItem: { label: 'Zoom', keys: ['Wheel'], pad: ['RStickPress'] },
   close: { label: 'Close', keys: ['Tab'], pad: ['B'] },
 };
 
-/** The in-game actions, in the order the controls screen and the first-time tips list them. */
+/** The in-game actions, in the order shown on the controls screen. */
 export const GAME_ACTIONS: Action[] = [
   'move',
   'look',

@@ -1,24 +1,16 @@
 import {HOTBAR_ORDER} from '../input/hotbar';
 /**
- * The menus over the game, after Skyrim's. Tab (B on a controller) opens the
- * menu of menus, Skyrim's separated plus: the character sheet above, magic to
- * the left, the items to the right and the map below. Pushing a way lights
- * that arm and its name, and letting go opens its menu. The item menu lists what the character
- * carries by kind, with the picked piece and its numbers, and anything in
- * it can be equipped, made a favourite or dropped. The piece is Arena's
- * picture of it given depth, to turn and look at closer as in Skyrim. The magic
- * menu lists the spells the character knows, with what each does at their
- * level and costs, and readies one to cast. The
- * favourites (Q, or up or down on the D-pad) list down the left of the game,
- * where each can be put on a number key (on a controller, the D-pad's left
- * or right) to use without opening a menu. The game waits while any of them
- * is open.
+ * In-game character, inventory and magic menus. Spells and usable items
+ * can be assigned to the hotbar; equipment is equipped from the item list.
+ * The game waits while a menu or hotbar assignment dialog is open.
  */
 import { experienceFor, knackDamage } from '../game/combat';
 import { FALLBACK_ATTRIBUTES, type Character, type CreationData } from '../game/character';
 import type { Dungeon, MenuEntry } from '../game/dungeon';
 import type { GameMenu } from '../game/engine';
-import { ARMOUR_TYPES, armourRating, itemFrame, wearable, type Item } from '../game/items';
+import { ARMOUR_TYPES, armourRating, itemFrame, wearable, weaponOf, type Item } from '../game/items';
+import {itemColour,itemStats,describeStats,QUALITY_NAMES} from '../game/affixes';
+import {itemProperties} from '../game/lootRoll';
 import { describe as describeSpell, elementName, targetWords } from '../game/magic';
 import { spellColour } from '../render/spellView';
 import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
@@ -108,6 +100,7 @@ export class GameMenus {
   private readonly picture: HTMLCanvasElement;
   private readonly itemView: ItemView;
   private readonly cardName: HTMLElement;
+  private readonly cardBase:HTMLElement;
   private readonly cardStats: HTMLElement;
   private readonly cardNote: HTMLElement;
   private readonly doll: HTMLCanvasElement;
@@ -159,9 +152,10 @@ export class GameMenus {
     this.picture = el('canvas', 'gm-picture');
     this.itemView = new ItemView(this.picture);
     this.cardName = el('h3', 'gm-card-name');
+    this.cardBase=el('p','gm-card-base');
     this.cardStats = el('dl', 'gm-card-stats');
     this.cardNote = el('p', 'gm-card-note');
-    this.card.append(this.cardName, el('div', 'rule'), this.cardStats, this.cardNote);
+    this.card.append(this.cardName,this.cardBase, el('div', 'rule'), this.cardStats, this.cardNote);
     const right = el('div', 'gm-right');
     right.append(this.picture, this.card);
     items.append(this.categoryList, this.itemList, right);
@@ -274,13 +268,15 @@ export class GameMenus {
 
     if (pad.take('RT') && which === 'items') this.cast();
     if (which === 'items') {
+      if(pad.take('X'))this.identify();
       if (pad.take('LB')) this.moveCategory(-1);
       if (pad.take('RB')) this.moveCategory(1);
       if (pad.take('RS')) this.itemView.toggleZoom();
       // The right stick turns the picked item.
       const dt = this.lastFrame ? Math.min(0.1, (now - this.lastFrame) / 1000) : 0;
       const { x, y } = pad.look;
-      if (!this.picture.hidden && (x || y)) this.itemView.turn(x * STICK_TURN * dt, y * STICK_TURN * dt);
+      if(pad.triggers.left>.5)this.cardNote.scrollTop+=y*360*dt;
+      else if (!this.picture.hidden && (x || y)) this.itemView.turn(x * STICK_TURN * dt, y * STICK_TURN * dt);
     }
     this.lastFrame = now;
     if (this.which === 'tween') {
@@ -352,8 +348,14 @@ export class GameMenus {
     } else if (this.which === 'items') {
       if (this.column === 'categories') this.go('right');
       else this.use(this.selected());
-    } else if (this.which === 'magic') this.use(this.selectedSpell());
+    } else if (this.which === 'magic') this.beginAssignment();
     else if (this.which === 'favourites') this.use(this.favourites()[this.favouriteRow]);
+  }
+  private identify():void {
+    const entry=this.selected(),d=this.host.run()?.dungeon;
+    if(!entry||!d)return;
+    const message=d.identify(entry.key);if(message)this.showMessage(message);
+    this.row=Math.max(0,this.shown().findIndex(item=>item.key===entry.key));this.render();
   }
 
   /** B or Esc: from the item list to its kinds, otherwise back to the game. */
@@ -589,6 +591,7 @@ export class GameMenus {
       if (verb) hints.push({ action: 'use', label: verb, run: () => this.use(picked) });
       if (picked.item && wearable(picked.item) && run.dungeon.castsSpell(picked.key)) hints.push({ action: 'cast', label: 'Cast', run: () => this.cast() });
       if (picked.item) {
+        if(picked.item.unidentified)hints.push({action:'identify',label:'Identify',run:()=>this.identify()});
         if(run.dungeon.hotbarAssignable(picked.key))hints.push({action:'assignHotbar',label:'Assign hotbar',run:()=>this.beginAssignment()});
         if (picked.item.kind !== 'potion') hints.push({ action: 'drop', label: 'Drop', run: () => this.drop() });
       }
@@ -597,6 +600,7 @@ export class GameMenus {
         hints.push({ action: 'turnItem', label: 'Turn', run: () => this.itemView.spin() }, { action: 'zoomItem', label: 'Zoom', run: () => this.itemView.toggleZoom() });
       }
     } else if (this.column === 'categories' && shown.length) hints.push({ action: 'use', label: 'Select', run: () => this.choose() });
+    if(picked&&this.cardNote.scrollHeight>this.cardNote.clientHeight+1)hints.push({action:'scrollItem',label:'Details',run:()=>{this.cardNote.scrollTop+=120;}});
     hints.push({ action: 'back', label: this.column === 'list' ? 'Back' : 'Close', run: () => this.back() });
     this.setHints(hints);
   }
@@ -610,6 +614,7 @@ export class GameMenus {
     const mark = el('span', 'gm-mark');
     mark.setAttribute('aria-hidden', 'true');
     const name = el('span', 'gm-name', entry.name);
+    if(entry.item)name.style.color=itemColour(entry.item);
     li.append(mark, name);
     if (entry.count > 1) li.append(el('span', 'gm-count', `(${entry.count})`));
     if (entry.hotkey !== undefined) li.append(this.hotkeyBadge(entry.hotkey));
@@ -635,15 +640,21 @@ export class GameMenus {
       this.pictureKey = '';
     }
     if (!entry) return;
+    if(entry.key!==this.cardNote.dataset.itemKey){this.cardNote.scrollTop=0;this.cardNote.dataset.itemKey=entry.key;}
     this.cardName.textContent = entry.name;
+    this.cardName.style.color=entry.item?itemColour(entry.item):'';
     const rows: Array<[string, string]> = [];
     const item = entry.item;
+    this.cardBase.textContent=item&&!item.unidentified&&item.plainName!==item.name?item.plainName??'':'';
+    this.cardBase.hidden=!this.cardBase.textContent;
     let note = '';
     let effects: string[] = [];
     if (item) {
       const known = !item.unidentified;
-      if (item.kind === 'weapon' && item.damage) rows.push(['Damage', `${item.damage[0]}–${item.damage[1]}`]);
-      else if (item.kind === 'armour' || item.kind === 'shield' || item.trinket === 'protective') rows.push(['Armour', String(armourRating(item))]);
+      if (item.kind === 'weapon' && item.damage) {const damage=known?weaponOf(item).damage:item.damage;rows.push(['Damage', `${damage[0]}–${damage[1]}`]);}
+      else if (item.kind === 'armour' || item.kind === 'shield' || item.trinket === 'protective') rows.push(['Armour', String(armourRating(known?item:{protection:item.protection}))]);
+      if(item.quality)rows.push(['Quality',QUALITY_NAMES[item.quality]]);
+      if(known&&item.requiredLevel)rows.push(['Level',String(item.requiredLevel)]);
       if (item.heals) rows.push(['Heals', String(item.heals)]);
       if (known && item.attribute !== undefined && item.boost) rows.push([FALLBACK_ATTRIBUTES[item.attribute] ?? 'Attribute', `+${item.boost}`]);
       if (known && item.charges !== undefined) rows.push(['Charges', String(item.charges)]);
@@ -657,6 +668,7 @@ export class GameMenus {
         else if (item.kind === 'potion') effects = ['Restores spell points'];
       }
       if (known && item.jumping) effects.push('Jump as far as an Acrobat');
+      if(known)effects.push(...describeStats(itemStats(item)),...itemProperties(item,run.dungeon.inventory.wornItems()));
       const forbidden = run.dungeon.inventory.forbidden(item);
       const kind = kindWords(item);
       note = item.unidentified ? `${kind}, not yet identified` : (forbidden ?? (entry.equipped ? `${kind}, equipped` : kind));
@@ -673,13 +685,13 @@ export class GameMenus {
       this.card.classList.remove('forbidden');
     }
     this.cardStats.replaceChildren(
-      ...rows.flatMap(([k, v]) => {
+      ...rows.map(([k, v]) => {
         const dt = el('dt', '', k);
         const dd = el('dd', '', v);
-        return [dt, dd];
+        const stat=el('div','gm-card-stat');stat.append(dt,dd);return stat;
       }),
     );
-    this.cardNote.textContent = [note, ...effects].join('. ');
+    this.cardNote.textContent = [note, ...effects].join('\n');
   }
 
   private async showWeaponModel(item: Item, key: string): Promise<void> {
@@ -726,7 +738,7 @@ export class GameMenus {
           this.spellRow = i;
           this.render();
         });
-        li.addEventListener('click', () => { this.spellRow = i; this.use(entry); });
+        li.addEventListener('click', () => { this.spellRow = i; this.beginAssignment(); });
         return li;
       }),
     );
@@ -748,9 +760,6 @@ export class GameMenus {
     }
     this.renderMagicBar(run);
     const hints: Hint[] = [];
-    if (picked) {
-      hints.push({ action: 'use', label: picked.equipped ? 'Put away' : 'Ready', run: () => this.use(picked) });
-    }
     if(picked?.spell)hints.push({action:'assignHotbar',label:'Assign hotbar',run:()=>this.beginAssignment()});
     hints.push({ action: 'back', label: 'Close', run: () => this.back() });
     this.setHints(hints);
@@ -944,6 +953,8 @@ export class GameMenus {
       return;
     }
     if(code==='KeyH'){handled();this.beginAssignment();return;}
+    if(which==='items'&&(code==='PageUp'||code==='PageDown')){handled();this.cardNote.scrollTop+=code==='PageUp'?-120:120;return;}
+    if(code==='KeyF'&&which==='items'){handled();if(!e.repeat)this.identify();return;}
     if (code === 'KeyR' && which === 'items') {
       handled();
       this.drop();

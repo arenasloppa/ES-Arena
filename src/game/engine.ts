@@ -1,3 +1,8 @@
+import {creatureName,eliteDescription} from './elites';
+import { SceneEffects } from '../render/sceneEffects';
+import { SceneLighting } from '../render/sceneLighting';
+import {CombatText,type CombatLabel} from './combatText';
+import {LootDropView} from '../render/lootDropView';
 import {experienceFor} from './combat';
 import {HOTBAR_ORDER} from '../input/hotbar';
 import {statusEffectsKey, type ActiveStatusEffect} from './statusEffects';
@@ -22,7 +27,7 @@ import type { Minimap } from '../ui/minimap';
 import { isAlive, type Creature } from './creatures';
 import type { Dungeon, Vision } from './dungeon';
 import { lineOfSight, cellIndex } from './grid';
-import { ARENA_HEIGHT, ceilingHeight } from './level';
+import { ARENA_HEIGHT, ceilingHeight, floorHeight } from './level';
 import {STANDING_EYE as EYE,SNEAKING_EYE as SNEAK_EYE,SWIMMING_EYE as SWIM_EYE,DEAD_EYE} from './playerView';
 import {WalkingCameraMotion} from './walkingCamera';
 import {airborne} from './player';
@@ -46,8 +51,8 @@ const ESCAPE_SCREEN = 1.1;
 /** Creatures hunting the player show on the compass this far away. */
 const COMPASS_RANGE = 16;
 /** The fog: where it begins and where it hides everything, in voxels, before a Light spell lengthens both. */
-const FOG_NEAR = 1.5;
-const FOG_FAR = 9;
+const FOG_NEAR = 1.25;
+const FOG_FAR = 6.5;
 /** The menu's film leaves out creatures this close to its camera, which can pass where one stands. */
 const FILM_NEAREST = 0.45;
 
@@ -100,7 +105,8 @@ export interface EngineHud {
   experience?(current:number,required:number):void;
   notify(text: string): void;
   hurt(): void;
-  enemy(name: string, health: number, maxHealth: number, id?: number): void;
+  enemy(name: string, health: number, maxHealth: number, id?: number,description?:string,quality?:string): void;
+  damageNumbers?(labels: CombatLabel[]): void;
   /** A title across the top: a place, a quest started, a level gained. */
   banner(title: string, kicker?: string, sub?: string): void;
   /** A quest objective given, or done. */
@@ -133,6 +139,14 @@ export interface ControlSettings {
   music: number;
   /** Plays Arena's opening cutscenes when the game folder is opened. */
   intro: boolean;
+  graphicsMode?: 'original' | 'remake';
+  bumpMaps?: boolean;
+  lighting?: boolean;
+  shadows?: boolean;
+  glow?: boolean;
+  specular?: boolean;
+  ambientOcclusion?: boolean;
+  volumetric?: number;
 }
 
 export interface EngineOptions {
@@ -170,6 +184,10 @@ export class Engine {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.02, 100);
   private readonly keys = new Set<string>();
+  private readonly graphics: SceneEffects;
+  private readonly lighting: SceneLighting;
+  private readonly combatText = new CombatText();
+  private readonly lootDrops=new LootDropView();
   private running = false;
   private frameRequest = 0;
   private last = 0;
@@ -246,11 +264,14 @@ export class Engine {
     const canvas = this.canvas;
     this.scene.background = new THREE.Color(0x000000);
     // Arena's dungeons fade to black a few voxels away.
-    this.scene.fog = new THREE.Fog(0x000000, FOG_NEAR, FOG_FAR);
+    this.scene.fog = new THREE.Fog(0x000000, this.controls.graphicsMode === 'original' ? 2 : FOG_NEAR, this.controls.graphicsMode === 'original' ? 9 : FOG_FAR);
     this.scene.add(levelScene.group,this.impacts.group);
+    this.scene.add(this.lootDrops.group);
     if (options.creatures) this.scene.add(options.creatures.group);
     if (options.spells) this.scene.add(options.spells.group);
     if (options.arrows) this.scene.add(options.arrows.group);
+    this.graphics = new SceneEffects(renderer);
+    this.lighting = new SceneLighting(renderer, this.scene, dungeon, levelScene);
     this.resize();
 
     window.addEventListener('resize', this.resize);
@@ -289,6 +310,8 @@ export class Engine {
 
   dispose(): void {
     this.pause();
+    this.combatText.clear();this.options.hud?.damageNumbers?.([]);
+    this.lootDrops.dispose();
     this.options.hud?.target(undefined);
     window.removeEventListener('resize', this.resize);
     window.removeEventListener('keydown', this.onKeyDown);
@@ -309,14 +332,18 @@ export class Engine {
     this.options.weapon?.dispose();
     this.options.film?.dispose();
     this.impacts.dispose();
+    this.graphics.dispose();this.lighting.dispose();
     const textures = new Set<THREE.Texture>();
     this.scene.traverse((o) => {
       if (o instanceof THREE.Mesh) {
         o.geometry.dispose();
+        if (o instanceof THREE.InstancedMesh) o.dispose();
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) {
           const map = (m as THREE.MeshBasicMaterial).map;
           if (map) textures.add(map);
+          const normalMap = (m as THREE.MeshStandardMaterial).normalMap;
+          if (normalMap) textures.add(normalMap);
           m.dispose();
         }
       }
@@ -429,7 +456,7 @@ export class Engine {
     d.viewEyeOffset=Math.min(this.eye+this.stepLag+this.walkingCamera.value.lift,
       ceilingHeight(d.level.cells[cellIndex(d.level,d.player.x,d.player.y)],d.level)-.03-(d.player.z??0));
     d.viewSideOffset=this.walkingCamera.value.side;
-    d.update(dt, { forward, strafe, sprint, sneaking: this.sneaking, block, guardOnly:holds.block&&!this.blockHeld, attack });
+    d.update(dt, { forward, strafe, sprint, sneaking: this.sneaking, block, guardOnly:true, attack });
     this.options.testArea?.update(dt);
     this.playEvents();
     this.impacts.update(dt);
@@ -533,6 +560,11 @@ export class Engine {
           this.rumble(70, 0.25, 0.15);
           break;
         case 'hit':
+          {
+            const c=e.creature,cell=d.level.cells[cellIndex(d.level,c.x,c.y)];
+            const height=Math.max(0,floorHeight(cell,d.level))+(c.collisionHeight??.6)+c.info.lift*ARENA_HEIGHT;
+            this.combatText.add(e.appliedDamage??e.damage,[c.x,height,c.y],d.time,e.damageKind,e.critical,e.periodic);
+          }
           this.enemy = e.creature;
           this.enemyHitUntil = d.time + .35;
           this.updateEnemyBar(true);
@@ -629,8 +661,14 @@ export class Engine {
       this.options.map.render(this.renderer, dt);
       return;
     }
+    this.graphics.begin(this.controls);
     if (this.options.film) {
-      this.options.film.render(this.renderer, this.scene, (camera) => this.face(camera, FILM_NEAREST));
+      let active: THREE.Camera | undefined;
+      this.options.film.render(this.renderer, this.scene, camera => {
+        active = camera; this.face(camera, FILM_NEAREST); this.lighting.update(camera, this.controls, dt);
+      });
+      if (active instanceof THREE.PerspectiveCamera) this.graphics.applyWorld(active, this.controls);
+      this.graphics.present(this.controls, dt, false);
       return;
     }
     const d = this.dungeon;
@@ -651,14 +689,21 @@ export class Engine {
     this.camera.lookAt(viewX + Math.cos(p.yaw) * cp, eye + Math.sin(p.pitch), viewZ + Math.sin(p.yaw) * cp);
     this.camera.rotateZ(bob.roll);
     this.camera.updateMatrixWorld(true);
+    this.options.hud?.damageNumbers?.(this.combatText.frame(d.time,point=>{
+      const projected=new THREE.Vector3(...point).project(this.camera);
+      return {x:(projected.x+1)*.5*this.canvas.clientWidth,y:(1-projected.y)*.5*this.canvas.clientHeight,
+        visible:projected.z>=-1&&projected.z<=1&&Math.abs(projected.x)<1.05&&Math.abs(projected.y)<1.1&&lineOfSight(d.level,p.x,p.y,point[0],point[2],d.openDoors)};
+    }));
     this.face(this.camera);
     this.options.spells?.update(d.bolts, eye * 0.85, dt);
     this.options.arrows?.update(d.arrows, eye * 0.85, dt);
+    this.lootDrops.update(d.lootDrops(),d.time);
     // A Light spell lets the player see further into the dark.
     const fog = this.scene.fog as THREE.Fog;
     const reach = d.lightReach;
-    fog.near += (FOG_NEAR * reach - fog.near) * Math.min(1, dt * 2);
-    fog.far += (FOG_FAR * reach - fog.far) * Math.min(1, dt * 2);
+    const original = this.controls.graphicsMode === 'original';
+    fog.near += ((original ? 2 : FOG_NEAR) * reach - fog.near) * Math.min(1, dt * 2);
+    fog.far += ((original ? 9 : FOG_FAR) * reach - fog.far) * Math.min(1, dt * 2);
     const lowered = this.diedAt === undefined ? 0 : Math.min(1, (d.time - this.diedAt) / 0.8);
     this.options.weapon?.setEnvironment({
       toWorld: (point) => point.clone().multiplyScalar(METRES_TO_WORLD).applyMatrix4(this.camera.matrixWorld).toArray(),
@@ -673,8 +718,18 @@ export class Engine {
     });
     this.options.minimap?.draw();
     this.options.hud?.heading(p.yaw, this.compassMarkers());
+    this.lighting.update(this.camera, this.controls, dt);
     this.renderer.render(this.scene, this.camera);
-    this.options.weapon?.render(this.renderer);
+    this.graphics.applyWorld(this.camera, this.controls);
+    this.options.weapon?.render(this.renderer, this.controls.bumpMaps !== false);
+    this.graphics.present(this.controls, dt, !this.autopilot);
+  }
+
+  async refreshGraphics(): Promise<void> {
+    await this.levelScene.setGraphicsMode?.(this.controls.graphicsMode ?? 'remake');
+    const fog=this.scene.fog as THREE.Fog, original=this.controls.graphicsMode==='original';
+    fog.near=(original?2:FOG_NEAR)*this.dungeon.lightReach;fog.far=(original?9:FOG_FAR)*this.dungeon.lightReach;
+    this.render();
   }
 
   /** Turns the flat sprites and the creatures towards `camera`, leaving out creatures nearer it than `nearest`. */
@@ -732,7 +787,7 @@ export class Engine {
     const key = `${c.id}:${c.health}:${c.maxHealth}`;
     if (!aimed && key === this.enemyKey) return;
     this.enemyKey = key;
-    this.options.hud?.enemy(c.info.name,c.health,c.maxHealth,c.id);
+    this.options.hud?.enemy(creatureName(c),c.health,c.maxHealth,c.id,eliteDescription(c),c.elite?.tier);
   }
 
   /** Tells the HUD what the player can use, when it changes. */

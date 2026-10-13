@@ -7,19 +7,27 @@ import type { StepEvent } from './menu';
 
 const KEY = 'es-arena.controls';
 
-type NumberSetting = 'lookSpeed' | 'volume' | 'music';
+type NumberSetting = 'lookSpeed' | 'volume' | 'music' | 'volumetric';
 
 /**
  * Number settings go in steps: look speed in fifths from 0.2 to 2 times the
  * normal speed, sound and music volume in tenths from off to full.
  */
 const STEPS: Record<NumberSetting, { min: number; max: number; per: number }> = {
+  volumetric: { min: 0, max: 2, per: 1 },
   lookSpeed: { min: 1, max: 10, per: 5 },
   volume: { min: 0, max: 10, per: 10 },
   music: { min: 0, max: 10, per: 10 },
 };
 
-export const DEFAULT_SETTINGS: ControlSettings = { lookSpeed: 1, invertLook: false, vibration: true, volume: 0.8, music: 0.6, intro: true };
+export function applyGraphicsPreset(settings: ControlSettings, mode: 'original' | 'remake'): void {
+  settings.graphicsMode = mode;
+  const on = mode === 'remake';
+  settings.bumpMaps = settings.lighting = settings.shadows = settings.glow = settings.specular = settings.ambientOcclusion = on;
+  settings.volumetric = on ? 2 : 0;
+}
+
+export const DEFAULT_SETTINGS: ControlSettings = { lookSpeed: 1, invertLook: false, vibration: true, volume: 0.8, music: 0.6, intro: true, graphicsMode: 'remake', bumpMaps: true, lighting: true, shadows: true, glow: true, specular: true, ambientOcclusion: true, volumetric: 2 };
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -40,9 +48,9 @@ export function loadSettings(storage = browserStorage()): ControlSettings {
   }
   const number = (key: NumberSetting) => {
     const value = Number(saved[key] ?? Number.NaN);
-    return Number.isFinite(value) ? fromStep(key, Math.round(value * STEPS[key].per)) : DEFAULT_SETTINGS[key];
+    return Number.isFinite(value) ? fromStep(key, Math.round(value * STEPS[key].per)) : (DEFAULT_SETTINGS[key] ?? 2);
   };
-  return {
+  const settings: ControlSettings = {
     lookSpeed: number('lookSpeed'),
     invertLook: saved.invertLook === true,
     vibration: saved.vibration !== false,
@@ -50,6 +58,8 @@ export function loadSettings(storage = browserStorage()): ControlSettings {
     music: number('music'),
     intro: saved.intro !== false,
   };
+  applyGraphicsPreset(settings, saved.graphicsMode === 'original' ? 'original' : 'remake');
+  return settings;
 }
 
 export function saveSettings(settings: ControlSettings, storage = browserStorage()): void {
@@ -73,6 +83,9 @@ export function stepSetting<K extends keyof ControlSettings>(
   wrap: boolean,
 ): ControlSettings[K] {
   const value = settings[key];
+  if (key === 'graphicsMode') {
+    return (value === 'original' ? 'remake' : 'original') as ControlSettings[K];
+  }
   if (typeof value === 'boolean') return !value as ControlSettings[K];
   const { min, max, per } = STEPS[key as NumberSetting];
   let step = Math.round((value as number) * per) + delta;
@@ -90,8 +103,10 @@ export function bindSettingRows(root: ParentNode, settings: ControlSettings, onC
     const valueEl = el.querySelector<HTMLElement>('.value')!;
     const show = () => {
       const value = settings[key];
-      if (typeof value === 'boolean') valueEl.textContent = value ? 'On' : 'Off';
-      else {
+      if (key === 'graphicsMode') valueEl.textContent = value === 'original' ? 'Original' : 'Remake';
+      else if (typeof value === 'boolean') valueEl.textContent = value ? 'On' : 'Off';
+      else if (key === 'volumetric') valueEl.textContent = ['Off', 'Low', 'High'][Number(value)];
+      else if (typeof value === 'number') {
         const { max, per } = STEPS[key as NumberSetting];
         const step = Math.round(value * per);
         valueEl.textContent = String(step);
@@ -101,6 +116,7 @@ export function bindSettingRows(root: ParentNode, settings: ControlSettings, onC
     };
     const apply = (delta: number, wrap: boolean) => {
       (settings as unknown as Record<string, unknown>)[key] = stepSetting(settings, key, delta, wrap);
+      if (key === 'graphicsMode') applyGraphicsPreset(settings, settings.graphicsMode ?? 'remake');
       saveSettings(settings);
       show();
       onChange?.(key);

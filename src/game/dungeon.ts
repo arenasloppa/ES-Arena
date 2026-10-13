@@ -1,3 +1,4 @@
+import {makeElite,creatureName} from './elites';
 import {creatureMagic,creatureAttribute} from './creatureMagic';
 import {TEST_BUFFS,TEST_DEBUFFS,testEffectDescription} from './testEffects';
 import {monsterWeaponDamage} from './monsterCombat';
@@ -123,6 +124,7 @@ import {
   amount,
 } from './magic';
 import { armourTables, ATTRIBUTES, Inventory, itemKey, POTION_WEIGHT, potionKey, randomGear, shownName, startingGear, weaponOf, wearable,
+  makeWeapon,makeArmour,makeShield,
   makeSteelArrows,
   STEEL,
   type Item, type NewItem } from './items';
@@ -138,8 +140,11 @@ import { sweepTerrain, sweepWoodProps, sweepCreatures, cellMaterial, type Materi
 import { creatureLoot, GEAR_CAST_LEVEL, POTION_CAST_LEVEL, spotLoot, type Loot, type LootRules } from './loot';
 import { RESTORE_POWER } from '../formats/loot';
 import type { ArmourTables } from '../formats/armour';
+import {spellDamageKind,type DamageKind} from './combatText';
+import {treasure,rollEquipment,EQUIPMENT_SETS,type LootContext} from './lootRoll';
+import {itemColour,QUALITY_COLOURS,type LootStats,type RolledAffix} from './affixes';
 import { Quest, type Objective } from './quest';
-import { cellIndex, lineOfSight } from './grid';
+import { blockedFor,cellIndex, lineOfSight } from './grid';
 import { isBlocking, ceilingHeight, floorHeight, ARENA_HEIGHT, type DoorSounds, type Level, type LevelItem } from './level';
 import { airborne, groundUnder, inChasm, jump, keepInChasm, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
 import {monsterSeesInvisible} from './monsterSenses';
@@ -228,7 +233,7 @@ export interface Target {
   note?: string;
 }
 
-export interface LootEntry { key: string; name: string; count: number; }
+export interface LootEntry { key: string; name: string; count: number; colour?:string; }
 export interface LootView { name: string; entries: LootEntry[]; }
 
 export type DungeonEvent =
@@ -248,7 +253,7 @@ export type DungeonEvent =
   /** A blow taken on the player's guard; `damage` is what got through. */
   | { type: 'blocked'; damage: number }
   /** A blow, arrow or spell landing on a creature; `far` when it struck from a distance, so no blood splashes on the view. */
-  | { type: 'hit'; creature: Creature; damage: number; killed: boolean; far?: boolean }
+  | { type: 'hit'; creature: Creature; damage: number; killed: boolean; far?: boolean; appliedDamage?:number; critical?:boolean; damageKind?:DamageKind; periodic?:boolean }
   | { type: 'bashed'; creature: Creature }
   /** A level gained: how much more health there can be, and the bonus points to share out among the attributes. */
   | { type: 'levelUp'; level: number; health: number; points: number }
@@ -434,6 +439,10 @@ export interface Bolt {
 
 /** An arrow in flight. */
 export interface Arrow {
+  bonuses?:LootStats;
+  procAffixes?:RolledAffix[];
+  attacker?:Hero;
+  attackerLevel?:number;
   id: number;
   x: number;
   y: number;
@@ -451,6 +460,7 @@ export interface Arrow {
 
 /** Harm a spell keeps doing to a creature: poison or continuous damage, a blow every so many seconds. */
 interface Affliction {
+  source?:Creature;
   creature: Creature;
   spell: SpellRecord;
   level: number;
@@ -462,6 +472,82 @@ interface Affliction {
 }
 
 export class Dungeon {
+  private randomizedLoot=false;
+  private eliteEncounters=false;
+  private readonly eliteNames=new Set<string>();
+  private nameElite(c:Creature):void {
+    if(!c.elite?.name)return;
+    if(this.eliteNames.has(c.elite.name))c.elite.name+=` ${c.id+1}`;
+    this.eliteNames.add(c.elite.name);
+  }
+  applyPracticeElite(c:Creature,tier:'champion'|'unique',options?:Parameters<typeof makeElite>[3]):void {
+    if(this.practiceMode)makeElite(c,tier,this.random,options);
+  }
+  enableEliteEncounters():void {
+    if(this.eliteEncounters)return;this.eliteEncounters=true;
+    for(const c of [...this.creatures])if(!c.info.boss&&c.info.id!==24&&Math.hypot(c.x-this.player.x,c.y-this.player.y)>2&&this.random()<.08)this.elitePack(c);
+  }
+  private elitePack(c:Creature):void {
+    const base=c.info,champions=this.random()<.2;
+    makeElite(c,champions?'champion':'unique',this.random,{champion:'champion'});this.nameElite(c);
+    const count=champions?1+Math.floor(this.random()*3):3+Math.floor(this.random()*4);
+    const candidates=[];
+    for(let y=-2;y<=2;y++)for(let x=-2;x<=2;x++)if(x||y)candidates.push({x:Math.floor(c.x)+x+.5,y:Math.floor(c.y)+y+.5,order:this.random()});
+    for(const at of candidates.sort((a,b)=>a.order-b.order)){
+      if(c.elite&&this.creatures.filter(o=>o.elite?.leader===c.id).length>=count)break;
+      const cell=cellIndex(this.level,at.x,at.y);
+      if(cell<0||this.level.cells[cell].chasm||floorHeight(this.level.cells[cell],this.level)!==0||blockedFor(this.level,at.x,at.y,CREATURE_RADIUS,this.openDoors)||Math.hypot(at.x-this.player.x,at.y-this.player.y)<2||this.creatures.some(o=>Math.hypot(o.x-at.x,o.y-at.y)<.65)||!lineOfSight(this.level,c.x,c.y,at.x,at.y,this.openDoors))continue;
+      const actor=spawnCreature(Math.max(-1,...this.creatures.map(o=>o.id))+1,base,at.x,at.y,this.random);
+      makeElite(actor,champions?'champion':'minion',this.random,{champion:this.creatures.some(o=>o.elite?.leader===c.id)?'champion':undefined,leader:c.id,affixes:c.elite?.affixes});
+      this.creatures.push(this.outfit(actor));
+    }
+  }
+  private readonly gearPoison=new Map<Creature,{damage:number;next:number;until:number}>();
+  private readonly procCooldown=new Map<string,number>();
+  private readonly foundUniques=new Set<string>();
+  enableRandomLoot():void {this.randomizedLoot=true;this.carried.clear();}
+  lootDrops():Array<{id:number;x:number;y:number;z:number;colour:string}> {
+    if(!this.randomizedLoot)return [];
+    return this.creatures.flatMap(c=>{
+      const contents=this.carried.get(c.id);
+      if(c.state!=='dead'||this.searchedBodies.has(c.id)||!contents||!contents.gold&&!contents.items.length)return [];
+      const rank=['low','normal','superior','magic','rare','set','unique'];
+      const best=[...contents.items].sort((a,b)=>rank.indexOf(b.quality??'normal')-rank.indexOf(a.quality??'normal'))[0];
+      return [{id:c.id,x:c.x,y:c.y,z:Math.max(0,floorHeight(this.level.cells[cellIndex(this.level,c.x,c.y)],this.level)),colour:best?itemColour(best):QUALITY_COLOURS.unique}];
+    });
+  }
+  practiceLootItems():NewItem[] {
+    if(!this.practiceMode||!this.lootRules)return [];
+    const items:NewItem[]=[];
+    for(let type=0;type<this.weaponTable.length;type++)for(const quality of ['magic','rare','unique'] as const){const item=rollEquipment(makeWeapon(this.weaponTable,type,STEEL,this.armourTable),{level:24},this.random,quality,this.lootRules);item.unidentified=false;items.push(item);}
+    for(const set of EQUIPMENT_SETS)for(const piece of set.pieces){
+      const base=piece.kind==='weapon'?makeWeapon(this.weaponTable,piece.type,STEEL,this.armourTable):piece.kind==='armour'?makeArmour(0,piece.type,STEEL,this.armourTable):piece.kind==='shield'?makeShield(piece.type,STEEL,this.armourTable):{kind:'trinket' as const,trinket:'attribute' as const,type:piece.type,name:piece.name,weight:0,value:100};
+      items.push({...base,name:piece.name,quality:'set',setId:set.id,setPiece:`${piece.kind}:${piece.type}`,itemLevel:set.level,requiredLevel:Math.floor(set.level*.75),modifiers:{...piece.stats},value:base.value*8});
+    }
+    return items;
+  }
+  progress():object {
+    const s=this.stats;
+    return {version:1,inventory:this.inventory.snapshot(),level:s.level,experience:s.experience,gold:s.gold,baseHealth:s.baseHealth,healthRolls:[...s.healthRolls],bonusPoints:s.bonusPoints,health:s.health,stamina:s.stamina,magicka:s.magicka,spells:this.spellbook.map(spell=>spell.index),abilities:[...this.abilitySlots],foundUniques:[...this.foundUniques]};
+  }
+  restoreProgress(value:unknown):boolean {
+    if(!value||typeof value!=='object')return false;
+    const p=value as Record<string,unknown>;
+    const finite=(key:string,lo:number,hi:number)=>typeof p[key]==='number'&&Number.isFinite(p[key])&&(p[key] as number)>=lo&&(p[key] as number)<=hi;
+    if(p.version!==1||!finite('level',1,100)||!Number.isInteger(p.level)||!finite('experience',0,1e12)||!finite('gold',0,1e9)||!finite('baseHealth',1,10000)||!finite('bonusPoints',0,10000)||!finite('health',.01,100000)||!finite('stamina',0,100000)||!finite('magicka',0,100000)||!Array.isArray(p.healthRolls)||p.healthRolls.length!==(p.level as number)-1||p.healthRolls.some(n=>typeof n!=='number'||!Number.isFinite(n)||n<1||n>1000))return false;
+    this.inventory.level=p.level as number;
+    if(!this.inventory.restore(p.inventory)){this.inventory.level=this.stats.level;return false;}
+    const s=this.stats;s.level=p.level as number;s.experience=p.experience as number;s.gold=p.gold as number;s.baseHealth=p.baseHealth as number;s.healthRolls=[...p.healthRolls];s.bonusPoints=p.bonusPoints as number;
+    s.weapon=weaponOf(this.inventory.weapon!);this.refreshHero();
+    s.health=Math.min(s.maxHealth,p.health as number);s.stamina=Math.min(s.maxStamina,p.stamina as number);s.magicka=Math.min(s.maxMagicka,p.magicka as number);
+    if(Array.isArray(p.spells)){this.spellbook.splice(0,this.spellbook.length,...this.spells.filter(spell=>(p.spells as unknown[]).includes(spell.index)));}
+    if(Array.isArray(p.abilities))p.abilities.slice(0,this.abilitySlots.length).forEach((key,i)=>{if(typeof key==='string'&&(this.inventory.byKey(key)||this.spellByKey(key)))this.abilitySlots[i]=key;});
+    this.foundUniques.clear();if(Array.isArray(p.foundUniques))for(const id of p.foundUniques)if(typeof id==='string')this.foundUniques.add(id);
+    return true;
+  }
+  private lootContext(level:number,boss=false):LootContext {
+    const stats=this.inventory.bonuses();return {level,magicFind:stats.magicFind,goldFind:stats.goldFind,boss,foundUniques:this.foundUniques};
+  }
   /** Optional exact assignments for texture names whose material is not described by their name. */
   surfaceMaterials: MaterialOverrides = {};
   private noArrowsUntil = 0;
@@ -545,7 +631,7 @@ export class Dungeon {
   private disease?: DiseaseState;
   /** Cumulative raw attribute losses remain after a cure, until restored through rest. */
   private readonly diseaseLosses = Array<number>(8).fill(0);
-  private readonly playerHarms = new Map<string, {name:string;icon:string;type:StatusDispelType;until:number;next:number;every:number;damage:number;element?:number;duration:number}>();
+  private readonly playerHarms = new Map<string, {name:string;icon:string;type:StatusDispelType;until:number;next:number;every:number;damage:number;element?:number;duration:number;vulnerability?:number;slow?:number}>();
   private sinceHurt = Infinity;
   private lookTimer = 0;
   private nextStep = STRIDE;
@@ -621,7 +707,7 @@ export class Dungeon {
     this.armourTable = armourTables(tables?.armour);
     this.undead = tables?.hits?.undead ?? [];
     if (tables?.loot && this.weaponTable.length) {
-      this.lootRules = { tables: tables.loot, weapons: this.weaponTable, armour: this.armourTable, classes: tables.character?.classes };
+      this.lootRules = { tables: tables.loot, weapons: this.weaponTable, armour: this.armourTable, classes: tables.character?.classes,spells };
     }
     this.inventory = new Inventory(hero.cls, tables?.character?.cannotEquip);
     for (const gear of startingGear(this.weaponTable, hero.cls)) this.inventory.equip(this.inventory.add(gear));
@@ -794,6 +880,8 @@ export class Dungeon {
   private geared(hero: Hero): Hero {
     const bonus = this.attributeBonus();
     if (this.heroWith && bonus.some((b) => b !== 0)) hero = this.heroWith(bonus);
+    const gear=this.inventory.bonuses();
+    hero={...hero,stamina:hero.stamina+(gear.maxStamina??0),magicka:hero.magicka+(gear.maxMagicka??0),pace:hero.pace*(1+Math.min(50,gear.moveSpeed??0)/100),carry:this.practiceMode?Math.max(10000,hero.carry+(gear.carryWeight??0)):hero.carry+(gear.carryWeight??0)};
     return this.inventory.jumping() ? { ...hero, leap: Math.max(hero.leap, JUMPING_LEAP) } : hero;
   }
 
@@ -809,7 +897,7 @@ export class Dungeon {
   /** Takes up a new hero: Endurance counts back over every level, and what each of health, stamina and spell points gains is had at once. */
   private setHero(hero: Hero, heal = false): void {
     const s = this.stats;
-    const health = maxHealthFor(s, hero.healthBonus);
+    const health = maxHealthFor(s, hero.healthBonus)+(this.inventory.bonuses().maxHealth??0);
     s.health = heal ? health : raiseTo(s.health, s.maxHealth, health);
     s.maxHealth = health;
     s.stamina = raiseTo(s.stamina, s.maxStamina, hero.stamina);
@@ -1010,7 +1098,8 @@ export class Dungeon {
     const x0 = p.x;
     const y0 = p.y;
     for (const f of this.level.flats) if (f.solid) bodies.push({ x: f.x, y: f.y, r: SOLID_FLAT_RADIUS });
-    const pace = this.swimming ? this.hero.swimPace : this.hero.pace;
+    const slow=Math.max(0,...[...this.playerHarms.values()].filter(h=>h.until>this.time).map(h=>h.slow??0));
+    const pace = (this.swimming ? this.hero.swimPace : this.hero.pace)*(1-Math.min(.75,slow));
     step(this.level, p, { forward, strafe, run, pace }, dt, this.openDoors, bodies);
     const moved = Math.hypot(p.x - x0, p.y - y0);
     this.moving = moved > 0;
@@ -1181,7 +1270,17 @@ export class Dungeon {
     w.nonTarget = this.time<this.sanctuary.until;
     w.now = this.time;
     w.round = this.clock/60;
+    for(const c of this.creatures){c.auraDamage=1;c.auraPace=1;c.auraAccuracy=1;c.auraAttackRate=1;}
+    for(const source of this.creatures)if(isAlive(source)&&source.elite?.aura&&source.paralysed<=0){
+      const aura=source.elite.aura;
+      for(const ally of this.creatures)if(isAlive(ally)&&Math.hypot(ally.x-source.x,ally.y-source.y)<=3&&lineOfSight(this.level,source.x,source.y,ally.x,ally.y,this.openDoors)){
+        if(aura==='might'||aura==='fury')ally.auraDamage=Math.max(ally.auraDamage??1,aura==='might'?1.3:1.2);
+        if(aura==='aim')ally.auraAccuracy=1.5;
+        if(aura==='fury'){ally.auraPace=Math.max(ally.auraPace??1,1.25);ally.auraAttackRate=1.2;}
+      }
+    }
     for (const c of this.creatures) {
+      this.updateElite(c);
       updateCreature(c, w, dt, this.creatureEvents);
       if(this.looting?.body===c.id&&(isAlive(c)||c.state==='reviving'))this.closeLoot();
       if(!c.info.timing)this.updateCreatureCasting(c);
@@ -1190,6 +1289,71 @@ export class Dungeon {
         this.growlAt.set(c.id, this.time + 4 + this.random() * 6);
         this.creatureSound(c);
       }
+    }
+  }
+
+  private eliteHarm(id:string,name:string,icon:string,type:StatusDispelType,seconds:number,extra:{damage?:number;element?:number;slow?:number;vulnerability?:number}={}):void {
+    const previous=this.playerHarms.get(id);
+    this.playerHarms.set(id,{name,icon,type,until:this.time+seconds,next:previous?.next??this.time+1,every:1,damage:0,duration:seconds,...extra});
+    if(!previous||previous.until<=this.time)this.events.push({type:'notify',text:`You have contracted ${name}`});
+  }
+  private eliteHit(c:Creature,physical:number,missile=false):void {
+    const e=c.elite;if(!e)return;
+    if(e.affixes.includes('curse')&&this.random()<.75)this.eliteHarm('elite-hex','Frailty Hex (Doubles physical damage taken)','curse','curse',8,{vulnerability:1});
+    if(e.affixes.includes('siphon'))this.stats.magicka=Math.max(0,this.stats.magicka-physical*.83);
+    if(missile)return;
+    let kinds:number[]=[];
+    if(e.affixes.includes('flame'))kinds.push(0);
+    if(e.affixes.includes('frost')||e.champion==='ghostly')kinds.push(1);
+    if(e.affixes.includes('storm'))kinds.push(3);
+    if(e.affixes.includes('prismatic'))kinds.push([4,0,3,1,2][Math.floor(this.random()*5)]);
+    for(const kind of kinds){
+      const damage=Math.max(1,Math.round(physical*(e.champion==='ghostly'?.4:.83)));
+      if(kind===2)this.eliteHarm('elite-poison','Venom Strike (Poison damage over time)','poison','poison',4,{damage:Math.max(1,damage/4),element:2});
+      const struck=kind!==2&&this.hurtPlayer(damage,c,kind);
+      if(kind===1&&struck)this.eliteHarm('elite-chill','Chilled (Slows movement)','frost','magic',4+c.info.level*.2,{slow:.35});
+    }
+  }
+  private updateElite(c:Creature):void {
+    const e=c.elite;if(!e||!isAlive(c)||this.outcome||c.paralysed>0)return;
+    const dist=Math.hypot(c.x-this.player.x,c.y-this.player.y),sees=lineOfSight(this.level,c.x,c.y,this.player.x,this.player.y,this.openDoors);
+    if(e.affixes.includes('blink')&&(c.health<c.maxHealth*.3||!!c.info.spells?.length&&dist<1.5)&&this.time>=e.nextBlink&&sees){
+      e.nextBlink=this.time+8;
+      const candidates=[];for(let y=-3;y<=3;y++)for(let x=-3;x<=3;x++){
+        const at={x:Math.floor(c.x)+x+.5,y:Math.floor(c.y)+y+.5},cell=cellIndex(this.level,at.x,at.y);
+        if(cell<0||this.level.cells[cell].chasm||floorHeight(this.level.cells[cell],this.level)!==0||blockedFor(this.level,at.x,at.y,CREATURE_RADIUS,this.openDoors)||Math.hypot(at.x-this.player.x,at.y-this.player.y)<2||this.creatures.some(o=>o!==c&&isAlive(o)&&Math.hypot(o.x-at.x,o.y-at.y)<.6)||!lineOfSight(this.level,c.x,c.y,at.x,at.y,this.openDoors))continue;
+        if(Math.hypot(at.x-c.x,at.y-c.y)>=1.5)candidates.push(at);
+      }
+      if(candidates.length){const at=candidates[Math.min(candidates.length-1,Math.floor(this.random()*candidates.length))];this.eliteBurst(c,4,0);Object.assign(c,at);delete c.goal;c.replan=0;c.state='chase';c.time=0;if(c.health<c.maxHealth*.3)c.health=Math.min(c.maxHealth,c.health+e.baseHealth*.25);this.eliteBurst(c,4,0);}
+    }
+    if(!e.aura||dist>3||!sees||this.time<e.nextPulse)return;
+    e.nextPulse=this.time+1;
+    if(e.aura==='flame'||e.aura==='frost'||e.aura==='storm'){
+      const kind=e.aura==='flame'?0:e.aura==='frost'?1:3;
+      const struck=this.hurtPlayer(Math.max(4,1+Math.floor(c.info.level/6)),c,kind);this.eliteBurst(c,kind,3);
+      if(kind===1&&struck)this.eliteHarm('elite-chill','Chilled (Slows movement)','frost','magic',2,{slow:.35});
+    }else if(e.aura==='weakening')this.eliteHarm('elite-frailty','Frailty Aura (Increases physical damage taken)','curse','curse',2,{vulnerability:.3});
+  }
+  private eliteBurst(c:Creature,element:number,radius:number):void {
+    const spell=this.spells.find(s=>s.element===element&&s.effects.some(e=>e.effect===DAMAGE));
+    if(spell)this.events.push({type:'burst',spell,at:{x:c.x,y:c.y},radius});
+    this.events.push({type:'sound',name:radius?'EXPLODE.VOC':'BURST5.VOC',at:{x:c.x,y:c.y},volume:.5});
+  }
+  private eliteStruck(c:Creature):void {
+    const e=c.elite;if(!e?.affixes.includes('storm')||this.time<e.nextStorm)return;
+    e.nextStorm=this.time+.6;
+    const damage=Math.max(1,c.info.level-1),spell:SpellRecord={index:-1,name:'Storm Discharge',target:'target',element:3,flags:0,cost:0,effects:[{effect:DAMAGE,sub:0,attribute:0,params:[damage,damage,0,0,0,0]}]};
+    const floor=Math.max(0,floorHeight(this.level.cells[cellIndex(this.level,c.x,c.y)],this.level));
+    for(let i=0;i<8;i++){const angle=i*Math.PI/4;this.bolts.push({id:this.nextBolt++,spell,level:1,x:c.x,y:c.y,dx:Math.cos(angle),dy:Math.sin(angle),z:floor+.3,dz:0,travelled:0,source:c});}
+    this.events.push({type:'sound',name:'SLOWBALL.VOC',at:{x:c.x,y:c.y},volume:.5});
+  }
+  private eliteDeath(c:Creature):void {
+    const e=c.elite;if(!e||e.deathTriggered)return;e.deathTriggered=true;
+    for(const [affix,element]of [['flame',0],['frost',1]] as const)if(e.affixes.includes(affix)){
+      this.eliteBurst(c,element,2.65);
+      if(Math.hypot(c.x-this.player.x,c.y-this.player.y)>2.65||!lineOfSight(this.level,c.x,c.y,this.player.x,this.player.y,this.openDoors))continue;
+      if(element===0){const total=e.baseHealth*(.1125+this.random()*.075);this.hurtPlayer(total/2,c);this.hurtPlayer(total/2,c,0);}
+      else {if(this.hurtPlayer(Math.max(1,c.info.level-1),c,1))this.eliteHarm('elite-chill','Chilled (Slows movement)','frost','magic',4,{slow:.35});}
     }
   }
 
@@ -1215,6 +1379,10 @@ export class Dungeon {
     const aimZ=(this.player.z??0)+playerEyeOffset(this.sneaking,this.swimming);
     this.bolts.push({id:this.nextBolt++,spell,level,x:c.x+dx*.35,y:c.y+dy*.35,dx,dy,travelled:0,source:c,
       z:z+(aimZ-z)/dist*.35,dz:(aimZ-z)/dist});
+    if(c.elite?.affixes.includes('volley')){
+      const middle=this.bolts[this.bolts.length-1],yaw=Math.atan2(dy,dx);
+      for(const angle of [-.16,.16])this.bolts.push({...middle,id:this.nextBolt++,dx:Math.cos(yaw+angle),dy:Math.sin(yaw+angle)});
+    }
     this.events.push({type:'sound',name:'SLOWBALL.VOC',at:{x:c.x,y:c.y},volume:.7});
     return true;
   }
@@ -1231,6 +1399,7 @@ export class Dungeon {
       // Sanctuary: a chance the creature ignores the player.
       if (damage > 0 && this.time < this.sanctuary.until) return;
       if (this.outcome || damage <= 0 || !this.hurtPlayer(damage, c)) return;
+      this.eliteHit(c,damage);
       const rounds = paralysisFrom(c.info, this.hero.paralysis, this.random);
       if (rounds > 0) this.paralyse(rounds * ROUND);
       else if (!this.paralysed && !this.disease) {
@@ -1285,17 +1454,21 @@ export class Dungeon {
    * not taken on the guard, and not all soaked up by a shield spell.
    */
   private hurtPlayer(damage: number, from?: Creature, element?: number, resistanceChecked=false): boolean {
+    const gear=this.inventory.bonuses();
+    if(element===undefined)damage*=1+Math.max(0,...[...this.playerHarms.values()].filter(h=>h.until>this.time).map(h=>h.vulnerability??0));
     if (element !== undefined) {
       const ward=[...this.wards.values()].find(w=>w.effect.effect===ELEMENTAL_RESISTANCE&&resistedElement(w.effect.sub)===element&&this.time<w.until);
       if(!resistanceChecked&&ward&&this.random()*100<ward.power)return false;
       damage = elementalDamage(damage, element, this.hero, this.random);
-    }
+      const key=(['resistFire','resistFrost','resistPoison','resistShock','resistMagic'] as const)[element];
+      damage=Math.max(0,Math.round(damage*(1-Math.min(75,(key?gear[key]??0:0)+(gear.resistAll??0))/100))-(gear.magicReduction??0));
+    }else damage=Math.max(0,damage-(gear.damageReduction??0));
     if (damage <= 0) return false;
     let guarded = false;
     if (this.blocking && from && angleTo(this.player, from.x, from.y) <= BLOCK_ARC && spendStamina(this.stats, BLOCK_STAMINA)) {
       this.sinceStamina = 0;
       guarded = true;
-      damage = Math.round(damage * BLOCK_LEAK);
+      damage = Math.round(damage * Math.max(.05,BLOCK_LEAK-(gear.blockReduction??0)/100));
       this.events.push({ type: 'blocked', damage }, { type: 'sound', name: 'CLANK.VOC', volume: 0.8 });
       if (damage <= 0) return false;
     }
@@ -1312,6 +1485,10 @@ export class Dungeon {
     this.stats.health = this.practiceMode?this.stats.maxHealth:Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
     this.events.push({ type: 'hurt', damage }, { type: 'sound', name: 'UHIT.VOC' });
+    if(from&&element===undefined&&isAlive(from)){
+      if(gear.thorns)this.hurtByMagic(from,gear.thorns,'magic');
+      this.gearProcs(from,'struck');
+    }
     this.fallBack();
     if (this.stats.health <= 0) this.die();
     return !guarded;
@@ -1413,8 +1590,9 @@ export class Dungeon {
         : power
           ? this.moving ? 'thrust' : 'chop'
           : COMBO[this.combo++ % COMBO.length];
-    this.swing = { kind, power, sweepDirection, time: 0, duration: steelAttackDuration(this.stats.weapon, power, kind), hitAt: steelImpactAt(this.stats.weapon, power, kind), struck: false };
-    const soundAt=steelSwingSoundTime(this.stats.weapon,power,kind);
+    const rate=1+Math.min(60,this.inventory.bonuses().attackSpeed??0)/100;
+    this.swing = { kind, power, sweepDirection, time: 0, duration: steelAttackDuration(this.stats.weapon, power, kind)/rate, hitAt: steelImpactAt(this.stats.weapon, power, kind), struck: false };
+    const soundAt=steelSwingSoundTime(this.stats.weapon,power,kind)/rate;
     this.events.push({type:'swing',swing:this.swing});
     if(soundAt>0)this.swing.soundAt=soundAt;
     else this.events.push({type:'sound',name:'SWISH.VOC'});
@@ -1465,15 +1643,19 @@ export class Dungeon {
     }
     if (target) {
       // Arena's blow, then the remake's power attacks and sneak attacks.
-      let damage = this.blowDamage(this.stats.weapon, target);
+      const blow = this.blowDamage(this.stats.weapon, target);
+      let damage = blow.damage;
       if (s.power) damage *= 2;
       if (this.sneaking && isCalm(target)) {
         damage *= SNEAK_ATTACK;
         this.events.push({ type: 'notify', text: `Sneak attack for ${SNEAK_ATTACK}x damage!` });
       }
+      const before = Math.max(0,target.health);
       const killed = hurtCreature(target, damage, this.world, s.power);
-      this.events.push({ type: 'hit', creature: target, damage, killed }, { type: 'sound', name: 'EHIT.VOC', at: { x: target.x, y: target.y } });
+      if(Math.max(0,target.health)<before&&isAlive(target))this.eliteStruck(target);
+      this.events.push({ type: 'hit', creature: target, damage, killed, appliedDamage:Math.max(0,before-Math.max(0,target.health)),critical:blow.critical,damageKind:'physical' }, { type: 'sound', name: 'EHIT.VOC', at: { x: target.x, y: target.y } });
       if (killed) this.killed(target);
+      this.weaponEnchantments(target,Math.max(0,before-Math.max(0,target.health)));
       return;
     }
     const ahead = this.ahead(1.1);
@@ -1501,15 +1683,22 @@ export class Dungeon {
    * swing or an arrow: the weapon's roll, Strength and the race's knack,
    * doubled for a critical hit, then a Ranger's level.
    */
-  private blowDamage(weapon: Weapon, target: Creature): number {
+  private blowDamage(weapon: Weapon, target: Creature,gear=this.inventory.bonuses(),hero=this.hero,level=this.stats.level): {damage:number;critical:boolean} {
     const bow = weapon.bow === true;
-    const bonus = this.hero.damageBonus + knackDamage(this.hero.knack, this.stats.level, bow);
+    const bonus = hero.damageBonus + knackDamage(hero.knack, level, bow);
     let damage = Math.max(1, roll(this.random, ...weapon.damage) + bonus);
-    if (mayCrit(this.hero, bow) && this.random() < this.hero.critical) {
-      damage *= 2;
+    const criticalChance=Math.min(1,(mayCrit(hero,bow)?hero.critical:0)+(gear.critical??0)/100);
+    const critical = criticalChance>0 && this.random() < criticalChance;
+    if (critical) {
+      damage = Math.round(damage*(2+Math.max(0,gear.criticalDamage??0)/100));
       this.events.push({ type: 'notify', text: 'Critical strike!' });
     }
-    return monsterWeaponDamage(damage + levelDamage(this.hero, this.stats.level, target.info.id, this.undead), weapon, target.info, this.undead, this.creatureMaterials);
+    const undead=target.info.id!==undefined&&this.undead.includes(target.info.id)||/ghost|wraith|skeleton|ghoul|zombie|vampire|lich/i.test(target.info.name);
+    const distance=Math.hypot(target.x-this.player.x,target.y-this.player.y);
+    const extra=(undead?gear.undeadDamage??0:/daedroth|dremora|fire demon/i.test(target.info.name)?gear.daedraDamage??0:0)
+      +(distance<=2?gear.closeDamage??0:gear.distantDamage??0)
+      +(target.health<target.maxHealth*.35?gear.woundedDamage??0:0);
+    return {damage:monsterWeaponDamage(Math.max(1,Math.round((damage + levelDamage(hero, level, target.info.id, this.undead))*(1+extra/100))), weapon, target.info, this.undead, this.creatureMaterials),critical};
   }
 
   /**
@@ -1591,7 +1780,7 @@ export class Dungeon {
     const p = this.player;
     this.swing = { kind: 'shoot', power: false, time: 0, duration: this.hero.reload, struck: true };
     this.events.push({ type: 'swing', swing: this.swing }, { type: 'sound', name: 'ARROWFR.VOC' });
-    const arrow: Arrow = { id: this.nextArrow++, x: p.x, y: p.y, dx: Math.cos(p.yaw), dy: Math.sin(p.yaw), travelled: 0, weapon: this.stats.weapon, sneak: this.sneaking };
+    const arrow: Arrow = { id: this.nextArrow++, x: p.x, y: p.y, dx: Math.cos(p.yaw), dy: Math.sin(p.yaw), travelled: 0, weapon: this.stats.weapon, sneak: this.sneaking,attacker:{...this.hero},attackerLevel:this.stats.level,bonuses:this.inventory.bonuses(),procAffixes:this.inventory.wornItems().flatMap(i=>i.affixes??[]) };
     this.arrows.push(arrow);
     // It sets off a little in front, striking anything nearer on the way.
     this.flyArrow(arrow, ARROW_START);
@@ -1616,6 +1805,7 @@ export class Dungeon {
         damage: this.stats.weapon.damage.map((d) => Math.max(1, Math.round(d * (0.25 + 0.75 * strength)))) as [number, number],
       },
       sneak: this.sneaking,
+      bonuses:this.inventory.bonuses(),procAffixes:this.inventory.wornItems().flatMap(i=>i.affixes??[]),attacker:{...this.hero},attackerLevel:this.stats.level,
       projectile: projectile([originX, height, originZ], [Math.cos(p.yaw) * cp * speed, Math.sin(p.pitch) * speed, Math.sin(p.yaw) * cp * speed]),
     };
     this.arrows.push(arrow);
@@ -1700,20 +1890,59 @@ export class Dungeon {
   }
 
   private arrowStrikes(a: Arrow, target: Creature): void {
-    let damage = this.blowDamage(a.weapon, target);
+    const blow = this.blowDamage(a.weapon, target,a.bonuses,a.attacker,a.attackerLevel);
+    let damage = blow.damage;
     if (a.sneak && isCalm(target)) {
       damage *= SNEAK_SHOT;
       this.events.push({ type: 'notify', text: `Sneak attack for ${SNEAK_SHOT}x damage!` });
     }
+    const before = Math.max(0,target.health);
     const killed = hurtCreature(target, damage, this.world);
-    this.events.push({ type: 'hit', creature: target, damage, killed, far: true }, { type: 'sound', name: 'ARROWHT.VOC', at: { x: target.x, y: target.y } });
+    if(Math.max(0,target.health)<before&&isAlive(target))this.eliteStruck(target);
+    this.events.push({ type: 'hit', creature: target, damage, killed, far: true, appliedDamage:Math.max(0,before-Math.max(0,target.health)),critical:blow.critical,damageKind:'physical' }, { type: 'sound', name: 'ARROWHT.VOC', at: { x: target.x, y: target.y } });
     if (killed) this.killed(target);
+    this.weaponEnchantments(target,Math.max(0,before-Math.max(0,target.health)),a.bonuses,a.procAffixes);
   }
 
-  private killed(c: Creature): void {
-    this.kills++;
+  private weaponEnchantments(target:Creature,physical:number,gear=this.inventory.bonuses(),procs?:RolledAffix[]):void {
+    this.stats.health=Math.min(this.stats.maxHealth,this.stats.health+physical*Math.min(30,gear.lifeLeech??0)/100+(physical>0?Math.max(0,gear.healthOnHit??0):0));
+    this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+physical*Math.min(30,gear.magickaLeech??0)/100);
+    if(!isAlive(target))return;
+    const damageTypes:Array<[keyof LootStats,DamageKind,number]>=[['fireDamage','fire',4],['frostDamage','frost',8],['shockDamage','shock',16],['magicDamage','magic',0]];
+    for(const [key,kind,immune]of damageTypes)if((gear[key]??0)>0&&!(target.info.flags&immune)&&isAlive(target))this.hurtByMagic(target,gear[key]!,kind,false,false);
+    if(isAlive(target)&&(gear.poisonDamage??0)>0&&!(target.info.flags&64)){
+      const old=this.gearPoison.get(target);
+      this.gearPoison.set(target,{damage:Math.max(old?.damage??0,gear.poisonDamage!/4),next:old?.next??this.time+1,until:this.time+4});
+    }
+    this.gearProcs(target,'hit',procs);
+  }
+
+  private gearProcs(target:Creature,trigger:'hit'|'struck',affixes=this.inventory.wornItems().flatMap(i=>i.affixes??[])):void {
+    for(const a of affixes){
+      if(!a.proc||(a.proc.trigger??'hit')!==trigger||a.spell===undefined||!isAlive(target))continue;
+      const key=`${a.id}:${trigger}`;
+      if(this.time<(this.procCooldown.get(key)??0)||this.random()*100>=a.proc.chance)continue;
+      const spell=this.spellRecord(a.spell);if(!spell)continue;
+      this.procCooldown.set(key,this.time+.5);
+      if(spell.target==='caster')this.onCaster(spell,undefined,a.proc.level);
+      else this.burst(spell,target,a.proc.level,target);
+    }
+  }
+
+  private killed(c: Creature,credited=true): void {
+    const gear=this.inventory.bonuses();
+    if(credited&&this.stats.health>0)this.stats.health=Math.min(this.stats.maxHealth,this.stats.health+Math.max(0,gear.healthOnKill??0));
+    if(credited)this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+Math.max(0,gear.magickaOnKill??0));
+    if(this.randomizedLoot&&this.lootRules&&c.info.id!==undefined&&!this.carried.has(c.id))this.carried.set(c.id,treasure(this.lootRules,this.lootRules.tables.creatures[c.info.id]??[0,0,0,0],this.lootContext(c.info.level+1,!!c.elite&&c.elite.tier!=='minion'||/jagar|tharn/i.test(c.info.name)),this.random));
+    if(this.randomizedLoot&&this.lootRules&&c.elite&&c.elite.tier!=='minion'){
+      const contents=this.carried.get(c.id)??{gold:0,items:[]};
+      const extra=treasure(this.lootRules,[100,0,100,0],this.lootContext(c.info.level+1,true),this.random);
+      contents.gold+=extra.gold;contents.items.push(...extra.items);this.carried.set(c.id,contents);
+    }
+    this.eliteDeath(c);
+    if(credited)this.kills++;
     // The level comes later, once a game minute passes with no monsters near (checkLevel).
-    this.stats.experience += c.experienceValue??(c.info.experience + c.info.experiencePerHealth * c.maxHealth);
+    if(credited)this.stats.experience += Math.round((c.experienceValue??(c.info.experience + c.info.experiencePerHealth * c.maxHealth))*(1+Math.max(0,gear.experiencePct??0)/100));
     if (!this.practiceMode && !this.cleared && this.creatures.every(isDefeated)) {
       this.cleared = true;
       this.events.push({ type: 'cleared' });
@@ -1747,6 +1976,7 @@ export class Dungeon {
   /** How far the dungeon can be seen, as a multiple of the usual: more under a Light spell. */
   get lightReach(): number {
     let reach=this.time < this.light.until ? this.light.reach : 1;
+    reach=Math.max(reach,1+Math.min(10,this.inventory.bonuses().lightRadius??0)*.1);
     for(const b of this.bolts)if(b.lightUntil&&this.time<b.lightUntil){
       const distance=Math.hypot(b.x-this.player.x,b.y-this.player.y);
       if(lineOfSight(this.level,this.player.x,this.player.y,b.x,b.y,this.openDoors))reach=Math.max(reach,1+(b.lightPower??1)*Math.max(0,1-distance/6));
@@ -1862,7 +2092,7 @@ export class Dungeon {
 
   /** Spell points the spell costs at the player's level. */
   spellCost(spell: SpellRecord): number {
-    return magickaCost(spell, this.stats.level);
+    return Math.max(0,Math.ceil(magickaCost(spell, this.stats.level)*(1-Math.min(60,this.inventory.bonuses().spellCost??0)/100)));
   }
 
   /** Casts a spell, if there are spell points enough and it has something to work on. */
@@ -2016,8 +2246,8 @@ export class Dungeon {
         case CURE:
           if (this.random() * 100 < chance(e, level)) {
             if (e.sub === CURE_PARALYSIS || e.sub === 1) this.paralysedUntil = this.time;
-            if (e.sub === 1) this.playerHarms.delete('poison');
-            if (e.sub === 3) {this.playerHarms.delete('curse');this.playerHarms.delete('spell-curse');for(let i=this.fortified.length-1;i>=0;i--)if(this.fortified[i].dispel==='curse')this.fortified.splice(i,1);this.refreshHero();}
+            if (e.sub === 1) {for(const [id,h]of this.playerHarms)if(h.type==='poison')this.playerHarms.delete(id);}
+            if (e.sub === 3) {for(const [id,h]of this.playerHarms)if(h.type==='curse')this.playerHarms.delete(id);this.playerHarms.delete('curse');this.playerHarms.delete('spell-curse');for(let i=this.fortified.length-1;i>=0;i--)if(this.fortified[i].dispel==='curse')this.fortified.splice(i,1);this.refreshHero();}
             else if (e.sub === 0) this.cureDisease();
           }
           break;
@@ -2049,18 +2279,18 @@ export class Dungeon {
     // Native target 3 excludes its caster; target 4 may also hit its caster.
     if((source||nativeArea)&&!(spell.target==='areaCaster'&&!source)&&reaches(this.player))this.receiveSpell(spell,level,source);
     if (radius === 0) {
-      if (hit) this.onCreature(spell, hit, level);
+      if (hit) this.onCreature(spell, hit, level,source);
       return;
     }
     for (const c of this.creatures) {
       // Native 3cdd:090e omits death-flat actors, including subdued bodies.
       if (!(nativeArea?isAlive(c):isMagicTarget(c)) || spell.target==='areaCaster'&&c===source || !reaches(c,CREATURE_RADIUS)) continue;
-      this.onCreature(spell, c, level);
+      this.onCreature(spell, c, level,source);
     }
   }
 
   /** A spell's effects on a creature it reached, cast at `level`. */
-  private onCreature(spell: SpellRecord, c: Creature, level: number): void {
+  private onCreature(spell: SpellRecord, c: Creature, level: number,source?:Creature): void {
     if(!isMagicTarget(c))return;
     let damage = 0;
     const state=creatureMagic(c);
@@ -2071,13 +2301,13 @@ export class Dungeon {
       switch (e.effect) {
         case DAMAGE: {
           const n=magnitude(e,level,this.random);
-          if(e.sub===DAMAGE_HEALTH&&!(c.info.flags&([4,8,64,16][spell.element]??0)))damage+=n;
+          if(e.sub===DAMAGE_HEALTH&&!(c.info.flags&([4,8,64,16][spell.element]??0)))damage+=Math.round(n*(1+(source?0:this.inventory.bonuses().spellPower??0)/100));
           else if(e.sub===1)state.stamina=Math.max(0,state.stamina-n);
           else if(e.sub===2)state.magicka=Math.max(0,state.magicka-n);
           break;
         }
         case CONTINUOUS_DAMAGE:
-          this.afflict(c, spell, level, e, CONTINUOUS_EVERY * ROUND, duration(e, level));break;
+          this.afflict(c, spell, level, e, CONTINUOUS_EVERY * ROUND, duration(e, level),source);break;
         case SILENCE:
           if(this.random()*100<chance(e,level)){
             state.silencedUntil=this.time+duration(e,level);
@@ -2090,13 +2320,14 @@ export class Dungeon {
             const attribute=attributeIndex(e),taken=Math.min(e.params[0],creatureAttribute(c,attribute));
             modifier(attribute,-taken,{...e,params:[e.params[0],0,0,0,1,e.params[5]]},duration(e,level));
             const lasts=duration(e,level),every=Math.max(1,e.params[4])*ROUND;
-            this.fortified.push({attribute,points:taken,loss:0,every,next:this.time+every,until:this.time+lasts,duration:lasts});this.refreshHero();
+            if(source)creatureMagic(source).modifiers.push({attribute,points:taken,loss:0,every,next:this.time+every,until:this.time+lasts});
+            else{this.fortified.push({attribute,points:taken,loss:0,every,next:this.time+every,until:this.time+lasts,duration:lasts});this.refreshHero();}
           }else {
             const pool=transferPool(e),available=pool===0?Math.max(0,c.health-damage):pool===1?state.stamina:state.magicka;
             const taken=Math.min(e.params[0],available);
-            if(pool===0){damage+=taken;this.stats.health=Math.min(this.stats.maxHealth,this.stats.health+taken);}
-            else if(pool===1){state.stamina-=taken;this.stats.stamina=Math.min(this.stats.maxStamina,this.stats.stamina+taken);}
-            else if(pool===2){state.magicka-=taken;this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+taken);}
+            if(pool===0){damage+=taken;if(source)source.health=Math.min(source.maxHealth,source.health+taken);else this.stats.health=Math.min(this.stats.maxHealth,this.stats.health+taken);}
+            else if(pool===1){state.stamina-=taken;if(source){const pool=creatureMagic(source);pool.stamina=Math.min(pool.maxStamina,pool.stamina+taken);}else this.stats.stamina=Math.min(this.stats.maxStamina,this.stats.stamina+taken);}
+            else if(pool===2){state.magicka-=taken;if(source){const pool=creatureMagic(source);pool.magicka=Math.min(pool.maxMagicka,pool.magicka+taken);}else this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+taken);}
           }break;
         }
         case CAUSE:
@@ -2105,20 +2336,21 @@ export class Dungeon {
           }
           if (e.sub === CAUSE_PARALYSIS) {
             paralyseCreature(c, duration(e, level), this.world);
-            this.events.push({ type: 'notify', text: `The ${c.info.name} is paralyzed` });
+            this.events.push({ type: 'notify', text: `The ${creatureName(c)} is ${c.elite&&c.elite.tier!=='minion'?'chilled':'paralyzed'}` });
           } else if (e.sub === CAUSE_POISON) {
             if(c.info.flags&64)break;
             const p = poisonDamage(e);
-            this.afflict(c, spell, level, p.damage, p.everyRounds * ROUND, duration(e, level));
+            this.afflict(c, spell, level, p.damage, p.everyRounds * ROUND, duration(e, level),source);
             this.events.push({ type: 'notify', text: `The ${c.info.name} is poisoned` });
           } else if(e.sub===0||e.sub===3){
+            if(e.sub===3&&c.elite?.curseImmune)break;
             for(const attribute of e.sub===0?[0,3,4,5]:[1,2,6,7])state.modifiers.push({attribute,points:-Math.min(e.params[2],creatureAttribute(c,attribute)),loss:0,growth:e.params[2],every:ROUND,next:this.time+ROUND,until:this.time+duration(e,level)});
             this.events.push({type:'notify',text:`The ${c.info.name} is ${e.sub===0?'diseased':'cursed'}`});
           } else if(e.sub===4)damage=c.health;
           break;
       }
     }
-    this.hurtByMagic(c, damage);
+    this.hurtByMagic(c, damage,spellDamageKind(spell.element),false,true,!source);
   }
 
   /** Incoming monster spells share the same records as player spells. Reflection is resolved once. */
@@ -2138,6 +2370,7 @@ export class Dungeon {
     }
     const resist=[...this.wards.values()].find(w=>w.effect.effect===ELEMENTAL_RESISTANCE&&resistedElement(w.effect.sub)===spell.element&&this.time<w.until);
     if(resist&&this.random()*100<resist.power){this.events.push({type:'notify',text:'Elemental spell resisted'});return;}
+    if(source?.elite&&spell.effects.some(e=>e.effect===DAMAGE))this.eliteHit(source,Math.max(1,Math.round((source.elite.baseDamage[0]+source.elite.baseDamage[1])/2)),true);
     for(const e of spell.effects){
       const lasts=duration(e,level),until=this.time+lasts;
       const harm=(id:string,name:string,icon:string,type:StatusDispelType,damage=0,every=ROUND)=>{
@@ -2183,19 +2416,34 @@ export class Dungeon {
     }
   }
 
-  private afflict(c: Creature, spell: SpellRecord, level: number, damage: Affliction['damage'], every: number, lasts: number): void {
+  private afflict(c: Creature, spell: SpellRecord, level: number, damage: Affliction['damage'], every: number, lasts: number,source?:Creature): void {
     if (lasts <= 0) return;
-    this.afflictions.push({ creature: c, spell, level, damage, every, next: this.time + every, until: this.time + lasts });
+    this.afflictions.push({ source,creature: c, spell, level, damage, every, next: this.time + every, until: this.time + lasts });
   }
 
-  private hurtByMagic(c: Creature, damage: number): void {
-    const killed = hurtCreature(c, damage, this.world, false, true);
-    if (damage > 0) this.events.push({ type: 'hit', creature: c, damage, killed, far: true }, { type: 'sound', name: 'EHIT.VOC', at: { x: c.x, y: c.y } });
-    if (killed) this.killed(c);
+  private hurtByMagic(c: Creature, damage: number, damageKind:DamageKind='magic',periodic=false,sound=true,credited=true): void {
+    const before = Math.max(0,c.health);
+    const killed = hurtCreature(c, damage, this.world, false, true,damageKind);
+    if (damage > 0) {
+      if(isAlive(c))this.eliteStruck(c);
+      this.events.push({ type: 'hit', creature: c, damage, killed, far: true,appliedDamage:Math.max(0,before-Math.max(0,c.health)),damageKind,periodic });
+      if(sound)this.events.push({ type: 'sound', name: 'EHIT.VOC', at: { x: c.x, y: c.y } });
+    }
+    if (killed) this.killed(c,credited);
   }
 
   /** Bolts in flight, harm that lasts, and spells on the player wearing off. */
   private updateMagic(dt: number): void {
+    const gear=this.inventory.bonuses();
+    if(!this.outcome&&this.stats.health>0){
+      this.stats.health=Math.min(this.stats.maxHealth,this.stats.health+(gear.healthRegen??0)*dt/10);
+      this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+(gear.magickaRegen??0)*dt/10);
+      this.stats.stamina=Math.min(this.stats.maxStamina,this.stats.stamina+(gear.staminaRegen??0)*dt/10);
+    }
+    for(const [creature,poison] of this.gearPoison){
+      if(!isMagicTarget(creature)||this.time>poison.until){this.gearPoison.delete(creature);continue;}
+      while(this.time>=poison.next&&poison.next<=poison.until){poison.next++;this.hurtByMagic(creature,poison.damage,'poison',true,false);}
+    }
     for(const [cell,lock] of this.magicalLocks)if(this.time>=lock.until)this.magicalLocks.delete(cell);
     for(const [id,ward] of this.wards)if(this.time>=ward.until)this.wards.delete(id);
     for (const [id,harm] of this.playerHarms) {
@@ -2223,7 +2471,7 @@ export class Dungeon {
         const state=creatureMagic(a.creature);
         if(a.damage.sub===1)state.stamina=Math.max(0,state.stamina-damage);
         else state.magicka=Math.max(0,state.magicka-damage);
-      }else if(!(a.creature.info.flags&([4,8,64,16][a.spell.element]??0)))this.hurtByMagic(a.creature, damage);
+      }else if(!(a.creature.info.flags&([4,8,64,16][a.spell.element]??0)))this.hurtByMagic(a.creature, Math.round(damage*(1+(a.source?0:gear.spellPower??0)/100)),spellDamageKind(a.spell.element),true,true,!a.source);
     }
     let fortified = false;
     for (const f of [...this.fortified]) {
@@ -2432,8 +2680,9 @@ export class Dungeon {
       consider(item.x, item.y, () => ({ kind: 'item', id: item.id, ...ITEM_PROMPTS[item.kind] }));
     }
     for (const c of this.creatures) {
-      if (c.state !== 'dead' || c.info.noCorpse || this.searchedBodies.has(c.id)) continue;
-      consider(c.x, c.y, () => ({ kind: 'body', id: c.id, name: c.info.name, verb: 'Search' }));
+      if (c.state !== 'dead' || this.searchedBodies.has(c.id)) continue;
+      if(c.info.noCorpse){const loot=this.carried.get(c.id);if(!this.randomizedLoot||!loot||!loot.gold&&!loot.items.length)continue;}
+      consider(c.x, c.y, () => ({ kind: 'body', id: c.id, name: creatureName(c), verb: 'Search' }));
     }
     for (const a of this.arrows) {
       const state = a.projectile;
@@ -2564,7 +2813,9 @@ export class Dungeon {
     }
     let contents = this.spotContents.get(item.id);
     if (!contents) {
-      if (this.lootRules) contents = spotLoot(this.lootRules, this.level.floor ?? 0, this.random, this.hero.cls);
+      if (this.lootRules) contents = this.randomizedLoot
+        ?treasure(this.lootRules,this.lootRules.tables.places[3],this.lootContext((this.level.floor??0)*5+5),this.random)
+        :spotLoot(this.lootRules, this.level.floor ?? 0, this.random, this.hero.cls);
       else {
         contents = { gold: 0, items: [] };
         switch (item.kind) {
@@ -2597,18 +2848,20 @@ export class Dungeon {
   /** Gives a creature what it carries as it appears, by Arena's rules. */
   private outfit(c: Creature): Creature {
     c.regenerationRound=Math.floor(this.clock/60);
-    if (this.lootRules && c.info.id !== undefined) this.carried.set(c.id, creatureLoot(this.lootRules, c.info.id, c.info.level, this.random));
+    if(this.eliteEncounters&&!c.elite&&!c.info.boss&&c.info.id!==24&&this.random()<.08)makeElite(c,this.random()<.2?'champion':'unique',this.random);
+    if (!this.randomizedLoot&&this.lootRules && c.info.id !== undefined) this.carried.set(c.id, creatureLoot(this.lootRules, c.info.id, c.info.level, this.random));
+    this.nameElite(c);
     return c;
   }
 
   private searchBody(c: Creature): void {
     let contents = this.carried.get(c.id);
     if (!contents) {
-      contents = { gold: 0, items: [] };
+      contents = this.randomizedLoot&&this.lootRules&&c.info.id!==undefined?treasure(this.lootRules,this.lootRules.tables.creatures[c.info.id]??[0,0,0,0],this.lootContext(c.info.level+1,!!c.elite&&c.elite.tier!=='minion'),this.random):{ gold: 0, items: [] };
       if (!this.lootRules && this.random() < Math.min(0.6, 0.15 * c.info.level)) contents.gold = roll(this.random, 1, 10 * c.info.level);
       this.carried.set(c.id, contents);
     }
-    this.looting = { name: c.info.name, contents, body: c.id };
+    this.looting = { name: creatureName(c), contents, body: c.id };
     if (!contents.gold && !contents.items.length) {
       this.finishLoot();
       this.events.push({ type: 'notify', text: this.messages.nothingUsable?.replace('%s', c.info.name) ?? 'Nothing of value' });
@@ -2620,7 +2873,7 @@ export class Dungeon {
     const source = this.looting;
     if (!source) return undefined;
     const entries: LootEntry[] = source.contents.gold > 0 ? [{ key: 'gold', name: 'Gold', count: source.contents.gold }] : [];
-    source.contents.items.forEach((item, i) => entries.push({ key: `item:${i}`, name: shownName(item), count: item.quantity ?? 1 }));
+    source.contents.items.forEach((item, i) => entries.push({ key: `item:${i}`, name: shownName(item), count: item.quantity ?? 1,colour:itemColour(item) }));
     return { name: source.name, entries };
   }
 
@@ -2788,6 +3041,7 @@ export class Dungeon {
     if (item.kind === 'potion') return this.drink(item);
     if (!wearable(item)) return this.castFrom(item);
     const wasOn = this.inventory.isEquipped(item);
+    this.inventory.level=this.practiceMode?100:this.stats.level;
     const before = this.inventory.weapon;
     const result = this.inventory.toggle(item);
     if (!result.ok) return result.message;
@@ -2802,6 +3056,11 @@ export class Dungeon {
     this.refreshHero();
     const done = wasOn ? `${item.name} removed` : `${item.name} equipped`;
     return result.message ? `${done}. ${result.message}` : done;
+  }
+
+  identify(key:string):string|undefined {
+    const item=this.inventory.byKey(key);if(!item||!item.unidentified)return undefined;
+    this.inventory.identify(item);return `${item.name} identified`;
   }
 
   /** Casts the spell of a piece of gear, as Arena's "use" does; returns what happened. */

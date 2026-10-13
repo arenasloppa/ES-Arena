@@ -74,6 +74,7 @@ export class LootMenu {
     view.entries.forEach((entry, i) => {
       const li = document.createElement('li'), button = document.createElement('button');
       button.textContent = entry.name + (entry.count > 1 ? ` (${entry.count})` : '');
+      if(entry.colour)button.style.color=entry.colour;
       button.classList.toggle('selected', i === this.row);
       button.addEventListener('mousemove', (event) => { if(this.input.mode!=='keyboard'||(!event.movementX&&!event.movementY))return;this.row = i; list.querySelectorAll('button').forEach((b, n) => b.classList.toggle('selected', n === i)); });
       button.addEventListener('click', () => this.take(entry.key)); li.append(button); list.append(li);

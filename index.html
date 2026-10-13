@@ -40,18 +40,6 @@
         <div id="prompt-name"></div>
         <div id="prompt-note" hidden></div>
       </div>
-      <aside id="tips" hidden>
-        <p class="tip"><span data-glyph="move"></span><span>Move</span></p>
-        <p class="tip"><span data-glyph="look"></span><span>Look</span></p>
-        <p class="tip"><span data-glyph="attack"></span><span>Attack, hold to power attack</span></p>
-        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash; right mouse casts a readied spell</span></p>
-        <p class="tip"><span data-glyph="activate"></span><span>Use, take, open</span></p>
-        <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
-        <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
-        <p class="tip"><span data-glyph="quickslot"></span><span>Use hotbar slot 2</span></p>
-        <p class="tip"><span data-glyph="tween"></span><span>Character, items, magic, map</span></p>
-        <p class="tip"><span data-glyph="menu"></span><span>Pause menu</span></p>
-      </aside>
       <div id="corner">
         <div id="notes" role="status" aria-live="polite"></div>
       </div>
@@ -132,6 +120,7 @@
           </label>
           <button class="option" data-screen="controls">Settings</button>
           <button class="option quit" hidden>Quit</button>
+          <button class="option" data-screen="guidebook">Guidebook</button>
           <button class="option" data-screen="testing">Testing</button>
         </nav>
         <div class="notes">
@@ -153,9 +142,12 @@
           <button class="option" data-screen="controls">Settings</button>
           <button id="to-main-menu" class="option" hidden>Main Menu</button>
           <button class="option quit" hidden>Quit</button>
+          <button class="option" data-screen="guidebook">Guidebook</button>
           <button class="option" data-screen="testing">Testing</button>
         </nav>
       </section>
+
+      <section id="screen-guidebook" class="screen" aria-label="Guidebook" hidden></section>
 
       <section id="screen-testing" class="screen" aria-label="Testing" hidden>
         <h2>Testing</h2>
@@ -173,30 +165,22 @@
       <section id="screen-controls" class="screen" aria-label="Settings" hidden>
         <h2>Settings</h2>
         <div class="rule" aria-hidden="true"></div>
-        <table class="bindings">
-          <thead>
-            <tr><th scope="col"></th><th scope="col">Keyboard and mouse</th><th scope="col">Controller</th></tr>
-          </thead>
-          <tbody id="bindings"></tbody>
-        </table>
-        <nav class="options settings">
-          <button class="option option-row" data-setting="lookSpeed">
-            <span class="row-label">Look speed</span>
-            <span class="row-value">
-              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
-              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
-              <span class="value"></span>
-              <span class="arrow" data-step="1" aria-hidden="true">›</span>
-            </span>
-          </button>
-          <button class="option option-row" data-setting="invertLook">
-            <span class="row-label">Invert look</span>
+        <div class="settings-tabs" role="tablist">
+          <button class="settings-tab option" data-settings-tab="graphics" role="tab" aria-selected="true">Graphics</button>
+          <button class="settings-tab" data-settings-tab="audio" role="tab" aria-selected="false">Audio</button>
+          <button class="settings-tab" data-settings-tab="controls" role="tab" aria-selected="false">Controls</button>
+        </div>
+        <div class="settings-panel" data-settings-panel="graphics" role="tabpanel">
+          <button class="option option-row" data-setting="graphicsMode">
+            <span class="row-label">Graphics</span>
             <span class="row-value">
               <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
               <span class="value"></span>
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
           </button>
+        </div>
+        <div class="settings-panel" data-settings-panel="audio" role="tabpanel" hidden>
           <button class="option option-row" data-setting="volume">
             <span class="row-label">Sound volume</span>
             <span class="row-value">
@@ -211,6 +195,25 @@
             <span class="row-value">
               <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
               <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+        </div>
+        <div class="settings-panel" data-settings-panel="controls" role="tabpanel" hidden>
+          <button class="option option-row" data-setting="lookSpeed">
+            <span class="row-label">Look speed</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
+              <span class="slider" aria-hidden="true"><span class="slider-fill"></span></span>
+              <span class="value"></span>
+              <span class="arrow" data-step="1" aria-hidden="true">›</span>
+            </span>
+          </button>
+          <button class="option option-row" data-setting="invertLook">
+            <span class="row-label">Invert look</span>
+            <span class="row-value">
+              <span class="arrow" data-step="-1" aria-hidden="true">‹</span>
               <span class="value"></span>
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
@@ -231,6 +234,14 @@
               <span class="arrow" data-step="1" aria-hidden="true">›</span>
             </span>
           </button>
+          <table class="bindings">
+          <thead>
+          <tr><th scope="col"></th><th scope="col">Keyboard and mouse</th><th scope="col">Controller</th></tr>
+          </thead>
+          <tbody id="bindings"></tbody>
+          </table>
+        </div>
+        <nav class="options settings-footer">
           <button id="change-folder" class="option">Change ARENA folder</button>
           <button class="option" data-back>Back</button>
         </nav>

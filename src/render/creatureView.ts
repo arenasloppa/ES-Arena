@@ -18,7 +18,7 @@ interface Actor {
   creature: Creature;
   sprite: CreatureSprite;
   mesh: THREE.Mesh;
-  material: THREE.MeshBasicMaterial;
+  material: THREE.MeshStandardMaterial;
 }
 
 export class CreatureView {
@@ -45,8 +45,10 @@ export class CreatureView {
     const sprite = await this.load(creature.info.animation);
     if (!sprite||this.disposed||this.retired.has(creature)) return;
     creature.collisionHeight=sprite.views[0].height*1.2/128;
-    const material = new THREE.MeshBasicMaterial({ map: sprite.views[0].frames[0], alphaTest: sprite.spectral ? 1 / 255 : 0.5, transparent: !!sprite.spectral, depthWrite: !sprite.spectral, side: THREE.DoubleSide });
+    const material = new THREE.MeshStandardMaterial({ map: sprite.views[0].frames[0], alphaTest: sprite.spectral ? 1 / 255 : 0.5, transparent: !!sprite.spectral, depthWrite: !sprite.spectral, side: THREE.DoubleSide, roughness: .95 });
+    material.userData.noBump = true;
     const mesh = new THREE.Mesh(this.plane, material);
+    mesh.layers.enable(2);mesh.userData.receiveSceneLighting=true;mesh.userData.shadowBillboard=true;
     this.group.add(mesh);
     this.actors.push({ creature, sprite, mesh, material });
   }

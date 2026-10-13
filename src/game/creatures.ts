@@ -1,3 +1,5 @@
+import {eliteResistance,type EliteState} from './elites';
+import type {DamageKind} from './combatText';
 import {creatureAttribute,updateCreatureMagic,type CreatureMagic} from './creatureMagic';
 import {monsterSeesInvisible} from './monsterSenses';
 import {ROUND} from './magic';
@@ -26,6 +28,11 @@ import { isBlocking, type Level } from './level';
 export type CreatureState = 'idle' | 'look' | 'wander' | 'chase' | 'attack' | 'dying' | 'dead' | 'reviving';
 
 export interface Creature {
+  elite?:EliteState;
+  auraPace?:number;
+  auraDamage?:number;
+  auraAccuracy?:number;
+  auraAttackRate?:number;
   /** Native fixed-step accumulator and previous AI casting/body-fall flags. */
   native?:{elapsed:number;casting:boolean;fallen:boolean};
   id: number;
@@ -137,7 +144,7 @@ const SHOVE = 0.35;
 const STRIDE = 5;
 
 /** IBM PIT timer / BIOS divisor, confirmed against the isolated original IRQ timer. */
-export const monsterStepSeconds=(c:Creature)=> (c.info.timing?.timerTicks??2)*65536/1193182;
+export const monsterStepSeconds=(c:Creature)=> (c.info.timing?.timerTicks??2)*65536/1193182/(c.auraAttackRate??c.elite?.attackRate??1);
 const deathFrameSeconds=(c:Creature)=>c.info.timing?monsterStepSeconds(c):DYING_TIME/2;
 /** Native AI distance: the larger delta plus one quarter of the smaller. */
 export function monsterInReach(c:Creature,player:{x:number;y:number}):boolean {
@@ -184,6 +191,9 @@ export const isMagicTarget = (c:Creature) => isAlive(c) || canRevive(c);
  */
 export function paralyseCreature(c: Creature, seconds: number, w: CreatureWorld): void {
   if (!isMagicTarget(c)) return;
+  if(c.elite&&c.elite.tier!=='minion'){
+    c.elite.chilledUntil=Math.max(c.elite.chilledUntil??0,w.now+seconds);return;
+  }
   c.paralysed = Math.max(c.paralysed, seconds);
   if(!isAlive(c))return;
   if (c.state === 'attack') {
@@ -343,9 +353,9 @@ function stepCreature(c:Creature,w:CreatureWorld,dt:number,events:CreatureEvents
         const defender = { level: p.level, agility: p.agility ?? MIDDLING_AGILITY, protection: p.protection ?? [], evasive: !!p.evasive };
         // Original 3aa1:00d8/058b resolves the attempted blow's hit chance;
         // it does not repeat a spatial check after the AI starts the attack.
-        const lands = (c.info.timing||dist <= REACH + 0.35) && blowLands({ level: c.info.level, agility: c.magic ? creatureAttribute(c,3)*256/100 : c.info.agility ?? MIDDLING_AGILITY }, defender, w.random, w.bodyParts);
+        const lands = (c.info.timing||dist <= REACH + 0.35) && blowLands({ level: c.info.level, agility: (c.magic ? creatureAttribute(c,3)*256/100 : c.info.agility ?? MIDDLING_AGILITY)*(c.auraAccuracy??1) }, defender, w.random, w.bodyParts);
         const strength=c.magic ? creatureAttribute(c,0)/Math.max(1,(c.info.attributes?.[0]??128)*100/256) : 1;
-        events.strike?.(c, lands ? Math.max(0,Math.round(roll(w.random, c.info.damage[0], c.info.damage[1])*strength*(c.magic?Math.min(1,c.magic.stamina/Math.max(1,c.magic.maxStamina)):1))) : 0);
+        events.strike?.(c, lands ? Math.max(0,Math.round(roll(w.random, c.info.damage[0], c.info.damage[1])*strength*(c.auraDamage??1)*(c.magic?Math.min(1,c.magic.stamina/Math.max(1,c.magic.maxStamina)):1))) : 0);
       }
       if (c.time+1e-9 >= (c.info.timing?(c.info.timing.attackEnd-c.info.timing.attackFirst)*dt:ATTACK_TIME)) {
         setState(c, 'chase');
@@ -382,8 +392,9 @@ export function paralysisFrom(info: CreatureInfo, chance: number, random: () => 
  * Hurts a creature; returns true only for a permanent kill. A staggering blow
  * (a power attack) also stops a swing that has not landed yet.
  */
-export function hurtCreature(c: Creature, damage: number, w: CreatureWorld, stagger = false, magical = false): boolean {
+export function hurtCreature(c: Creature, damage: number, w: CreatureWorld, stagger = false, magical = false,kind:DamageKind=magical?'magic':'physical'): boolean {
   if (!(magical?isMagicTarget(c):isAlive(c)) || damage<=0) return false;
+  damage=eliteResistance(c,damage,kind);
   const standing=isAlive(c);
   if(magical&&c.info.regeneration)c.maxHealth-=damage;
   c.health -= damage;
@@ -395,7 +406,7 @@ export function hurtCreature(c: Creature, damage: number, w: CreatureWorld, stag
     return isDefeated(c);
   }
   if(!standing)return false;
-  if (stagger && c.state === 'attack' && !c.struck) {
+  if (stagger && (!c.elite||c.elite.tier==='minion'||w.random()<.1) && c.state === 'attack' && !c.struck) {
     setState(c, 'chase');
     c.cooldown = STAGGER_TIME;
   } else if (c.state !== 'attack' && c.state !== 'chase') alert(c, w);
@@ -450,7 +461,7 @@ function moveToward(c: Creature, gx: number, gy: number, speed: number, dt: numb
   const speedStat=Math.max(0,Math.min(255,Math.floor(c.magic?creatureAttribute(c,4)*256/100:c.info.attributes?.[4]??128)));
   if(timing)speed=2*(timing.speedBase+((speedStat*timing.speedMultiplier)>>8))/128/monsterStepSeconds(c);
   const pace=timing?1:c.magic ? Math.min(2,creatureAttribute(c,4)/Math.max(1,(c.info.attributes?.[4]??128)*100/256)) : 1;
-  const stepLen = Math.min(d, speed * pace * dt);
+  const stepLen = Math.min(d, speed * pace * (c.elite?.pace??1) * (c.auraPace??1) * (w.now<(c.elite?.chilledUntil??0)?.5:1) * dt);
   let mx = (dx / d) * stepLen;
   let my = (dy / d) * stepLen;
   // Keep a little apart from the others.

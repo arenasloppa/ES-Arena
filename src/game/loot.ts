@@ -40,9 +40,11 @@ import type { ClassInfo } from '../formats/classes';
 import type { WeaponInfo } from '../formats/exe';
 import { ATTRIBUTE, FIRST_CLASSED_CREATURE, JUMPING, type LootTables, type MagicInfo } from '../formats/loot';
 import type { Random } from './combat';
+import type {SpellRecord} from '../formats/spells';
 import { classMayUse, GEAR_BOOST, makeArmour, makeShield, makeWeapon, MATERIALS, PIECES, PLATE, POTION_WEIGHT, type NewItem } from './items';
 
 export interface LootRules {
+  spells?:SpellRecord[];
   tables: LootTables;
   weapons: WeaponInfo[];
   armour: ArmourTables;

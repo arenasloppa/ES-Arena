@@ -443,16 +443,6 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #resting { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); pointer-events: none; }
 #resting[hidden] { display: none; }
 #resting p { margin: 0; font: 400 clamp(22px, 2.6vw, 30px)/1.3 var(--font-ui); letter-spacing: 0.08em; text-shadow: 0 0 12px #000; }
-/* Skyrim's help: the controls down the left side for a while at the start. */
-#tips {
-  position: absolute; left: 24px; top: 50%; transform: translateY(-50%); max-width: min(420px, 38vw);
-  display: grid; grid-template-columns: max-content auto; gap: 6px 4px; align-items: center;
-  padding: 14px 48px 14px 18px; font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase;
-  background: linear-gradient(90deg, var(--shade), transparent);
-  border-left: 1px solid var(--line);
-}
-.tip { display: contents; }
-
 /* ---- Character creation ---- */
 .create { width: min(1180px, 100%); gap: 16px; }
 /* Each step's own part, with the doll beside it all the way through. */
@@ -666,11 +656,13 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 8px 30px rgba(0, 0, 0, 0.6);
 }
 .gm-card-name { margin: 0 0 8px; font: 600 clamp(18px, 1.9vw, 23px)/1.15 var(--font-title); letter-spacing: 0.1em; text-transform: uppercase; }
+.gm-card-base { margin:0 0 8px; font-size:17px; color:var(--dim); }
 .gm-card .rule { width: 80%; margin-bottom: 10px; }
-.gm-card-stats { display: grid; grid-auto-flow: column; grid-template-rows: auto auto; justify-content: center; column-gap: 32px; margin: 0; }
-.gm-card-stats dt { font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
-.gm-card-stats dd { margin: 2px 0 0; font-size: 24px; }
-.gm-card-note { margin: 10px 0 0; color: var(--dim); font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; }
+.gm-card-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px 14px; margin:0; }
+.gm-card-note { margin: 10px 0 0; color: var(--dim); font-size: 15px; letter-spacing: 0.06em; white-space:pre-line; max-height:22vh; overflow-y:auto; }
+.gm-card-stat { display:flex; flex-direction:column; align-items:center; min-width:0; }
+.gm-card-stats dt { font-size:12px; letter-spacing:.12em; text-align:center; text-transform:uppercase; color:var(--dim); }
+.gm-card-stats dd { margin:4px 0 0; font-size:20px; line-height:1.15; text-align:center; overflow-wrap:anywhere; }
 .gm-card.forbidden .gm-card-note { color: var(--error); font-size: 17px; letter-spacing: 0.02em; text-transform: none; }
 
 /* Magic: the spells down the left, as Skyrim's, and the picked one's card on the right. */
@@ -730,7 +722,6 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 }
 
 @media (max-width: 720px) {
-  #tips { display: none !important; }
   .gm-categories { top: 10vh; }
   .gm-items .gm-list { left: calc(var(--left) + var(--kinds) + 8px); width: auto; right: 16px; }
   .gm-magic .gm-list { width: auto; right: 16px; }
@@ -940,3 +931,63 @@ body[data-input=keyboard] #game-menu [data-glyph] { display:none; }
 #quest-tracker .quest-title { margin:0 0 4px; text-align:left; font:600 14px/1.2 var(--font-ui); color:#ead79d; }
 #quest-tracker .objective { display:flex; align-items:flex-start; text-align:left; padding-left:10px; gap:7px; }
 #quest-tracker .box { display:block; margin-top:5px; }
+
+ .settings-tabs { display:flex; gap:12px; width:min(480px,100%); }
+.settings-tabs .settings-tab { flex:1; min-width:0; padding:8px 0; border:0; background:none; color:var(--dim); font:400 18px/1.3 var(--font-ui); text-transform:uppercase; letter-spacing:.12em; cursor:pointer; }
+.settings-tabs .settings-tab[aria-selected=true], .settings-tabs .settings-tab:focus-visible { color:var(--ink); text-shadow:0 0 12px var(--glow); outline:none; }
+.settings-panel { display:grid; width:min(480px,100%); max-height:248px; overflow-y:auto; overscroll-behavior:contain; padding:8px 0; border:0; background:none; scrollbar-width:thin; scrollbar-color:#e1ddcd55 transparent; }
+.settings-panel .option-row { min-height:46px; border:0; }
+.settings-footer { margin-top:4px; }
+.settings-panel[hidden] { display:none; }
+#menu[data-screen='controls'] { padding-top:24px; }
+#menu[data-screen='controls'] #screen-controls { margin-top:0; gap:12px; }
+.settings-panel[data-settings-panel='controls'] { width:min(820px,100%); max-height:max(160px,calc(100dvh - 300px)); grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; overflow-x:hidden; }
+.settings-panel[data-settings-panel='controls'] .row-label { white-space:normal; }
+.settings-panel[data-settings-panel='controls'] .option-row { gap:8px; padding:8px; font-size:20px; letter-spacing:.07em; }
+.settings-panel .bindings { grid-column:1/-1; width:100%; table-layout:fixed; margin-top:12px; }
+.settings-panel .bindings th:first-child { width:44%; }
+.settings-panel .bindings th:nth-child(2) { width:36%; }
+.settings-panel .bindings th:last-child { width:20%; }
+.settings-panel .bindings th,.settings-panel .bindings td { padding-left:8px; padding-right:8px; overflow-wrap:anywhere; }
+.settings-panel .bindings [data-glyph] { flex-wrap:wrap; }
+.settings-panel .bindings .binding-row { font:inherit; letter-spacing:inherit; color:var(--ink); text-transform:none; padding:0; cursor:default; }
+.settings-panel .bindings .binding-row:focus { background:rgba(255,255,255,.08); text-shadow:none; }
+@media(max-width:560px) {
+  .settings-panel[data-settings-panel='controls'] { grid-template-columns:minmax(0,1fr); }
+  .settings-panel .bindings { font-size:14px; }
+}
+ .combat-numbers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+ .combat-number { position: absolute; top: 0; left: 0; font-family: 'Barlow Condensed', sans-serif; font-size: 26px; font-weight: 600; line-height: 1; text-shadow: -1px -1px 0 #17130f, 1px -1px 0 #17130f, -1px 1px 0 #17130f, 1px 1px 0 #17130f, 0 2px 3px #000; }
+ .combat-number.critical { font-size: 34px; font-weight: 700; }
+ .combat-number.periodic { font-size: 22px; }
+
+.enemy-affixes { margin-top:4px; font:400 13px/1.2 var(--font-ui); color:#e4c890; letter-spacing:.025em; }
+#enemy[data-quality=champion] #enemy-name { color:#8faeff; }
+#enemy[data-quality=unique] #enemy-name { color:#d7b375; }
+
+#menu[data-screen=guidebook] { padding-top:24px; gap:12px; overflow:hidden; }
+#menu[data-screen=guidebook] .logo,#menu[data-screen=guidebook] #status { display:none; }
+#screen-guidebook { width:min(1100px,100%); margin:0; gap:10px; flex:1; min-height:0; grid-template-rows:auto auto auto auto auto minmax(0,1fr) auto auto; }
+.guide-tabs { display:flex; justify-content:center; gap:24px; flex-wrap:wrap; }
+.guide-tabs button { padding:6px 0; border:0; background:none; color:var(--dim); font:400 20px/1.2 var(--font-ui); cursor:pointer; }
+.guide-tabs button.active,.guide-tabs button:focus-visible { color:var(--ink); text-shadow:0 0 12px var(--glow); outline:none; }
+.guide-search { display:flex; align-items:center; gap:12px; font-size:16px; color:var(--dim); }
+.guide-search input { width:min(360px,60vw); padding:6px 10px; border:1px solid var(--line); background:#080b0caa; color:var(--ink); font:400 17px/1.2 var(--font-ui); }
+.guide-count,.guide-note { margin:0; font:400 14px/1.2 var(--font-ui); color:var(--dim); letter-spacing:.025em; }
+.guide-body { display:grid; grid-template-columns:minmax(220px,1fr) minmax(0,1.6fr); width:100%; min-height:0; gap:24px; text-align:left; }
+.guide-list,.guide-details { min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:#e1ddcd55 transparent; }
+.guide-entry.option { width:100%; display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:8px 12px; font:400 19px/1.3 var(--font-ui); letter-spacing:.03em; text-align:left; text-transform:none; }
+.guide-entry small { font-size:12px; color:var(--dim); flex:none; }
+.guide-entry[aria-pressed=true] { color:#e4c890; background:#ffffff0b; }
+.guide-details { padding:6px 20px 12px; border-left:1px solid var(--line); font:400 18px/1.4 var(--font-ui); letter-spacing:.015em; outline:none; }
+.guide-details h3 { margin:6px 0 18px; font:500 24px/1.25 var(--font-title); color:#e4c890; }
+.guide-group { margin:0; font-size:13px; text-transform:uppercase; color:var(--dim); }
+.guide-effect { margin:0 0 18px; }
+.guide-details ul { padding-left:18px; color:var(--dim); font-size:16px; }
+.guide-details li { margin:0 0 10px; }
+.guide-back { font-size:18px; }
+@media(max-width:650px){ .guide-body { grid-template-columns:minmax(140px,1fr) minmax(0,1.3fr); gap:8px; } .guide-entry.option { font-size:16px; flex-direction:column; gap:0; } .guide-details { padding:6px 10px; font-size:16px; } .guide-tabs { gap:12px; } .guide-tabs button { font-size:17px; } }
+
+.guide-pad-help { display:none; margin:0; font:400 14px/1.2 var(--font-ui); color:var(--dim); }
+body[data-input=gamepad] .guide-pad-help { display:flex; justify-content:center; align-items:center; gap:24px; }
+.guide-pad-help>span { display:flex; align-items:center; gap:6px; }

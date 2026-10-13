@@ -1,3 +1,4 @@
+import {Guidebook} from './ui/guidebook';
 import {TEST_SECTION_NAMES,type TestAreaMode} from './game/testEffects';
 import '@fontsource/cinzel/latin-500.css';
 import '@fontsource/cinzel/latin-600.css';
@@ -29,6 +30,7 @@ import { parseMif } from './formats/mif';
 import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
 import { attributeRoom, creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
+import {saveProgress,loadProgress,clearProgress} from './game/runProgress';
 import { Dungeon, type Vision } from './game/dungeon';
 import { steelWeaponThumbnail } from './render/steelWeaponThumbnail';
 import { weaponModelDefinition } from './render/weaponModelDefinitions';
@@ -41,6 +43,7 @@ import { GamepadInput } from './input/gamepad';
 import { CreatureView } from './render/creatureView';
 import { TextureCache } from './render/textures';
 import { buildLevelScene } from './render/levelScene';
+import { environmentWalls } from './render/environmentWalls';
 import { MapView } from './render/mapView';
 import { Portraits } from './render/portrait';
 import { WeaponView } from './render/weaponView';
@@ -58,6 +61,7 @@ import { Hud } from './ui/hud';
 import { LevelUp } from './ui/levelUp';
 import { MenuNav, type StepEvent } from './ui/menu';
 import { Minimap } from './ui/minimap';
+import { SettingsTabs } from './ui/settingsTabs';
 import { bindSettingRows, loadSettings } from './ui/settings';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -110,18 +114,18 @@ let textures: TextureCache | undefined;
 let engine: Engine | undefined;
 /** The map being played; undefined while only the backdrop runs. */
 let engineMap: string | undefined;
-let tipsShown = false;
 
 /** True while a map is being played and the player is still in it. */
 const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'testing' | 'create' | 'controls' | 'wait' | 'level' | 'dead' | 'escaped';
+type Screen = 'folder' | 'play' | 'testing' | 'guidebook' | 'create' | 'controls' | 'wait' | 'level' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
   testing: $('screen-testing'),
+  guidebook: $('screen-guidebook'),
   create: $('screen-create'),
   controls: $('screen-controls'),
   wait: $('screen-wait'),
@@ -132,6 +136,16 @@ const screens: Record<Screen, HTMLElement> = {
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
 let screenBeforeTesting:Screen='folder';
+let screenBeforeGuidebook:Screen='folder';
+const guidebook=new Guidebook(screens.guidebook);
+let guideFrame=0;
+let guideLoad=0;
+async function loadGuidebook():Promise<void>{
+ const requested=++guideLoad,game=data;if(!game){guidebook.setRules(undefined);return;}
+ const [readTables,readSpells]=await Promise.all([tables===undefined?loadTables(game):tables,spells===undefined?loadSpells(game):spells]);
+ if(requested!==guideLoad||data!==game||screen!=='guidebook')return;
+ if(readTables?.loot)guidebook.setRules({tables:readTables.loot,spells:readSpells});
+}
 const creator = new CharacterCreation(screens.create);
 const levelSheet = new LevelUp(screens.level);
 const cutscenes = new Cutscenes($('cutscene'), pad, () => data, () => sounds);
@@ -157,11 +171,14 @@ if (import.meta.env.DEV) {
     showCutscene(death ? deathVision(name) : firstVision(name), SONGS.vision);
 }
 
+const settingsTabs = new SettingsTabs(screens.controls);
 const nav = new MenuNav(menu, pad, input, {
+  switchTab: delta => screen === 'controls' ? settingsTabs.step(delta) : screen==='guidebook'?guidebook.step(delta):false,
   back: () => {
     if (screen === 'create') creator.back();
     else if (screen === 'controls') showScreen(screenBeforeControls);
     else if (screen === 'testing') showScreen(screenBeforeTesting);
+    else if(screen==='guidebook')showScreen(screenBeforeGuidebook);
     else if (screen === 'level') levelSheet.back();
     else if (playing()) resume();
   },
@@ -172,11 +189,13 @@ const nav = new MenuNav(menu, pad, input, {
 });
 
 function showScreen(next: Screen) {
+  if(next==='guidebook'&&screen!=='guidebook')screenBeforeGuidebook=screen;
   if(next==='testing' && screen!=='testing')screenBeforeTesting=screen;
   if (next === 'controls' && screen !== 'controls') screenBeforeControls = screen;
   screen = next;
   for (const [name, el] of Object.entries(screens)) el.hidden = name !== next;
   menu.dataset.screen = next;
+  if(next==='guidebook'){input.render(screens.guidebook);void loadGuidebook();}
   // The main menu's song, unless a map is being played (its music carries on under the pause menu) or a character is being made.
   if (!playing() && next !== 'create') music?.play(SONGS.menu);
   updateHints();
@@ -186,9 +205,9 @@ function showScreen(next: Screen) {
 /** The button hints along the bottom: Back steps back through character creation, closes the Controls screen, or returns to the game. */
 function updateHints() {
   // The level-up sheet has no way back: the points have to be shared out first.
-  $('hint-back').hidden = screen === 'level' || (screen !== 'controls' && screen !== 'testing' && screen !== 'create' && !playing());
-  $('hint-back-label').textContent = screen === 'controls' || screen === 'testing' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
-  $('hint-change').hidden = screen !== 'controls' && screen !== 'create' && screen !== 'wait' && screen !== 'level';
+  $('hint-back').hidden = screen === 'level' || (screen !== 'controls' && screen !== 'testing' && screen !== 'guidebook' && screen !== 'create' && !playing());
+  $('hint-back-label').textContent = screen === 'controls' || screen === 'testing' || screen === 'guidebook' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
+  $('hint-change').hidden = screen !== 'controls' && screen !== 'guidebook' && screen !== 'create' && screen !== 'wait' && screen !== 'level';
 }
 
 /**
@@ -210,6 +229,7 @@ function updatePlayOptions() {
 function fillBindings() {
   const row = (action: (typeof GAME_ACTIONS)[number]) => {
     const tr = document.createElement('tr');
+    tr.className = 'binding-row option';tr.tabIndex = 0;
     const name = document.createElement('td');
     name.textContent = BINDINGS[action].label;
     const cells = (['keyboard', 'gamepad'] as InputMode[]).map((mode) => {
@@ -234,6 +254,7 @@ let engineChanges = 0;
 
 /** Stops the running engine (map or backdrop) and makes `next` the current one. */
 function setEngine(next?: Engine, map?: string) {
+  checkpoint();
   currentTesting=undefined;hotbarArtPending.clear();hud.clearHotbarArtwork();playerHeadKey='';
   $('effect-test-controls').hidden=true;
   lootMenu?.close(false);
@@ -260,7 +281,7 @@ async function showBackdrop() {
   const { level, textures: provider } = backdropLevel();
   const scene = await buildLevelScene(level, provider);
   if (engine) return; // a map started while the backdrop was building
-  setEngine(new Engine(renderer, new Dungeon(level, undefined), scene, { autopilot: true }));
+  setEngine(new Engine(renderer, new Dungeon(level, undefined), scene, { autopilot: true, controls: settings }));
   engine!.start();
 }
 
@@ -280,7 +301,7 @@ async function showFilm(game: GameData, asked: number): Promise<boolean> {
     const level = buildLevel(mif, levelIndex, inf, tables?.platforms);
     cache = new TextureCache(game, parseCol(await game.read('PAL.COL')));
     const dungeon = new Dungeon(level, tables ?? undefined);
-    const scene = await buildLevelScene(level, cache);
+    const scene = await buildLevelScene(level, cache, environmentWalls, settings.graphicsMode);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache!.creature(stem), level);
     // A map started, another folder was opened or the backdrop was asked for again meanwhile.
     if (engineChanges !== asked || data !== game) {
@@ -289,7 +310,7 @@ async function showFilm(game: GameData, asked: number): Promise<boolean> {
       return true;
     }
     const film = new FilmView(new Film(new Director(level, dungeon.creatures), level, dungeon.creatures));
-    setEngine(new Engine(renderer, dungeon, scene, { autopilot: true, creatures, film }));
+    setEngine(new Engine(renderer, dungeon, scene, { autopilot: true, creatures, film, controls: settings }));
     textures = cache;
     menu.classList.add('film');
     if (import.meta.env.DEV) (window as unknown as { arenaEngine?: Engine }).arenaEngine = engine;
@@ -372,6 +393,7 @@ async function createCharacter(map: string) {
     portraits,
     finish: 'Enter the dungeon',
     done: async (character) => {
+      setEngine(undefined);clearProgress(character);
       saveCharacter(character, made.classes[character.cls]);
       await showCutscene(firstVision(firstName(character)), SONGS.vision);
       void startMap(map, character);
@@ -437,15 +459,17 @@ async function startMap(name: string, character: Character) {
     if (spells === undefined) spells = await loadSpells(data);
     const cache = new TextureCache(data, palette);
     const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
+    dungeon.enableRandomLoot();
     if(practice&&!tables)throw new Error('Creature and weapon tables are needed for the Test Area');
     const testArea=practice?new TestArea(dungeon,tables!.creatures,tables!.weapons,testMode):undefined;
     // Enchanted gear, trinkets and Fortify raise attributes for a while; the character is worked out again with them.
     dungeon.heroWith = (bonus) => {
-      const c = runCharacter ?? character;
+      const c = engine?.dungeon===dungeon&&runCharacter ? runCharacter : character;
       const raised = { ...c, attributes: c.attributes.map((a, i) => Math.max(0, Math.min(ATTRIBUTE_MAX, a + (bonus[i] ?? 0)))) };
       return heroFor(raised, made.classes[c.cls], { levelled: dungeon.stats.level > 1 });
     };
-    const scene = await buildLevelScene(level, cache);
+    if(!practice){loadProgress(character,dungeon);dungeon.enableEliteEncounters();}
+    const scene = await buildLevelScene(level, cache, environmentWalls, settings.graphicsMode);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem), level);
     // A bow's arrow is a CFA, the swing sets CIFs.
     const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => (file.endsWith('.CFA') ? cache.screenAnimation(file) : cache.screenImages(file)));
@@ -502,10 +526,6 @@ async function startMap(name: string, character: Character) {
     resume();
     hud.fade(0, 1.4);
     hud.banner(level.name || name,practice?'Practice':undefined,practice?(testMode==='weapons'?'Immortal · All monsters cycle one at a time · Every weapon and material in inventory':'Stack buffs and debuffs · Automatic cycles every 8 seconds'):undefined);
-    if (!practice&&!tipsShown) {
-      tipsShown = true;
-      hud.showTips();
-    }
   } catch (err) {
     console.error(err);
     setStatus(`Could not load ${name}: ${(err as Error).message}`);
@@ -583,8 +603,16 @@ function showMenu(next: Screen) {
 }
 
 function pause() {
+  checkpoint();
   showMenu('play');
 }
+let lastCheckpoint=0;
+function checkpoint():void {
+  if(!engineMap||!engine||!runCharacter||engine.dungeon.practiceMode||engine.dungeon.outcome)return;
+  saveProgress(runCharacter,engine.dungeon);
+  const cls=creationLoaded?.classes[runCharacter.cls];if(cls)saveCharacter(runCharacter,cls);
+}
+window.addEventListener('beforeunload',checkpoint);
 
 // ---- Waiting, as Skyrim's wait menu, with Arena's camping ----
 
@@ -740,6 +768,7 @@ async function updatePlayerPortrait():Promise<void>{
 let padWasConnected = false;
 function uiFrame(now: number) {
   pad.poll(now);
+  if(now-lastCheckpoint>10000){lastCheckpoint=now;checkpoint();}
   input.update(pad);
   void updatePlayerPortrait();
   void updateHotbarArtwork();
@@ -751,11 +780,12 @@ function uiFrame(now: number) {
    }
   }
   if (cutscenes.isPlaying) cutscenes.frame();
-  else if (!menu.hidden) nav.frame(now);
+  else if (!menu.hidden){nav.frame(now);if(screen==='guidebook')guidebook.frame(guideFrame?(now-guideFrame)/1000:0,pad.look.y);}
   else if (gameMenus.isOpen) gameMenus.frame(now);
   else if (lootMenu.isOpen) lootMenu.frame(now);
   // Like Skyrim, pause if the controller goes away mid-game.
   else if (padWasConnected && !pad.connected && playing()) pause();
+  guideFrame=now;
   padWasConnected = pad.connected;
   requestAnimationFrame(uiFrame);
 }
@@ -952,6 +982,7 @@ mainMenuButton.addEventListener('click', () => {
   showScreen('play');
 });
 for(const button of document.querySelectorAll<HTMLElement>('[data-test-mode]'))button.addEventListener('click',()=>void enterTestArea(button.dataset.testMode as TestAreaMode));
+$('guidebook-back').addEventListener('click',()=>showScreen(screenBeforeGuidebook));
 $('testing-back').addEventListener('click',()=>showScreen(screenBeforeTesting));
 for(const button of document.querySelectorAll<HTMLButtonElement>('[data-test-action]'))button.addEventListener('click',()=>{
  const area=currentTesting;if(area?.mode!=='effects')return;
@@ -965,6 +996,7 @@ $('play-again').addEventListener('click', () => engineMap && enterDungeon(engine
 bindSettingRows(screens.controls, settings, (key) => {
   if (key === 'volume') sounds?.setVolume(settings.volume);
   if (key === 'music') music?.setVolume(settings.music);
+  if (key === 'graphicsMode') void engine?.refreshGraphics().catch(error => { console.error(error); setStatus('Could not change graphics.'); });
 });
 // Browsers start sound only after a click or key press.
 for (const type of ['pointerdown', 'keydown']) {

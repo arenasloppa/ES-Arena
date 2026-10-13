@@ -11,6 +11,7 @@ export interface MenuActions {
   back(): void;
   /** Start: back to the game, if one is running. */
   resume(): void;
+  switchTab?(delta: number): boolean;
 }
 
 /** Asks a setting to step through its values; `wrap` goes round from the last value to the first. */
@@ -84,15 +85,15 @@ export class MenuNav {
     if (pad.take('A')) this.choose();
     if (pad.take('B')) this.actions.back();
     if (pad.take('Start')) this.actions.resume();
-    if (pad.take('LB')) this.change(-10);
-    if (pad.take('RB')) this.change(10);
+    if (pad.take('LB') && !this.actions.switchTab?.(-1)) this.change(-10);
+    if (pad.take('RB') && !this.actions.switchTab?.(1)) this.change(10);
     const direction = this.repeater.update(pad.direction(), now);
     if (direction) this.go(direction);
   }
 
   private optionAt(el: Element): HTMLElement | undefined {
     const row = el.closest<HTMLElement>('.option-row');
-    return (row ? row.querySelector<HTMLElement>('.option') : el.closest<HTMLElement>('.option')) ?? undefined;
+    return (row ? (row.matches('.option') ? row : row.querySelector<HTMLElement>('.option')) : el.closest<HTMLElement>('.option')) ?? undefined;
   }
 
   private current(): HTMLElement | undefined {
@@ -131,6 +132,7 @@ export class MenuNav {
       if (n === el.selectedIndex) return;
       el.selectedIndex = n;
       el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (el.dataset.settingsTab !== undefined || el.dataset.guideTab!==undefined) { this.actions.switchTab?.(delta);
     } else if (el.dataset.setting !== undefined && delta) {
       el.dispatchEvent(new CustomEvent('step', { detail: { delta: Math.sign(delta), wrap: false } }));
     }
@@ -139,7 +141,7 @@ export class MenuNav {
   private onKeyDown = (e: KeyboardEvent) => {
     if (this.menu.hidden || e.defaultPrevented) return;
     const el = this.current();
-    const changes = el instanceof HTMLSelectElement || el?.dataset.setting !== undefined;
+    const changes = el instanceof HTMLSelectElement || el?.dataset.setting !== undefined || el?.dataset.settingsTab !== undefined || el?.dataset.guideTab!==undefined;
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
       this.go(e.key === 'ArrowUp' ? 'up' : 'down');

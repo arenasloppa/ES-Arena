@@ -38,6 +38,10 @@ const SAVED_CHARACTER = 'es-arena.character';
 /** What each shot shows, in the order the gallery lists them. */
 const CAPTIONS: Record<string, string> = {
   menu: 'The main menu',
+  'guidebook-weapons':'Weapon affixes in the Guidebook',
+  'guidebook-monsters':'Monster affixes in the Guidebook',
+  'loot':'Randomized loot and equipment properties',
+  'elite':'A named elite in Weapon Testing',
   race: 'Choosing gender, race and face, with the map of Tamriel',
   attributes: 'Sharing out bonus points, beside the paper doll',
   cell: 'Arriving in the cell where Arena begins',
@@ -58,12 +62,12 @@ await build({ root, mode: 'development', logLevel: 'warn' });
 
 // The electron package's main export is the path to its binary.
 const electronPath = createRequire(import.meta.url)('electron') as string;
-// Linux containers have no GPU and run as root; a separate settings folder keeps the player's own untouched there.
+// An isolated profile keeps the player's saved character and settings untouched.
 const linux = process.platform === 'linux';
-const settings = linux ? mkdtempSync(join(tmpdir(), 'es-arena-shots-')) : undefined;
+const settings = mkdtempSync(join(tmpdir(), 'es-arena-shots-'));
 const app = await electron.launch({
   executablePath: electronPath,
-  args: [...(linux ? ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : []), root],
+  args: [`--user-data-dir=${settings}`, ...(linux ? ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : []), root],
   env: { ...process.env, ...(settings ? { XDG_CONFIG_HOME: settings } : {}) },
 });
 
@@ -99,6 +103,13 @@ try {
   await page.waitForSelector('#screen-play:not([hidden])', { timeout: 60_000 });
   await page.waitForTimeout(2500);
   await shot(page, 'menu');
+  await page.click('#screen-play [data-screen=guidebook]');
+  await page.waitForSelector('#screen-guidebook:not([hidden]) .guide-entry');
+  await page.waitForFunction(()=>[...document.querySelectorAll<HTMLElement>('.guide-entry')].some(b=>b.dataset.guideEntry?.startsWith('suffix-charge-')));
+  await page.fill('.guide-search input','fire damage');
+  await page.locator('.guide-entry').first().focus();await shot(page,'guidebook-weapons');
+  await page.click('[data-guide-tab=monsters]');await page.fill('.guide-search input','storm bolts');await page.click('[data-guide-entry=monster-storm]');await shot(page,'guidebook-monsters');
+  await page.keyboard.press('Escape');
 
   await page.click('#new-character');
   // The story of how the Emperor was betrayed comes first.
@@ -109,8 +120,9 @@ try {
   }
   await makeCharacter(page);
   await page.waitForSelector('#menu[hidden]', { state: 'attached', timeout: 60_000 });
-  await page.evaluate(() => (document.getElementById('tips')!.hidden = true));
   await page.waitForTimeout(1800);
+  await page.evaluate(()=>{const d=(window as unknown as Win).arenaEngine.dungeon,base=d.inventory.weapon;if(base){const item=d.inventory.add({...base,material:1,name:'Steel Broadsword'});d.use('item:'+item.id);}});
+  await page.waitForTimeout(600);
   await shot(page, 'cell');
   // Let the titles across the top finish.
   await page.waitForTimeout(7500);
@@ -139,6 +151,7 @@ try {
   await menus(page);
   await wait(page);
   await levelUp(page);
+  await newFeatures(page);
   writeFileSync(versionFile, `${version}\n`);
   writeGallery();
   console.log(`Saved the screenshots in ${out}. Run "npm run build" for a normal build again.`);
@@ -168,7 +181,12 @@ function archive(): void {
   if (!taken || taken === version || !shots.length) return;
   const dir = join(out, taken);
   mkdirSync(dir, { recursive: true });
-  for (const f of shots) renameSync(join(out, f), join(dir, f));
+  for (const f of shots) {
+    let destination=join(dir,f),number=2;
+    if(existsSync(destination)&&readFileSync(destination).equals(readFileSync(join(out,f)))){rmSync(join(out,f));continue;}
+    while(existsSync(destination))destination=join(dir,f.replace(/\.png$/,`-${number++}.png`));
+    renameSync(join(out,f),destination);
+  }
   console.log(`Moved the ${taken} screenshots to docs/screenshots/${taken}/`);
 }
 
@@ -191,7 +209,7 @@ function writeGallery(): void {
       .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     lines.push('', `## ${title}`, '', '| | |', '|---|---|');
     for (let i = 0; i < names.length; i += 2) {
-      const cells = names.slice(i, i + 2).map((n) => `![${CAPTIONS[n] ?? n}](${dir}/${n}.png)<br>${CAPTIONS[n] ?? n}`);
+      const cells = names.slice(i, i + 2).map((n) => `![${CAPTIONS[n] ?? CAPTIONS[n.replace(/-\d+$/,'')] ?? n}](${dir}/${n}.png)<br>${CAPTIONS[n] ?? CAPTIONS[n.replace(/-\d+$/,'')] ?? n}`);
       lines.push(`| ${cells.join(' | ')}${cells.length === 1 ? ' | ' : ''} |`);
     }
   }
@@ -269,6 +287,7 @@ async function wait(page: Page): Promise<void> {
 /** The menu of menus aimed at the items, the item menu with a piece of armour picked, and the character sheet. */
 async function menus(page: Page): Promise<void> {
   // Aiming lights the arm and its name; letting go opens it.
+  await page.evaluate(()=>{const e=(window as unknown as Win).arenaEngine;e.dungeon.outcome=undefined;e.dungeon.stats.health=e.dungeon.stats.maxHealth;e.start();});
   await page.keyboard.press('Tab');
   await page.waitForSelector("#game-menu[data-panel='tween']:not([hidden])");
   await page.keyboard.down('ArrowRight');
@@ -312,6 +331,27 @@ async function levelUp(page: Page): Promise<void> {
   }
   await page.click('#screen-level .option >> text="Done"');
   await page.waitForTimeout(600);
+}
+
+/** The latest loot and elite encounter screens, in the isolated practice profile. */
+async function newFeatures(page:Page):Promise<void>{
+ await page.keyboard.press('Escape');await page.waitForSelector('#screen-play:not([hidden])');
+ await page.click('#screen-play [data-screen=testing]');await page.click('[data-test-mode=weapons]');
+ await page.waitForFunction(()=>(window as unknown as Win).arenaEngine?.dungeon.practiceMode&&!document.getElementById('hud')!.hidden);
+ await page.waitForTimeout(8500);
+ await page.evaluate(async()=>{
+  const e=(window as unknown as Win).arenaEngine,d=e.dungeon;let c=d.creatures[0];
+  const options=(e as unknown as {options:import('../src/game/engine').EngineOptions}).options;
+  const info=(options.testArea as unknown as {enemyTypes:typeof c.info[]}).enemyTypes.find(i=>i.name==='Goblin')!;
+  options.creatures!.remove(c);c={...c};d.creatures[0]=c;c.info=info;c.elite=undefined;c.health=c.maxHealth=info.health[1];await options.creatures!.add(c);
+  d.applyPracticeElite(c,'unique',{affixes:['strong','stonehide']});c.health=c.maxHealth=40;c.paralysed=100;c.state='chase';c.x=d.player.x+1;c.y=d.player.y;d.player.yaw=0;
+  (d as unknown as {hurtByMagic(c:typeof d.creatures[0],n:number):void}).hurtByMagic(c,1);
+ });
+ await page.waitForTimeout(150);await page.evaluate(()=>(window as unknown as Win).arenaEngine.pause());await shot(page,'elite');
+ await page.evaluate(()=>(window as unknown as Win).arenaEngine.start());await page.keyboard.press('KeyI');
+ await page.waitForSelector('#game-menu:not([hidden]) .gm-card-name');
+ await page.evaluate(()=>{const item=(window as unknown as Win).arenaEngine.dungeon.inventory.items.find(i=>i.quality==='unique'&&i.type===3)!;[...document.querySelectorAll<HTMLElement>('.gm-items .gm-list li')].find(li=>li.querySelector('.gm-name')?.textContent===item.name)!.click();});
+ await page.waitForTimeout(2200);await shot(page,'loot');
 }
 
 /** The window's game engine, which development builds expose. */
@@ -423,8 +463,8 @@ async function explore(page: Page): Promise<void> {
       d.explored.look((i % L.width) + 0.5, Math.floor(i / L.width) + 0.5, d.openDoors);
     }
     for (const i of [...d.openDoors]) if (d.doors.get(i)?.target !== 1) d.openDoors.delete(i);
-    for (const c of d.creatures) c.state = 'dead';
-    engine.teleport(L.start.x - 6, L.start.y - 3);
+    for (const c of d.creatures) {c.state = 'dead';c.maxHealth=0;}
+    engine.teleport(L.start.x,L.start.y);
   });
   await page.keyboard.press('KeyC');
 }

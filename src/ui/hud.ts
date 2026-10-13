@@ -1,4 +1,5 @@
 import {effectTimer, effectClockProgress, type ActiveStatusEffect} from '../game/statusEffects';
+import {DAMAGE_COLOURS,CRITICAL_COLOUR,type CombatLabel} from '../game/combatText';
 /**
  * The in-game HUD, after Skyrim's: a compass along the top that marks
  * creatures hunting the player and the current objective, the health of the
@@ -12,7 +13,6 @@ import {effectTimer, effectClockProgress, type ActiveStatusEffect} from '../game
 import type { AbilitySlotView, CompassMarker, EngineHud, HudTarget, ReadiedSpell, Vitals } from '../game/engine';
 
 const MESSAGE_MS = 7000;
-const TIPS_MS = 14000;
 const NOTE_MS = 4500;
 const MAX_NOTES = 5;
 /** How long each title across the top stays up; the next waits its turn. */
@@ -65,8 +65,9 @@ class Bar {
 }
 
 export class Hud implements EngineHud {
+  private readonly combatLayer: HTMLElement;
+  private readonly combatLabels = new Map<number,HTMLElement>();
   private messageTimer: ReturnType<typeof setTimeout> | undefined;
-  private tipsTimer: ReturnType<typeof setTimeout> | undefined;
   private lastHeading = Number.NaN;
   private readonly strip: HTMLElement;
   private readonly prompt: HTMLElement;
@@ -74,13 +75,13 @@ export class Hud implements EngineHud {
   private readonly promptVerb: HTMLElement;
   private readonly promptNote: HTMLElement;
   private readonly messageEl: HTMLElement;
-  private readonly tips: HTMLElement;
   private readonly notes: HTMLElement;
   private readonly questTracker: HTMLElement;
   private readonly hurtEl: HTMLElement;
   private readonly enemyEl: HTMLElement;
   private readonly enemyName: HTMLElement;
   private readonly enemyBar: HTMLElement;
+  private readonly enemyDescription:HTMLElement;
   private readonly health: Bar;
   private readonly stamina: Bar;
   private readonly magickaEl: HTMLElement;
@@ -104,6 +105,8 @@ export class Hud implements EngineHud {
   clearHotbarArtwork():void {this.hotbarArtwork.clear();}
 
   constructor(private readonly root: HTMLElement) {
+    this.combatLayer=document.createElement('div');this.combatLayer.className='combat-numbers';
+    this.combatLayer.setAttribute('aria-hidden','true');root.append(this.combatLayer);
     const $ = (id: string) => root.querySelector<HTMLElement>(`#${id}`)!;
     this.strip = $('compass-strip');
     this.prompt = $('prompt');
@@ -111,13 +114,13 @@ export class Hud implements EngineHud {
     this.promptVerb = $('prompt-verb');
     this.promptNote = $('prompt-note');
     this.messageEl = $('message');
-    this.tips = $('tips');
     this.notes = $('notes');
     const logLayout=new ResizeObserver(()=>this.trimNotes());logLayout.observe(this.notes);
     this.questTracker = $('quest-tracker');
     this.hurtEl = $('hurt');
     this.enemyEl = $('enemy');
     this.enemyName = $('enemy-name');
+    this.enemyDescription=document.createElement('div');this.enemyDescription.className='enemy-affixes';this.enemyEl.append(this.enemyDescription);
     this.enemyBar = $('enemy-bar');
     this.health = new Bar($('health'));
     this.stamina = new Bar($('stamina'));
@@ -158,6 +161,21 @@ export class Hud implements EngineHud {
       if (letter) mark.textContent = letter;
       mark.style.setProperty('--at', String(deg + 360));
       this.strip.append(mark);
+    }
+  }
+
+  /** Places world-space combat feedback without intercepting gameplay input. */
+  damageNumbers(labels: CombatLabel[]): void {
+    const live=new Set(labels.map(label=>label.id));
+    for(const [id,element] of this.combatLabels)if(!live.has(id)){element.remove();this.combatLabels.delete(id);}
+    for(const label of labels){
+      let element=this.combatLabels.get(label.id);
+      if(!element){element=document.createElement('span');this.combatLabels.set(label.id,element);this.combatLayer.append(element);}
+      element.className=`combat-number${label.critical?' critical':''}${label.periodic?' periodic':''}`;
+      element.textContent=label.amount<1?label.amount.toFixed(1):String(Math.round(label.amount));
+      element.style.color=label.critical?CRITICAL_COLOUR:DAMAGE_COLOURS[label.kind];
+      element.style.transform=`translate(${label.x.toFixed(1)}px,${label.y.toFixed(1)}px) translate(-50%,-100%)`;
+      element.style.opacity=label.opacity.toFixed(3);
     }
   }
 
@@ -370,14 +388,15 @@ export class Hud implements EngineHud {
   }
 
   /** Shows the health of the creature being fought, under the compass. */
-  enemy(name: string, health: number, maxHealth: number, id?: number): void {
-    const key = `${id ?? name}:${health}:${maxHealth}`;
+  enemy(name: string, health: number, maxHealth: number, id?: number,description='',quality=''): void {
+    const key = `${id ?? name}:${health}:${maxHealth}:${description}:${quality}`;
     this.enemyUntil = performance.now() + (health > 0 ? ENEMY_MS : 1200);
     this.enemyEl.hidden = false;
     this.enemyEl.classList.remove('faded');
     if (key === this.enemyKey) return;
     this.enemyKey = key;
     this.enemyName.textContent = name;
+    this.enemyDescription.textContent=description;this.enemyDescription.hidden=!description;this.enemyEl.dataset.quality=quality;
     this.enemyBar.style.setProperty('--fill', String(maxHealth > 0 ? Math.max(0, Math.min(1, health / maxHealth)) : 0));
   }
 
@@ -450,17 +469,10 @@ export class Hud implements EngineHud {
     f.style.opacity = String(opacity);
   }
 
-  /** Lists the controls for a while, as Skyrim's tutorial notes do. */
-  showTips(): void {
-    this.tips.hidden = false;
-    clearTimeout(this.tipsTimer);
-    this.tipsTimer = setTimeout(() => (this.tips.hidden = true), TIPS_MS);
-  }
-
   /** Clears everything from the last map. */
   reset(): void {
+    this.damageNumbers([]);
     clearTimeout(this.messageTimer);
-    clearTimeout(this.tipsTimer);
     clearTimeout(this.bannerTimer);
     this.bannerTimer = undefined;
     this.banners.length = 0;
@@ -468,7 +480,6 @@ export class Hud implements EngineHud {
     for (const el of this.markerPool) el.hidden = true;
     this.detection(undefined);
     this.messageEl.classList.remove('shown');
-    this.tips.hidden = true;
     this.notes.replaceChildren();
     this.questTracker.replaceChildren();
     this.questTracker.hidden = true;

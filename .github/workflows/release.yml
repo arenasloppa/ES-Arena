@@ -79,6 +79,7 @@ jobs:
           node scripts/release-notes.mjs "$version" > notes.md
           if gh release view "$tag" > /dev/null 2>&1; then
             gh release upload "$tag" zips/*.zip --clobber
+            gh release edit "$tag" --title "ES Arena $version" --notes-file notes.md
           else
             gh release create "$tag" zips/*.zip --target "$GITHUB_SHA" --title "ES Arena $version" --notes-file notes.md
           fi

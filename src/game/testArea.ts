@@ -1,3 +1,4 @@
+import {ELITE_AFFIXES,CHAMPIONS} from './elites';
 import type {CreatureInfo,WeaponInfo} from '../formats/exe';
 import {isDefeated,type Creature} from './creatures';
 import type {Dungeon} from './dungeon';
@@ -10,6 +11,7 @@ export class TestArea {
  private readonly dead=new Map<Creature,number>();
  private missingSince:number|undefined;
  private nextType=0;
+ private encounterCycle=0;
  private readonly enemyTypes:CreatureInfo[];
  private nextId=0;
  private buffIndex=0;
@@ -31,6 +33,7 @@ export class TestArea {
   for(const item of [...dungeon.inventory.items])dungeon.inventory.remove(item);
   for(let material=0;material<MATERIALS.length;material++)for(let type=0;type<weapons.length;type++)dungeon.inventory.add(makeWeapon(weapons,type,material));
   dungeon.inventory.add(makeSteelArrows(200));
+  for(const item of dungeon.practiceLootItems())dungeon.inventory.add(item);
   const sword=dungeon.inventory.items.find(i=>i.kind==='weapon'&&i.type===3&&i.material===1)!;
   if(sword)dungeon.use(itemKey(sword));
   dungeon.hero.carry=Math.max(dungeon.hero.carry,10000);
@@ -64,9 +67,16 @@ export class TestArea {
   const info=this.enemyTypes[this.nextType];if(!info)return;
   const creature=rangeSpawn(d.level,d.player,d.creatures,info);if(!creature)return;
   creature.id=this.nextId++;creature.awareness=0;creature.state='idle';
+  if(this.encounterCycle===1)d.applyPracticeElite(creature,'champion',{champion:CHAMPIONS[this.nextType%CHAMPIONS.length]});
+  else if(this.encounterCycle>1&&!info.boss&&info.id!==24){
+    const eligible=ELITE_AFFIXES.filter(a=>a!=='volley'||!!info.spells?.length);
+    const affix=eligible[(this.nextType+(this.encounterCycle-2)*this.enemyTypes.length)%eligible.length];
+    d.applyPracticeElite(creature,'unique',{affixes:[affix]});
+  }
   d.addPracticeCreature(creature);
   if(!initial)d.events.push({type:'spawned',creature});
   this.nextType=(this.nextType+1)%this.enemyTypes.length;
+  if(this.nextType===0)this.encounterCycle++;
   this.missingSince=undefined;
 
  }

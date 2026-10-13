@@ -8,6 +8,8 @@ export function makeLiquidMaterial(frame: THREE.DataTexture, layer?: THREE.DataT
   const viewport = new THREE.Vector4(0, 0, 1, 1);
   const frameUniform = { value: frame };
   const material = new THREE.MeshBasicMaterial({ map: layer ?? frame, side: THREE.DoubleSide });
+  material.userData.keepAnimatedMaterial = true;
+  material.userData.liquid = true;
   material.onBeforeRender = renderer => { renderer.getCurrentViewport(viewport); };
   material.onBeforeCompile = shader => {
     shader.uniforms.arenaLiquidViewport = { value: viewport };

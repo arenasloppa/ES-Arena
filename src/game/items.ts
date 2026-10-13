@@ -28,6 +28,8 @@ import type { ArmourTables } from '../formats/armour';
 import type { ClassInfo } from '../formats/classes';
 import type { WeaponInfo } from '../formats/exe';
 import { BOWS, weaponCif, type Random, type Weapon } from './combat';
+import {itemStats,addStats,ATTRIBUTE_STATS,QUALITY_COLOURS,type ItemQuality,type RolledAffix,type LootStats} from './affixes';
+import {setBonuses} from './lootRoll';
 
 /** Arena's materials, from the plainest to the finest. */
 export const MATERIALS = ['Iron', 'Steel', 'Silver', 'Elven', 'Dwarven', 'Mithril', 'Adamantium', 'Ebony'];
@@ -90,6 +92,14 @@ export type ItemKind = 'weapon' | 'armour' | 'shield' | 'trinket' | 'potion' | '
 export type TrinketKind = 'spell' | 'attribute' | 'protective';
 
 export interface Item {
+  quality?:ItemQuality;
+  itemLevel?:number;
+  requiredLevel?:number;
+  affixes?:RolledAffix[];
+  modifiers?:LootStats;
+  setId?:string;
+  setPiece?:string;
+  uniqueId?:string;
   id: number;
   kind: ItemKind;
   name: string;
@@ -222,12 +232,16 @@ export function makeShield(shield: number, material?: number, t: ArmourTables = 
 
 /** The armour rating Arena shows for a piece or shield: a fifth of its protection. */
 export function armourRating(item: Pick<Item, 'protection'>): number {
-  return Math.floor((item.protection ?? 0) / 5);
+  return Math.floor(effectiveProtection(item) / 5);
+}
+export function effectiveProtection(item:Pick<Item,'protection'>&Partial<Pick<Item,'affixes'|'modifiers'>>):number {
+  const stats=itemStats(item);return Math.max(0,Math.round((item.protection??0)*(1+(stats.armourPct??0)/100)+(stats.armourFlat??0)));
 }
 
 /** The weapon as the fighting rules and the first-person view need it. */
 export function weaponOf(item: Item): Weapon {
-  return { name: item.name, damage: item.damage ?? [1, 2], cif: weaponCif(item.type) ?? 'SWORD.CIF', bow: BOWS.includes(item.type),
+  const stats=itemStats(item),damage=(item.damage??[1,2]).map(n=>Math.max(1,Math.round((n+(stats.damageFlat??0))*(1+(stats.damagePct??0)/100)))) as [number,number];
+  return { name: item.name, damage, cif: weaponCif(item.type) ?? 'SWORD.CIF', bow: BOWS.includes(item.type),
     type: item.type,
     material: item.material,
     twoHanded: item.twoHanded,
@@ -323,8 +337,16 @@ export interface EquipResult {
   /** Why not, or what else came off. */
   message?: string;
 }
+export interface InventoryState {
+  items:Item[];
+  worn:Array<[Slot,number]>;
+  favourites:string[];
+  hotkeys:Array<string|undefined>;
+  knownPotions:number[];
+}
 
 export class Inventory {
+  level=1;
   readonly items: Item[] = [];
   /** The keys of the entries in the favourites list, in the order they were added. */
   readonly favourites: string[] = [];
@@ -334,6 +356,44 @@ export class Inventory {
   readonly knownPotions = new Set<number>();
   private readonly worn = new Map<Slot, number>();
   private nextId = 1;
+  snapshot():InventoryState {
+    return {items:JSON.parse(JSON.stringify(this.items)) as Item[],worn:[...this.worn],favourites:[...this.favourites],hotkeys:[...this.hotkeys],knownPotions:[...this.knownPotions]};
+  }
+  restore(value:unknown):boolean {
+    if(!value||typeof value!=='object')return false;
+    const state=value as InventoryState;
+    if(!Array.isArray(state.items)||state.items.length>2048||!Array.isArray(state.worn)||!Array.isArray(state.hotkeys)||!Array.isArray(state.favourites)||!Array.isArray(state.knownPotions))return false;
+    const finite=(n:unknown,lo:number,hi:number)=>typeof n==='number'&&Number.isFinite(n)&&n>=lo&&n<=hi;
+    const ids=new Set<number>();
+    for(const item of state.items){
+      if(!item||!Number.isInteger(item.id)||item.id<1||ids.has(item.id)||!['weapon','armour','shield','trinket','potion','ammunition'].includes(item.kind)||!Number.isInteger(item.type)||item.type< -1||item.type>255||typeof item.name!=='string'||item.name.length>200||!finite(item.weight,0,10000)||!finite(item.value,0,1e9))return false;
+      if(item.damage&&(!Array.isArray(item.damage)||item.damage.length!==2||item.damage.some(n=>!finite(n,0,10000))))return false;
+      if(item.requiredLevel!==undefined&&!finite(item.requiredLevel,0,100))return false;
+      if(item.quality!==undefined&&!(item.quality in QUALITY_COLOURS))return false;
+      if(item.material!==undefined&&(!Number.isInteger(item.material)||item.material<0||item.material>7))return false;
+      if(item.quantity!==undefined&&(!Number.isInteger(item.quantity)||item.quantity<1||item.quantity>1000000))return false;
+      if(item.covers&&(!Array.isArray(item.covers)||item.covers.some(n=>!Number.isInteger(n)||n<0||n>6)))return false;
+      if(item.affixes&&(!Array.isArray(item.affixes)||item.affixes.length>8||item.affixes.some(a=>!a||!['prefix','suffix'].includes(a.side)||typeof a.id!=='string'||typeof a.name!=='string'||!a.stats||Object.values(a.stats).some(n=>!finite(n,-10000,10000)))))return false;
+      if(item.modifiers&&Object.values(item.modifiers).some(n=>!finite(n,-10000,10000)))return false;
+      if(item.affixes?.some(a=>a.proc&&(!finite(a.proc.chance,0,100)||!finite(a.proc.level,1,100))))return false;
+      ids.add(item.id);
+    }
+    const items=JSON.parse(JSON.stringify(state.items)) as Item[],worn=new Map<Slot,number>();
+    for(const entry of state.worn){
+      if(!Array.isArray(entry)||entry.length!==2)return false;
+      const item=items.find(i=>i.id===entry[1]);
+      if(!item||!wearable(item)||this.slot(item)!==entry[0]||this.forbidden(item)||worn.has(entry[0]))return false;
+      worn.set(entry[0],entry[1]);
+    }
+    const weapon=items.find(i=>i.id===worn.get('weapon'));
+    if(!weapon||weapon.twoHanded&&worn.has('shield'))return false;
+    this.items.splice(0,this.items.length,...items);this.worn.clear();worn.forEach((id,slot)=>this.worn.set(slot,id));
+    this.nextId=Math.max(0,...ids)+1;
+    this.favourites.splice(0,this.favourites.length,...state.favourites.filter(k=>typeof k==='string'));
+    this.hotkeys.fill(undefined);state.hotkeys.slice(0,HOTKEYS).forEach((key,i)=>{if(typeof key==='string')this.hotkeys[i]=key;});
+    this.knownPotions.clear();for(const type of state.knownPotions)if(Number.isInteger(type))this.knownPotions.add(type);
+    return true;
+  }
 
   /**
    * `cannotEquip` is the game's "%ss cannot equip this item." for when the
@@ -414,7 +474,7 @@ export class Inventory {
 
   /** The armour ratings of everything worn, added up, for the menus. */
   armourRating(): number {
-    return this.wornItems().reduce((sum, i) => sum + armourRating(i), 0);
+    return this.wornItems().reduce((sum, i) => sum + armourRating(i), 0)+Math.floor((this.bonuses().ward??0)/5);
   }
 
   /**
@@ -425,9 +485,9 @@ export class Inventory {
    */
   protection(): number[] {
     const shield = this.equipped('shield');
-    const trinkets = this.wornItems().reduce((sum, i) => sum + (i.trinket === 'protective' ? (i.protection ?? 0) : 0), 0);
+    const trinkets = this.wornItems().reduce((sum, i) => sum + (i.kind==='trinket'?effectiveProtection(i):0), 0)+(this.bonuses().ward??0);
     return PIECES.map(
-      (_, part) => (this.equipped(`armour${part}`)?.protection ?? 0) + (shield?.covers?.includes(part) ? (shield.protection ?? 0) : 0) + trinkets,
+      (_, part) => (this.equipped(`armour${part}`)?effectiveProtection(this.equipped(`armour${part}`)!):0) + (shield?.covers?.includes(part) ? effectiveProtection(shield) : 0) + trinkets,
     );
   }
 
@@ -435,7 +495,13 @@ export class Inventory {
   attributeBonus(): number[] {
     const bonus = new Array<number>(ATTRIBUTES).fill(0);
     for (const i of this.wornItems()) if (i.attribute !== undefined && i.attribute < ATTRIBUTES) bonus[i.attribute] += i.boost ?? 0;
+    const stats=this.bonuses();ATTRIBUTE_STATS.forEach((stat,i)=>bonus[i]+=stats[stat]??0);
     return bonus;
+  }
+  bonuses():LootStats {
+    const worn=this.wornItems(),stats:LootStats={};
+    for(const item of worn)addStats(stats,itemStats(item));
+    return addStats(stats,setBonuses(worn));
   }
 
   /** Something worn makes the wearer jump as an Acrobat does. */
@@ -461,6 +527,7 @@ export class Inventory {
 
   /** Why the class may not use the item, or undefined when it may. */
   forbidden(item: Item): string | undefined {
+    if((item.requiredLevel??0)>this.level)return `Requires level ${item.requiredLevel}`;
     return classMayUse(this.cls, item) ? undefined : this.cannotEquip.replace('%s', this.cls!.name);
   }
 
