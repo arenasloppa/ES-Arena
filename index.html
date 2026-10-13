@@ -20,6 +20,7 @@
         <div class="bar" id="enemy-bar"><div class="bar-fill"></div></div>
       </div>
       <div id="minimap-frame" aria-hidden="true"><canvas id="minimap"></canvas></div>
+      <div id="quest-tracker" aria-label="Active quests" hidden></div>
       <div id="banner" aria-live="polite">
         <p class="banner-kicker" hidden></p>
         <p class="banner-title"></p>
@@ -43,12 +44,11 @@
         <p class="tip"><span data-glyph="move"></span><span>Move</span></p>
         <p class="tip"><span data-glyph="look"></span><span>Look</span></p>
         <p class="tip"><span data-glyph="attack"></span><span>Attack, hold to power attack</span></p>
-        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash, or cast the readied spell</span></p>
+        <p class="tip"><span data-glyph="block"></span><span>Block, attack to bash; right mouse casts a readied spell</span></p>
         <p class="tip"><span data-glyph="activate"></span><span>Use, take, open</span></p>
         <p class="tip"><span data-glyph="sprint"></span><span>Sprint</span></p>
         <p class="tip"><span data-glyph="sneak"></span><span>Sneak</span></p>
-        <p class="tip"><span data-glyph="favourites"></span><span>Favourites</span></p>
-        <p class="tip"><span data-glyph="hotkey"></span><span>Use a hotkeyed favourite</span></p>
+        <p class="tip"><span data-glyph="quickslot"></span><span>Use hotbar slot 2</span></p>
         <p class="tip"><span data-glyph="tween"></span><span>Character, items, magic, map</span></p>
         <p class="tip"><span data-glyph="menu"></span><span>Pause menu</span></p>
       </aside>
@@ -58,13 +58,41 @@
       <div id="resting" hidden><p role="status" aria-live="polite"></p></div>
       <p id="message" role="status" aria-live="polite"></p>
       <div id="hand" aria-hidden="true"></div>
+      <section id="ability-bar" aria-label="Abilities and quickslot">
+        <div id="xp-bar" role="progressbar" aria-label="Experience toward next level"><span class="xp-fill"></span><span id="xp-value">0 / 0</span></div>
+        <button class="ability-slot" data-ability="4" title="Assign a usable item or spell"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span><span class="ability-cooldown"></span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="ability5"></span><span class="ability-name">Empty</span></button>
+        <button class="ability-slot quickslot" data-quickslot title="Assign a usable item or spell in Items or Magic"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="quickslot"></span><span class="ability-name">Empty</span></button>
+        <button class="ability-slot" data-ability="5" title="Assign a usable item or spell"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span><span class="ability-cooldown"></span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="ability6"></span><span class="ability-name">Empty</span></button>
+        <button class="ability-slot" data-ability="0" title="Assign a spell in Magic"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span><span class="ability-cooldown"></span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="ability1"></span><span class="ability-name">Empty</span></button>
+        <button class="ability-slot" data-ability="1" title="Assign a spell in Magic"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span><span class="ability-cooldown"></span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="ability2"></span><span class="ability-name">Empty</span></button>
+        <button class="ability-slot" data-ability="2" title="Assign a spell in Magic"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span><span class="ability-cooldown"></span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="ability3"></span><span class="ability-name">Empty</span></button>
+        <button class="ability-slot" data-ability="3" title="Assign a spell in Magic"><span class="ability-art"><img alt="" hidden><span class="ability-empty">+</span><span class="ability-cooldown"></span></span><span class="ability-cost"></span><span class="ability-binding" data-glyph="ability4"></span><span class="ability-name">Empty</span></button>
+      </section>
       <div id="spell-readied" hidden><span id="spell-name"></span><span id="spell-cost"></span></div>
-      <ul id="effects" aria-label="Spells on you" hidden></ul>
-      <div id="vitals" aria-hidden="true">
-        <div class="bar" id="magicka" hidden><div class="bar-fill"></div></div>
-        <div class="bar" id="health"><div class="bar-fill"></div></div>
-        <div class="bar" id="stamina"><div class="bar-fill"></div></div>
-      </div>
+      <div id="effects" aria-label="Active effects" hidden></div>
+      <section id="effect-test-controls" aria-label="Effect Testing controls" hidden>
+        <div class="test-effect-actions">
+          <button data-test-action="buff"><span data-glyph="testBuff"></span> Add Buff <small>Next: <span id="test-next-buff">Shield</span></small></button>
+          <button data-test-action="debuff"><span data-glyph="testDebuff"></span> Add Debuff <small>Next: <span id="test-next-debuff">Poison</span></small></button>
+          <button data-test-action="clear"><span data-glyph="testClear"></span> Clear Effects</button>
+        </div>
+        <div class="test-effect-cycles">
+          <button id="test-auto-buffs" data-test-action="auto-buff" aria-pressed="true"><span data-glyph="testAutoBuff"></span> Auto Buffs: <span class="test-toggle-state">On</span></button>
+          <button id="test-auto-debuffs" data-test-action="auto-debuff" aria-pressed="true"><span data-glyph="testAutoDebuff"></span> Auto Debuffs: <span class="test-toggle-state">On</span></button>
+        </div>
+      </section>
+      <section id="vitals" aria-label="Player status">
+        <div id="player-name">Adventurer</div>
+        <div id="player-portrait-wrap">
+          <canvas id="player-portrait" width="80" height="80" aria-label="Character portrait"></canvas>
+          <span id="player-level" aria-label="Level 1">1</span>
+        </div>
+        <div id="player-bars">
+          <div class="bar" id="health" role="progressbar" aria-label="Health"><div class="bar-fill"></div><span class="bar-value"></span></div>
+          <div class="bar" id="magicka" role="progressbar" aria-label="Mana"><div class="bar-fill"></div><span class="bar-value"></span></div>
+          <div class="bar" id="stamina" role="progressbar" aria-label="Stamina"><div class="bar-fill"></div><span class="bar-value"></span></div>
+        </div>
+      </section>
     </div>
 
     <div id="map-screen" hidden>
@@ -85,7 +113,9 @@
 
     <div id="fade" aria-hidden="true"></div>
 
-    <main id="menu">
+    <div id="startup-cover" aria-hidden="true" style="position:fixed;inset:0;z-index:100;background:#000"></div>
+
+    <main id="menu" hidden>
       <header class="logo">
         <p class="logo-kicker">The Elder Scrolls</p>
         <h1>Arena</h1>
@@ -102,6 +132,7 @@
           </label>
           <button class="option" data-screen="controls">Settings</button>
           <button class="option quit" hidden>Quit</button>
+          <button class="option" data-screen="testing">Testing</button>
         </nav>
         <div class="notes">
           <p>
@@ -122,7 +153,19 @@
           <button class="option" data-screen="controls">Settings</button>
           <button id="to-main-menu" class="option" hidden>Main Menu</button>
           <button class="option quit" hidden>Quit</button>
+          <button class="option" data-screen="testing">Testing</button>
         </nav>
+      </section>
+
+      <section id="screen-testing" class="screen" aria-label="Testing" hidden>
+        <h2>Testing</h2>
+        <div class="rule" aria-hidden="true"></div>
+        <nav class="options">
+          <button class="option" data-test-mode="weapons">Weapon Testing</button>
+          <button class="option" data-test-mode="effects">Effect Testing</button>
+          <button class="option" id="testing-back">Back</button>
+        </nav>
+        <div class="notes"><p>Weapon Testing: every weapon and material, one monster at a time.</p><p>Effect Testing: stack buffs and debuffs, or cycle them automatically.</p></div>
       </section>
 
       <section id="screen-create" class="screen create" aria-label="Make your character" hidden></section>

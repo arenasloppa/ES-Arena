@@ -1,10 +1,17 @@
+import {creatureMagic,creatureAttribute} from './creatureMagic';
+import {TEST_BUFFS,TEST_DEBUFFS,testEffectDescription} from './testEffects';
+import {monsterWeaponDamage} from './monsterCombat';
+import {DISEASE_DAY, DISEASE_ICONS, diseaseFrom, infectDisease, diseaseDescription, type DiseaseState} from './diseases';
+import type {DiseaseTables} from '../formats/diseases';
+import type {ActiveStatusEffect, StatusDispelType} from './statusEffects';
+import {usesModelWeaponHandling} from '../render/weaponModelDefinitions';
 /**
  * One run through a dungeon: the player, the creatures, the doors and the
  * loot, and the rules that tie them together. Pure logic (no Three.js and no
  * sound) so it can be unit tested. The engine feeds it input every frame,
  * draws what it holds and plays out the events it leaves in `events`.
  *
- * Fighting works as in Skyrim: a click swings (each swing in a different
+ * Fighting works with direct controls: a click swings (each swing in a different
  * direction), holding the button makes a power attack that costs stamina
  * and does double damage, and every swing hits whatever is in front within
  * reach. Blocking takes most of the sting out of blows from the front for
@@ -31,8 +38,12 @@
  * hits; area spells catch every creature near the burst. How fast bolts
  * fly and how wide the areas are is the remake's own.
  */
+import { steelAttackDuration, steelBowDrawTime, steelImpactAt, steelSwingSoundTime } from './weaponHandling';
+import {BOW_MOTION_MARKERS,bowReleaseTiming,weaponAttackSpeed} from '../render/weaponMotion';
+import {playerEyeOffset} from './playerView';
+import {STEEL_ARROW_SPEED} from './projectilePhysics';
 import type { ExeData, WeaponInfo } from '../formats/exe';
-import type { SpellRecord } from '../formats/spells';
+import type { SpellEffect, SpellRecord } from '../formats/spells';
 import {
   ARENA_TICK,
   bashChance,
@@ -57,7 +68,10 @@ import {
   CREATURE_RADIUS,
   hurtCreature,
   isAlive,
+  isDefeated,
+  isMagicTarget,
   isCalm,
+  monsterInReach,
   paralyseCreature,
   paralysisFrom,
   spawnCreature,
@@ -70,6 +84,9 @@ import {
 import { Exploration } from './explore';
 import {
   castable,
+  attributeIndex, transferPool, terrainEffect, resistedElement,
+  DESTROY, DRAIN, LEVITATE, LOCK, SILENCE, ELEMENTAL_RESISTANCE,
+  SPELL_ABSORPTION, SPELL_REFLECTION, SPELL_RESISTANCE,
   CAUSE,
   CAUSE_PARALYSIS,
   CAUSE_POISON,
@@ -105,14 +122,27 @@ import {
   TRANSFER,
   amount,
 } from './magic';
-import { armourTables, ATTRIBUTES, Inventory, itemKey, POTION_WEIGHT, potionKey, randomGear, shownName, startingGear, weaponOf, wearable, type Item, type NewItem } from './items';
+import { armourTables, ATTRIBUTES, Inventory, itemKey, POTION_WEIGHT, potionKey, randomGear, shownName, startingGear, weaponOf, wearable,
+  makeSteelArrows,
+  STEEL,
+  type Item, type NewItem } from './items';
+import {
+  projectile,
+  stepProjectile,
+  METRES_TO_WORLD,
+  type Projectile,
+  type ProjectileHit,
+  type SurfaceMaterial,
+} from './projectilePhysics';
+import { sweepTerrain, sweepWoodProps, sweepCreatures, cellMaterial, type MaterialOverrides } from './surfacePhysics';
 import { creatureLoot, GEAR_CAST_LEVEL, POTION_CAST_LEVEL, spotLoot, type Loot, type LootRules } from './loot';
 import { RESTORE_POWER } from '../formats/loot';
 import type { ArmourTables } from '../formats/armour';
 import { Quest, type Objective } from './quest';
 import { cellIndex, lineOfSight } from './grid';
-import { isBlocking, type DoorSounds, type Level, type LevelItem } from './level';
+import { isBlocking, ceilingHeight, floorHeight, ARENA_HEIGHT, type DoorSounds, type Level, type LevelItem } from './level';
 import { airborne, groundUnder, inChasm, jump, keepInChasm, PLAYER_RADIUS, playerBlocked, settle, step, type Body, type PlayerState } from './player';
+import {monsterSeesInvisible} from './monsterSenses';
 import type { GameMessages } from '../formats/messages';
 import type { CreatureInfo, EncounterTables } from '../formats/exe';
 import { START_MINUTES } from '../formats/calendar';
@@ -152,14 +182,25 @@ export interface Swing {
   power: boolean;
   /** A shove made while blocking: no damage, but it staggers. */
   bash?: boolean;
+  /** Camera-space lateral sweep: -1 left, +1 right, opposing the initiating strafe. */
+  sweepDirection?: -1 | 1;
   /** Seconds since it began. */
   time: number;
   duration: number;
+  /** The normalized contact frame, shared with the Steel viewmodel. */
+  hitAt?: number;
+  /** A pending whoosh on the swing clock; cleared after the cutting section begins. */
+  soundAt?: number;
   /** Set once the blow has landed (or met nothing). */
   struck: boolean;
+  /** Steel bows draw first, then release on this same gameplay clock. */
+  releaseAt?: number;
+  /** Original BowAndArrow release section selected from the held attack strength. */
+  bowReleaseSource?: number;
+  bowStrength?: number;
 }
 
-export type TargetKind = 'door' | 'exit' | 'item' | 'body';
+export type TargetKind = 'door' | 'exit' | 'item' | 'body' | 'arrow' | 'spellTerrain';
 
 /** One line in the item menus: a piece of gear, a trinket, the potions of a kind, or the keys. */
 export interface MenuEntry {
@@ -187,7 +228,15 @@ export interface Target {
   note?: string;
 }
 
+export interface LootEntry { key: string; name: string; count: number; }
+export interface LootView { name: string; entries: LootEntry[]; }
+
 export type DungeonEvent =
+  | { type: 'terrainChanged' }
+  | { type: 'loot' }
+  | {type:'despawned';creature:Creature}
+  | { type: 'weaponImpact'; material: SurfaceMaterial; bash: boolean }
+  | { type: 'surfaceImpact'; material: SurfaceMaterial; point: ProjectileHit['point']; normal: ProjectileHit['normal'] }
   /** A sound from a place in the level; no place means the player's own. */
   | { type: 'sound'; name: string; at?: { x: number; y: number }; volume?: number }
   /** One of the dungeon's own messages. */
@@ -253,6 +302,8 @@ export interface DungeonInput {
   sneaking: boolean;
   /** The block button is held. */
   block: boolean;
+  /** Controller guard stays available when a spell is readied. */
+  guardOnly?:boolean;
   /** The attack button: held now, and whether it went down or came up since the last update. */
   attack: { held: boolean; pressed: boolean; released: boolean };
 }
@@ -284,8 +335,7 @@ const BLOCK_ARC = (70 * Math.PI) / 180;
 export const SNEAK_ATTACK = 3;
 /** Holding attack this long makes a power attack. */
 const POWER_HOLD = 0.32;
-const SWING_TIME = 0.4;
-const POWER_SWING_TIME = 0.6;
+
 /** Point of the swing, as a fraction of it, where the blow lands. */
 const HIT_AT = 0.5;
 /** A pause this long between swings starts the combo over. */
@@ -315,7 +365,7 @@ const START_EXPERIENCE = 700;
  * minute, at 13 game seconds a real one, 30 times over, on its 0-256 scale
  * (OpenTESArena's reading); about 0.44 points a second.
  */
-const SWIM_TIRING = ((11 / 64) * (86400 / 6646.153846153846)) / 60 * 30 * (100 / 256);
+const SWIM_TIRING = (((11 / 64) * (86400 / 6646.153846153846)) / 60) * 30 * (100 / 256);
 /** Lava burns 10 health a second (OpenTESArena). */
 const LAVA_BURN = 10;
 /** Pushing forward against the edge this long starts a climb out of water (or lava) or a pit. */
@@ -362,7 +412,7 @@ const ARROW_SPEED = 50 / 128 / ARENA_TICK;
 const ARROW_REACH = ARROW_START + (30 * 50) / 128;
 export const ARROW_RADIUS = 0.1;
 const ARROW_STEP = 0.1;
-/** An arrow loosed from hiding at a creature that hasn't noticed the player does double damage, as a bow's sneak attack does in Skyrim. */
+/** An arrow loosed from hiding at a creature that hasn't noticed the player does double damage. */
 export const SNEAK_SHOT = 2;
 
 /** A spell flying through the dungeon. */
@@ -376,6 +426,10 @@ export interface Bolt {
   dx: number;
   dy: number;
   travelled: number;
+  /** Enemy caster, when this projectile is travelling toward the player. */
+  source?:Creature;
+  z?:number; dz?:number;
+  lightUntil?:number; lightPower?:number; stopped?:boolean;
 }
 
 /** An arrow in flight. */
@@ -390,6 +444,9 @@ export interface Arrow {
   weapon: Weapon;
   /** Loosed while sneaking: a sneak attack if it strikes a creature that hasn't noticed the player. */
   sneak: boolean;
+  /** Only Steel uses the new recoverable ballistic model; other materials keep the original presentation. */
+  projectile?: Projectile;
+  carrierOffset?: [number, number, number];
 }
 
 /** Harm a spell keeps doing to a creature: poison or continuous damage, a blow every so many seconds. */
@@ -405,6 +462,9 @@ interface Affliction {
 }
 
 export class Dungeon {
+  /** Optional exact assignments for texture names whose material is not described by their name. */
+  surfaceMaterials: MaterialOverrides = {};
+  private noArrowsUntil = 0;
   readonly player: PlayerState;
   readonly stats: PlayerStats;
   readonly creatures: Creature[] = [];
@@ -419,12 +479,18 @@ export class Dungeon {
   outcome?: 'dead' | 'escaped';
   /** Seconds of play. */
   time = 0;
+  /** Invalidates map caches after a successful terrain spell. */
+  terrainVersion=0;
   kills = 0;
   /** How far the player has walked, for footsteps and the weapon's sway. */
   walked = 0;
   /** Holding the guard up; the engine draws the weapon raised. */
   blocking = false;
   sneaking = false;
+  /** The main renderer supplies its smoothed camera offset; headless/range use the stance height. */
+  viewEyeOffset: number | undefined;
+  /** Camera's small lateral walking offset, also used by projectile launch. */
+  viewSideOffset=0;
   /** Sprinting this moment, for the camera's widening view. */
   running = false;
   /** In water or lava. */
@@ -439,6 +505,8 @@ export class Dungeon {
   readonly spellbook: SpellRecord[] = [];
   /** The spell in hand, cast with the block button. */
   readied?: SpellRecord;
+  /** Four independently assigned spells; equipment stays on favourite hotkeys. */
+  readonly abilitySlots:Array<string|undefined>=Array(6).fill(undefined);
   /** Spells in flight. */
   readonly bolts: Bolt[] = [];
   /** Arrows in flight. */
@@ -455,6 +523,10 @@ export class Dungeon {
   /** The undead, by creature number, when the program's list can be read. */
   private readonly undead: number[];
   private readonly unlocked = new Set<number>();
+  private readonly magicalLocks = new Map<number,{until:number;strength:number}>();
+  private readonly wards = new Map<string,{effect:SpellEffect;power:number;until:number;duration:number}>();
+  private levitateUntil=0;
+  private terrainSpell?:{spell:SpellRecord;effect:SpellEffect;remaining:number};
   private readonly pickedAt = new Map<number, number>();
   private readonly lockTried = new Set<number>();
   private readonly shownTexts = new Set<number>();
@@ -467,14 +539,24 @@ export class Dungeon {
   private readonly messages: GameMessages;
   private readonly encounters?: EncounterTables;
   private readonly creatureInfo: CreatureInfo[];
+  private readonly diseaseTables?: DiseaseTables;
+  private readonly creatureMaterials?: number[];
+  private readonly spellAreaCells?: ExeData['spellAreaCells'];
+  private disease?: DiseaseState;
+  /** Cumulative raw attribute losses remain after a cure, until restored through rest. */
+  private readonly diseaseLosses = Array<number>(8).fill(0);
+  private readonly playerHarms = new Map<string, {name:string;icon:string;type:StatusDispelType;until:number;next:number;every:number;damage:number;element?:number;duration:number}>();
   private sinceHurt = Infinity;
   private lookTimer = 0;
   private nextStep = STRIDE;
+  /** Begin visible preparation on press while tap/power selection waits for release/hold. */
+  get attackCharging(): boolean { return this.armedAt!==undefined&&!this.swing&&!this.stats.weapon.bow&&!this.outcome&&!this.camping&&!this.paralysed&&!this.climb; }
   private armedAt: number | undefined;
   private queued: boolean | undefined;
   private combo = 0;
   private lastSwingEnd = -Infinity;
   private moving = false;
+  private movementIntent = { forward: 0, strafe: 0 };
   private cleared = false;
   private sprintHeld = false;
   private nextBolt = 0;
@@ -484,12 +566,14 @@ export class Dungeon {
   private readonly afflictions: Affliction[] = [];
   /** Spells working on the player: when each ends (seconds of play) and what it holds. */
   private shieldPoints = 0;
+  private readonly effectDurations=new Map<string,number>();
   private sanctuary = { chance: 0, until: 0 };
   private invisibleUntil = 0;
   private light = { reach: 1, until: 0 };
   private regen = { health: 0, every: 0, next: 0, until: 0 };
   /** Seconds of play until a paralysing blow wears off. */
   private paralysedUntil = 0;
+  private paralysisType: StatusDispelType = 'poison';
 
   /** What the player's character brings, with what they wear; worked out again when they share out bonus points (see applyAttributes) and when what they wear changes. */
   hero: Hero;
@@ -506,8 +590,10 @@ export class Dungeon {
   private readonly lootRules?: LootRules;
   /** What each creature carries, by its id, from when it appeared. */
   private readonly carried = new Map<number, Loot>();
+  private readonly spotContents = new Map<number, Loot>();
+  private looting?: { name: string; contents: Loot; item?: DungeonItem; body?: number };
   /** Fortify spells working on the player: points added to an attribute, lost a few at a time. */
-  private readonly fortified: Array<{ attribute: number; points: number; loss: number; every: number; next: number; until: number }> = [];
+  private readonly fortified: Array<{ attribute: number; points: number; loss: number; every: number; next: number; until: number; duration?:number; dispel?:StatusDispelType; growth?:number }> = [];
 
   /**
    * `hero` is what the player's character brings; without one, the player
@@ -527,6 +613,9 @@ export class Dungeon {
     this.player = { x: level.start.x, y: level.start.y, yaw: initialYaw(level), pitch: 0, z: 0, vz: 0 };
     this.messages = tables?.messages ?? {};
     this.encounters = tables?.encounters;
+    this.diseaseTables = tables?.diseases;
+    this.creatureMaterials = tables?.creatureMaterialRequirements;
+    this.spellAreaCells = tables?.spellAreaCells;
     this.creatureInfo = tables?.creatures ?? [];
     this.weaponTable = tables?.weapons ?? [];
     this.armourTable = armourTables(tables?.armour);
@@ -547,6 +636,7 @@ export class Dungeon {
       this.spellbook.push(...startingSpells(spells));
       this.readied = this.spellbook.find(offensive) ?? this.spellbook[0];
       for (const s of this.spellbook) this.inventory.toggleFavourite(spellKey(s));
+      this.spellbook.slice(0,4).forEach((s,i)=>this.abilitySlots[i]=spellKey(s));
     }
     this.items = level.items.map((item, id) => ({ ...item, id }));
     level.cells.forEach((c, i) => {
@@ -573,7 +663,33 @@ export class Dungeon {
     this.explored.look(this.player.x, this.player.y, this.openDoors);
   }
 
+  /** Enabled only for the separate Test Area run. */
+  practiceMode=false;
+  practiceKeepVitalsFull=true;
+  /** Test runs use the native spell list, without changing the saved character. */
+  learnAllPracticeSpells():void {
+    if(!this.practiceMode)return;
+    this.spellbook.splice(0,this.spellbook.length,...this.spells);
+    this.ensurePracticeMagicka();
+  }
+  private ensurePracticeMagicka():void {
+    if(!this.practiceMode)return;
+    this.stats.maxMagicka=Math.max(this.stats.maxMagicka,100,...this.spells.map(s=>this.spellCost(s)));
+    this.stats.magicka=this.stats.maxMagicka;
+  }
+  removePracticeCreature(creature:Creature):void {
+    if(!this.practiceMode)return;
+    const index=this.creatures.indexOf(creature);if(index<0)return;
+    this.creatures.splice(index,1);this.searchedBodies.delete(creature.id);this.carried.delete(creature.id);
+    this.events.push({type:'despawned',creature});
+  }
+  addPracticeCreature(creature: Creature): void {
+    if (!this.practiceMode) return;
+    this.creatures.push(this.outfit(creature));
+  }
   update(dt: number, input: DungeonInput): void {
+    if(this.practiceMode && this.practiceKeepVitalsFull){this.stats.health=this.stats.maxHealth;this.stats.stamina=this.stats.maxStamina;this.stats.magicka=this.stats.maxMagicka;}
+
     this.time += dt;
     this.updateDoors(dt);
     this.sneaking = input.sneaking && !this.outcome;
@@ -583,7 +699,8 @@ export class Dungeon {
     }
     const minute = Math.floor(this.clock / 60);
     this.clock += dt * GAME_SECONDS_PER_SECOND;
-    if (!this.outcome && Math.floor(this.clock / 60) !== minute) this.checkLevel();
+    this.updateDisease();
+    if (!this.practiceMode && !this.outcome && Math.floor(this.clock / 60) !== minute) this.checkLevel();
     if (this.paralysedUntil > 0 && !this.paralysed) {
       this.paralysedUntil = 0;
       if (!this.outcome) this.events.push({ type: 'notify', text: 'You can move again' });
@@ -601,7 +718,10 @@ export class Dungeon {
       if (this.hero.regainsMagicka) recoverMagicka(this.stats, dt, this.sinceCast, this.hero.recovery);
       this.sinceCast += dt;
       this.updateMagic(dt);
-      for (const a of [...this.arrows]) this.flyArrow(a, ARROW_SPEED * dt);
+      for (const a of [...this.arrows]) {
+        if (a.projectile) this.flySteelArrow(a, dt);
+        else this.flyArrow(a, ARROW_SPEED * dt);
+      }
       this.sinceStamina += dt;
       this.sinceHurt += dt;
       this.lookTimer -= dt;
@@ -680,7 +800,9 @@ export class Dungeon {
   /** What worn enchantments, trinkets and Fortify spells add to each attribute, Strength to Luck. */
   attributeBonus(): number[] {
     const bonus = this.inventory.attributeBonus();
-    for (const f of this.fortified) if (f.attribute < ATTRIBUTES) bonus[f.attribute] += Math.max(0, f.points);
+    for (const f of this.fortified) if (f.attribute < ATTRIBUTES) bonus[f.attribute] += f.points;
+    for (let i=0;i<8;i++) bonus[i] -= this.diseaseLosses[i]*100/256;
+    if (this.playerHarms.has('curse')) bonus[0]-=10;
     return bonus;
   }
 
@@ -694,6 +816,7 @@ export class Dungeon {
     s.maxStamina = hero.stamina;
     s.magicka = raiseTo(s.magicka, s.maxMagicka, hero.magicka);
     s.maxMagicka = hero.magicka;
+    if(this.practiceMode)this.ensurePracticeMagicka();
     this.hero = hero;
   }
 
@@ -773,9 +896,16 @@ export class Dungeon {
     for (c.tick -= dt; c.tick <= 0 && this.camping; c.tick += REST_STEP_SECONDS) {
       const hour = Math.floor(this.clock / 3600);
       this.clock += REST_STEP;
+      this.updateDisease();
+      if (this.outcome) { this.finishCamping('Rest interrupted'); break; }
       if (Math.floor(this.clock / 3600) === hour) continue;
       // Each hour: healing, the count, and perhaps monsters.
       restHealing(this.stats, this.rester);
+      if (this.diseaseLosses.some(n=>n>0)) {
+        const restored=Math.floor((this.hero.attributes?.[5] ?? 50)*256/100/10);
+        for (let i=0;i<8;i++) this.diseaseLosses[i] = Math.max(0,this.diseaseLosses[i]-restored);
+        this.refreshHero();
+      }
       if (c.hoursLeft !== undefined) {
         c.hoursLeft--;
         if (c.hoursLeft <= 0) this.finishCamping(m.doneWakeUp ?? CAMP_WORDS.doneWakeUp);
@@ -803,7 +933,7 @@ export class Dungeon {
     if (!tables || cell?.kind === 'raised' || this.enemiesNear()) return;
     if (restEncounterChance(tables) <= Math.floor(this.random() * 100)) return;
     const found = chooseEncounter(tables, this.stats.level, this.random);
-    const info = found && found.id <= this.creatureInfo.length ? this.creatureInfo[found.id - 1] : undefined;
+    const info = found && found.id <= 23 && found.id <= this.creatureInfo.length ? this.creatureInfo[found.id - 1] : undefined;
     if (!found || !info) return;
     for (let i = 0; i < found.count; i++) {
       const at = spawnSpot(this.level, this.player.x, this.player.y, this.random, this.creatures);
@@ -823,16 +953,18 @@ export class Dungeon {
     return jump(this.level, this.player, this.hero.leap);
   }
 
-  /** Held by a paralysing blow: the player can look about, but not move, fight, cast or use things. */
+  /** Held by a paralysing blow: the player can look about, but not move or fight; a paralysis cure remains usable. */
   get paralysed(): boolean {
     return this.time < this.paralysedUntil;
   }
 
   /** Paralyses the player for `seconds`; a player already paralysed stays so only as long as before, as in Arena. */
-  private paralyse(seconds: number): void {
+  private paralyse(seconds: number, type: StatusDispelType = 'poison'): void {
     if (this.outcome || this.paralysed) return;
     this.paralysedUntil = this.time + seconds;
-    this.events.push({ type: 'notify', text: 'You are paralyzed' });
+    this.effectDurations.set('paralysis',seconds);
+    this.paralysisType = type;
+    this.events.push({ type: 'notify', text: 'You have contracted Paralysis (Prevents movement, attacks and casting)' });
   }
 
   /** Paralysed: no moving, swinging or guarding, though falling, and tiring in water, go on. */
@@ -904,6 +1036,11 @@ export class Dungeon {
   /** Falls, lands, steps up, and goes into or out of water and lava, with what that does. */
   private updateHeight(dt: number): void {
     const p = this.player;
+    if(this.time<this.levitateUntil){
+      // Maintain floor-level flight across pits/water, with enough headroom for the body.
+      p.z=Math.min(Math.max(p.z??0,0),Math.max(0,this.level.height-0.75));p.vz=0;
+      this.swimming=false;this.climb=undefined;return;
+    }
     settle(this.level, p, dt);
     keepInChasm(this.level, p, this.openDoors);
     const cell = this.level.cells[cellIndex(this.level, p.x, p.y)];
@@ -977,13 +1114,15 @@ export class Dungeon {
   }
 
   private burn(damage: number): void {
-    this.stats.health = Math.max(0, this.stats.health - damage);
+    if(this.practiceMode)return;
+    this.stats.health = this.practiceMode?this.stats.maxHealth:Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
     if (this.camping) this.stopCamping();
     if (this.stats.health <= 0) this.die();
   }
 
   private die(cause?: string): void {
+    if(this.practiceMode && this.practiceKeepVitalsFull){this.stats.health=this.stats.maxHealth;return;}
     if (this.outcome) return;
     this.outcome = 'dead';
     this.swing = undefined;
@@ -1039,9 +1178,13 @@ export class Dungeon {
     w.player.protection = this.inventory.protection();
     w.sneaking = sneaking;
     w.invisible = this.invisible;
+    w.nonTarget = this.time<this.sanctuary.until;
     w.now = this.time;
+    w.round = this.clock/60;
     for (const c of this.creatures) {
       updateCreature(c, w, dt, this.creatureEvents);
+      if(this.looting?.body===c.id&&(isAlive(c)||c.state==='reviving'))this.closeLoot();
+      if(!c.info.timing)this.updateCreatureCasting(c);
       // Now and then a hunting creature calls out.
       if (c.state === 'chase' && this.time >= (this.growlAt.get(c.id) ?? Infinity)) {
         this.growlAt.set(c.id, this.time + 4 + this.random() * 6);
@@ -1050,7 +1193,35 @@ export class Dungeon {
     }
   }
 
+  /** Native casters roll once per native AI update; fallback actors use their cooldown. */
+  private updateCreatureCasting(c:Creature):boolean {
+    const list=c.info.spells;
+    if(this.outcome||!list?.length||!isAlive(c)||c.paralysed>0||c.state==='attack'||c.state!=='chase'&&this.time>=this.sanctuary.until)return false;
+    const state=creatureMagic(c);
+    if(!c.info.timing&&this.time<state.nextCast||this.time<state.silencedUntil||this.invisible&&!monsterSeesInvisible(c.info.id))return false;
+    // The original Medusa waits until its previous paralysis has worn off.
+    if(c.info.id===21&&this.paralysed)return false;
+    const dist=Math.hypot(c.x-this.player.x,c.y-this.player.y);
+    if((c.info.timing?monsterInReach(c,this.player):dist<1.35)||dist>BOLT_RANGE||!lineOfSight(this.level,c.x,c.y,this.player.x,this.player.y,this.openDoors))return false;
+    if(c.info.timing&&Math.floor(this.random()*65536)%c.info.timing.castDivisor!==0)return true;
+    const spell=this.spells.find(s=>s.index===list[Math.floor(this.random()*list.length)]);
+    if(!spell)return false;
+    const level=c.info.spellLevel??c.info.level;
+    // Native monsters use innate spells, without the humanoid mana check.
+    if(!c.info.timing)state.nextCast=this.time+2.5+this.random()*1.5;
+    const dx=(this.player.x-c.x)/dist,dy=(this.player.y-c.y)/dist;
+    const floor=Math.max(0,floorHeight(this.level.cells[cellIndex(this.level,c.x,c.y)],this.level));
+    const z=floor+c.info.lift*ARENA_HEIGHT+(c.collisionHeight??1)*.6;
+    const aimZ=(this.player.z??0)+playerEyeOffset(this.sneaking,this.swimming);
+    this.bolts.push({id:this.nextBolt++,spell,level,x:c.x+dx*.35,y:c.y+dy*.35,dx,dy,travelled:0,source:c,
+      z:z+(aimZ-z)/dist*.35,dz:(aimZ-z)/dist});
+    this.events.push({type:'sound',name:'SLOWBALL.VOC',at:{x:c.x,y:c.y},volume:.7});
+    return true;
+  }
+
   private readonly creatureEvents: CreatureEvents = {
+    casting:(c)=>this.updateCreatureCasting(c),
+    fall: (c) => this.events.push({type:'sound',name:'BODYFALL.VOC',at:{x:c.x,y:c.y}}),
     notice: (c) => {
       this.creatureSound(c);
       this.growlAt.set(c.id, this.time + 3 + this.random() * 5);
@@ -1058,12 +1229,51 @@ export class Dungeon {
     swing: (c) => this.events.push({ type: 'sound', name: 'SWISH.VOC', at: { x: c.x, y: c.y }, volume: 0.5 }),
     strike: (c, damage) => {
       // Sanctuary: a chance the creature ignores the player.
-      if (damage > 0 && this.time < this.sanctuary.until && this.random() * 100 < this.sanctuary.chance) return;
+      if (damage > 0 && this.time < this.sanctuary.until) return;
       if (this.outcome || damage <= 0 || !this.hurtPlayer(damage, c)) return;
       const rounds = paralysisFrom(c.info, this.hero.paralysis, this.random);
       if (rounds > 0) this.paralyse(rounds * ROUND);
+      else if (!this.paralysed && !this.disease) {
+        const disease = diseaseFrom(c.info, this.diseaseTables, this.hero.saves[2] ?? 0, this.hero.cls?.id, this.random);
+        if (disease) this.infect(disease.id);
+      }
     },
   };
+
+  /** One disease at a time, matching Arena's effect flag. */
+  infect(id: number): boolean {
+    if (this.disease || this.hero.cls?.id === 15) return false;
+    const info=this.diseaseTables?.diseases.find(d=>d.id===id);
+    if (!info) return false;
+    this.disease=infectDisease(info,this.clock,this.random);
+    this.events.push({type:'notify',text:`You have contracted ${info.name} (${diseaseDescription(info)})`});
+    return true;
+  }
+
+  cureDisease(): void {
+    if (!this.disease) return;
+    const name=this.disease.info.name;
+    this.disease=undefined;
+    this.events.push({type:'notify',text:`${name} cured`});
+  }
+
+  private updateDisease(): void {
+    const disease=this.disease;
+    if (!disease || this.outcome) return;
+    while (disease.next <= this.clock && (disease.until===undefined || disease.next < disease.until)) {
+      disease.next+=DISEASE_DAY;
+      for (let i=0;i<8;i++) this.diseaseLosses[i]+=disease.losses[i];
+      this.refreshHero();
+      const s=this.stats;
+      if (!this.practiceMode) {
+        s.health=Math.max(0,s.health-disease.losses[8]);
+        s.magicka=Math.max(0,s.magicka-disease.losses[10]);
+        s.stamina=Math.max(0,s.stamina-disease.losses[12]*100/256);
+        if (s.health<=0 || this.baseHero.attributes?.some((value,i)=>this.diseaseLosses[i]>=Math.round(value*256/100))) { this.die(); return; }
+      }
+    }
+    if (disease.until!==undefined && this.clock>=disease.until) this.cureDisease();
+  }
 
   private creatureSound(c: Creature): void {
     if (c.info.sound) this.events.push({ type: 'sound', name: c.info.sound, at: { x: c.x, y: c.y } });
@@ -1074,8 +1284,12 @@ export class Dungeon {
    * elementalDamage), reaching the player. Returns whether it struck home:
    * not taken on the guard, and not all soaked up by a shield spell.
    */
-  private hurtPlayer(damage: number, from?: Creature, element?: number): boolean {
-    if (element !== undefined) damage = elementalDamage(damage, element, this.hero, this.random);
+  private hurtPlayer(damage: number, from?: Creature, element?: number, resistanceChecked=false): boolean {
+    if (element !== undefined) {
+      const ward=[...this.wards.values()].find(w=>w.effect.effect===ELEMENTAL_RESISTANCE&&resistedElement(w.effect.sub)===element&&this.time<w.until);
+      if(!resistanceChecked&&ward&&this.random()*100<ward.power)return false;
+      damage = elementalDamage(damage, element, this.hero, this.random);
+    }
     if (damage <= 0) return false;
     let guarded = false;
     if (this.blocking && from && angleTo(this.player, from.x, from.y) <= BLOCK_ARC && spendStamina(this.stats, BLOCK_STAMINA)) {
@@ -1095,7 +1309,7 @@ export class Dungeon {
         return false;
       }
     }
-    this.stats.health = Math.max(0, this.stats.health - damage);
+    this.stats.health = this.practiceMode?this.stats.maxHealth:Math.max(0, this.stats.health - damage);
     this.sinceHurt = 0;
     this.events.push({ type: 'hurt', damage }, { type: 'sound', name: 'UHIT.VOC' });
     this.fallBack();
@@ -1106,6 +1320,8 @@ export class Dungeon {
   // ---- Fighting ----
 
   private updateAttack(dt: number, input: DungeonInput): void {
+    if(this.terrainSpell){if(input.attack.pressed)this.changeTerrain();return;}
+    this.movementIntent = { forward: input.forward, strafe: input.strafe };
     if (this.climb) {
       // Attacking too soon while climbing out drops the player back in.
       if (input.attack.pressed) this.fallBack();
@@ -1114,12 +1330,12 @@ export class Dungeon {
     // A readied spell takes the guard's place, as a spell in Skyrim's left hand does.
     const castPressed = input.block && !this.castHeld;
     this.castHeld = input.block;
-    if (this.readied) {
+    if (this.readied && !input.guardOnly) {
       if (castPressed) this.cast(this.readied);
       input = { ...input, block: false };
     }
     if (this.stats.weapon.bow) {
-      this.updateBow(dt, input.attack);
+      this.updateBow(dt, input);
       return;
     }
     const a = input.attack;
@@ -1142,7 +1358,11 @@ export class Dungeon {
     const s = this.swing;
     if (s) {
       s.time += dt;
-      if (!s.struck && s.time >= s.duration * HIT_AT) {
+      if(s.soundAt!==undefined&&s.time>=s.soundAt){
+        if(!s.struck)this.events.push({type:'sound',name:'SWISH.VOC'});
+        s.soundAt=undefined;
+      }
+      if (!s.struck && s.time >= s.duration * (s.hitAt ?? HIT_AT)) {
         s.struck = true;
         this.strike(s);
       }
@@ -1176,17 +1396,69 @@ export class Dungeon {
     if (power && spendStamina(this.stats, POWER_STAMINA)) this.sinceStamina = 0;
     else power = false;
     if (this.time - this.lastSwingEnd > COMBO_RESET) this.combo = 0;
-    // A power attack on the move lunges forward; standing, it chops down.
-    const kind: SwingKind = power ? (this.moving ? 'thrust' : 'chop') : COMBO[this.combo++ % COMBO.length];
-    this.swing = { kind, power, time: 0, duration: power ? POWER_SWING_TIME : SWING_TIME, struck: false };
-    this.events.push({ type: 'swing', swing: this.swing }, { type: 'sound', name: 'SWISH.VOC' });
+    // Counter the initiating strafe for both taps and power attacks.
+    const direction = this.movementIntent;
+    const sweepDirection: -1|1|undefined = usesModelWeaponHandling(this.stats.weapon)&&!(power&&this.stats.weapon.type===0)&&Math.abs(direction.strafe)>.1
+      ? direction.strafe>0?-1:1 : undefined;
+    const kind: SwingKind = power && this.stats.weapon.type===0
+      ? 'thrust'
+      : sweepDirection!==undefined
+        ? sweepDirection<0?'left':'right'
+        : power && usesModelWeaponHandling(this.stats.weapon)
+          ? direction.forward > 0.1
+              ? 'thrust'
+              : direction.forward < -0.1
+                ? 'downLeft'
+                : this.stats.weapon.type===6?'right':'chop'
+        : power
+          ? this.moving ? 'thrust' : 'chop'
+          : COMBO[this.combo++ % COMBO.length];
+    this.swing = { kind, power, sweepDirection, time: 0, duration: steelAttackDuration(this.stats.weapon, power, kind), hitAt: steelImpactAt(this.stats.weapon, power, kind), struck: false };
+    const soundAt=steelSwingSoundTime(this.stats.weapon,power,kind);
+    this.events.push({type:'swing',swing:this.swing});
+    if(soundAt>0)this.swing.soundAt=soundAt;
+    else this.events.push({type:'sound',name:'SWISH.VOC'});
+  }
+
+  /** A solid surface intercepted the visible Steel weapon before its damage frame. */
+  meleeTerrainContact(hit: ProjectileHit, swing: Swing): void {
+    if (this.swing !== swing || swing.struck || !usesModelWeaponHandling(this.stats.weapon) || hit.material === 'soft') return;
+    swing.struck = true;
+    this.surfaceFeedback(hit,swing);
+    // Probe just inside the struck face to find its door without bypassing locks.
+    const cell = cellIndex(this.level, hit.point[0] - hit.normal[0] * 0.002, hit.point[2] - hit.normal[2] * 0.002);
+    if (
+      cell >= 0 &&
+      this.level.cells[cell].kind === 'door' &&
+      this.locked(cell) &&
+      this.random() < bashChance(this.level.locks.get(cell) ?? 0) * (swing.power ? 2 : 1)
+    ) {
+      this.unlocked.add(cell);
+      this.openDoor(cell);
+      this.events.push({ type: 'notify', text: 'You broke the lock' });
+    }
+  }
+
+  private surfaceFeedback(hit:ProjectileHit,swing:Swing):void {
+    this.events.push(
+      {type:'weaponImpact',material:hit.material,bash:!!swing.bash},
+      {type:'surfaceImpact',material:hit.material,point:hit.point,normal:hit.normal},
+      {type:'sound',name:hit.material==='wood'?'BASH.VOC':'CLANK.VOC',at:{x:hit.point[0],y:hit.point[2]},volume:.6},
+    );
   }
 
   /** The moment a swing lands: on a creature in front, else on a door or wall. */
   private strike(s: Swing): void {
     const target = this.creatureInReach();
-    if (s.bash) {
-      if (!target) return;
+    if(usesModelWeaponHandling(this.stats.weapon)){
+      const p=this.player,height=Math.min((p.z??0)+(this.viewEyeOffset??playerEyeOffset(this.sneaking,this.swimming)),ceilingHeight(this.level.cells[cellIndex(this.level,p.x,p.y)],this.level)-.03),cp=Math.cos(p.pitch);
+      const from:ProjectileHit['point']=[p.x,height,p.y],to:ProjectileHit['point']=[p.x+Math.cos(p.yaw)*cp*WEAPON_REACH,height+Math.sin(p.pitch)*WEAPON_REACH,p.y+Math.sin(p.yaw)*cp*WEAPON_REACH];
+      const prop=sweepWoodProps(this.level,from,to),terrain=prop&&sweepTerrain(this.level,this.openDoors,from,to,this.surfaceMaterials);
+      if(prop&&(!terrain||prop.fraction<=terrain.fraction+1e-9)&&(!target||prop.fraction*WEAPON_REACH<Math.hypot(target.x-p.x,target.y-p.y)-.16)){
+        this.surfaceFeedback(prop,s);return;
+      }
+    }
+    if (s.bash && target) {
       staggerCreature(target, this.world, this.player);
       this.events.push({ type: 'bashed', creature: target }, { type: 'sound', name: 'BASH.VOC', at: { x: target.x, y: target.y }, volume: 0.7 });
       return;
@@ -1206,6 +1478,13 @@ export class Dungeon {
     }
     const ahead = this.ahead(1.1);
     if (!ahead) return;
+    const material = cellMaterial(this.level, this.level.cells[ahead.cell], 'wall', this.surfaceMaterials);
+    if (usesModelWeaponHandling(this.stats.weapon)) {
+      this.events.push({type:'weaponImpact',material,bash:!!s.bash});
+      const p=this.player,height=Math.min((p.z??0)+(this.viewEyeOffset??playerEyeOffset(this.sneaking,this.swimming)),ceilingHeight(this.level.cells[cellIndex(this.level,p.x,p.y)],this.level)-.03),cp=Math.cos(p.pitch);
+      const hit=sweepTerrain(this.level,this.openDoors,[p.x,height,p.y],[p.x+Math.cos(p.yaw)*cp*WEAPON_REACH,height+Math.sin(p.pitch)*WEAPON_REACH,p.y+Math.sin(p.yaw)*cp*WEAPON_REACH],this.surfaceMaterials);
+      if(hit)this.events.push({type:'surfaceImpact',material:hit.material,point:hit.point,normal:hit.normal});
+    }
     if (ahead.kind === 'door' && this.locked(ahead.cell)) {
       this.events.push({ type: 'sound', name: 'BASH.VOC', at: ahead.at });
       if (this.random() < bashChance(this.level.locks.get(ahead.cell) ?? 0) * (s.power ? 2 : 1)) {
@@ -1213,7 +1492,8 @@ export class Dungeon {
         this.events.push({ type: 'notify', text: 'You broke the lock' });
         this.openDoor(ahead.cell);
       }
-    } else this.events.push({ type: 'sound', name: 'NHIT.VOC', at: ahead.at, volume: 0.6 });
+    } else this.events.push({ type: 'sound', name: material === 'metal' || material === 'stone' ? 'CLANK.VOC' : 'BASH.VOC',
+        at: ahead.at, volume: 0.6 });
   }
 
   /**
@@ -1229,7 +1509,7 @@ export class Dungeon {
       damage *= 2;
       this.events.push({ type: 'notify', text: 'Critical strike!' });
     }
-    return damage + levelDamage(this.hero, this.stats.level, target.info.id, this.undead);
+    return monsterWeaponDamage(damage + levelDamage(this.hero, this.stats.level, target.info.id, this.undead), weapon, target.info, this.undead, this.creatureMaterials);
   }
 
   /**
@@ -1237,7 +1517,12 @@ export class Dungeon {
    * the last one is gone, as in Arena. There is no guard, bash or power
    * attack with a bow.
    */
-  private updateBow(dt: number, attack: DungeonInput['attack']): void {
+  private updateBow(dt: number, input: DungeonInput): void {
+    const attack = input.attack;
+    if (this.stats.weapon.material === STEEL) {
+      this.updateSteelBow(dt, input);
+      return;
+    }
     this.blocking = false;
     this.armedAt = this.queued = undefined;
     const s = this.swing;
@@ -1248,8 +1533,61 @@ export class Dungeon {
     if (!this.swing && (attack.held || attack.pressed)) this.shoot();
   }
 
+  private updateSteelBow(dt: number, input: DungeonInput): void {
+    this.blocking = input.block;
+    this.armedAt = this.queued = undefined;
+    const attack = input.attack;
+    // Block cancels a held draw without consuming ammunition; a tap while blocking bashes.
+    if (input.block) {
+      if (this.swing?.kind === 'shoot' && !this.swing.struck) this.swing = undefined;
+      if (attack.pressed && !this.swing) this.bash();
+    }
+    const s = this.swing;
+    if (s) {
+      s.time += dt;
+      if (s.bash) {
+        if (!s.struck && s.time >= s.duration * (s.hitAt ?? HIT_AT)) {
+          s.struck = true;
+          this.strike(s);
+        }
+        if (s.time >= s.duration) this.swing = undefined;
+      } else {
+        const type=this.stats.weapon.type??16,speed=weaponAttackSpeed(type);
+        const minimum=(BOW_MOTION_MARKERS['shoot min attack']-BOW_MOTION_MARKERS['shoot start'])/speed;
+        if(s.bowReleaseSource===undefined && (attack.released||!attack.held) && s.time>=minimum) {
+          const release=bowReleaseTiming(type,s.time);s.bowReleaseSource=release.start;s.bowStrength=release.strength;s.time=0;s.duration=release.duration;s.hitAt=release.hit/release.duration;
+        }
+        if(s.bowReleaseSource!==undefined){
+          const release=bowReleaseTiming(type,0),hit=(BOW_MOTION_MARKERS['shoot release']-s.bowReleaseSource)/speed;
+          if(!s.struck&&s.time>=hit){s.struck=true;this.looseSteelArrow(s.bowStrength??release.strength);}
+          if(s.time>=s.duration)this.swing=undefined;
+        }
+      }
+    }
+    if(!this.swing&&!input.block&&attack.pressed)this.shoot();
+  }
+
   /** Looses an arrow the way the player faces; the bow is ready again once the character's reload time is up. */
   private shoot(): void {
+    if (this.stats.weapon.material === STEEL) {
+      if (!this.inventory.steelArrowCount()) {
+        if (this.time >= this.noArrowsUntil) {
+          this.events.push({ type: 'notify', text: 'You need Steel Arrows' });
+          this.noArrowsUntil = this.time + 0.8;
+        }
+        return;
+      }
+      this.swing = {
+        kind: 'shoot',
+        power: false,
+        time: 0,
+        duration: Infinity,
+        struck: false,
+        releaseAt: steelBowDrawTime(this.stats.weapon),
+      };
+      this.events.push({ type: 'swing', swing: this.swing });
+      return;
+    }
     const p = this.player;
     this.swing = { kind: 'shoot', power: false, time: 0, duration: this.hero.reload, struck: true };
     this.events.push({ type: 'swing', swing: this.swing }, { type: 'sound', name: 'ARROWFR.VOC' });
@@ -1257,6 +1595,80 @@ export class Dungeon {
     this.arrows.push(arrow);
     // It sets off a little in front, striking anything nearer on the way.
     this.flyArrow(arrow, ARROW_START);
+  }
+
+  private looseSteelArrow(strength = 1): void {
+    if (!this.inventory.takeSteelArrow()) return;
+    const p = this.player,
+      speed = STEEL_ARROW_SPEED * (0.4 + 0.6 * strength),
+      cp = Math.cos(p.pitch),
+      height = Math.min((p.z ?? 0) + (this.viewEyeOffset ?? playerEyeOffset(this.sneaking,this.swimming)),ceilingHeight(this.level.cells[cellIndex(this.level,p.x,p.y)],this.level)-.03);
+    const originX=p.x-Math.sin(p.yaw)*this.viewSideOffset,originZ=p.y+Math.cos(p.yaw)*this.viewSideOffset;
+    const arrow: Arrow = {
+      id: this.nextArrow++,
+      x: p.x,
+      y: p.y,
+      dx: Math.cos(p.yaw) * cp,
+      dy: Math.sin(p.yaw) * cp,
+      travelled: 0,
+      weapon: {
+        ...this.stats.weapon,
+        damage: this.stats.weapon.damage.map((d) => Math.max(1, Math.round(d * (0.25 + 0.75 * strength)))) as [number, number],
+      },
+      sneak: this.sneaking,
+      projectile: projectile([originX, height, originZ], [Math.cos(p.yaw) * cp * speed, Math.sin(p.pitch) * speed, Math.sin(p.yaw) * cp * speed]),
+    };
+    this.arrows.push(arrow);
+    this.events.push({ type: 'sound', name: 'ARROWFR.VOC' });
+    // Sweep the short initial muzzle advance too; near walls cannot be skipped.
+    this.flySteelArrow(arrow, 0.1 / speed);
+  }
+
+  private flySteelArrow(a: Arrow, dt: number): void {
+    const state = a.projectile!;
+    if (state.hitCreature !== undefined) {
+      const c = this.creatures.find((c) => c.id === state.hitCreature);
+      if (c && a.carrierOffset) {
+        state.position[0] = c.x + a.carrierOffset[0];
+        state.position[2] = c.y + a.carrierOffset[2];
+      }
+      return;
+    }
+    if (state.phase !== 'flying') return;
+    stepProjectile(
+      state,
+      dt,
+      (from, to) => {
+        const terrain = sweepTerrain(this.level, this.openDoors, from, to, this.surfaceMaterials),
+          creature = sweepCreatures(this.level, this.creatures, from, to);
+        return terrain && (!creature || terrain.fraction <= creature.fraction) ? terrain : creature;
+      },
+      (hit) => {
+        if (hit.creature !== undefined) {
+          const c = this.creatures.find((c) => c.id === hit.creature);
+          if (c) {
+            this.arrowStrikes(a, c);
+            a.carrierOffset = [hit.point[0] - c.x, 0, hit.point[2] - c.y];
+          }
+        } else {
+          this.events.push({type:'surfaceImpact',material:hit.material,point:hit.point,normal:hit.normal});
+          this.events.push({
+            type: 'sound',
+            name: hit.material === 'metal' ? 'CLANK.VOC' : hit.material === 'stone' ? 'NHIT.VOC' : 'ARROWHT.VOC',
+            at: { x: hit.point[0], y: hit.point[2] },
+            volume: 0.55,
+          });
+        }
+      },
+    );
+    a.x = state.position[0];
+    a.y = state.position[2];
+    a.travelled = state.travelled;
+    // Lost outside the level or in a bottomless pit: retire it instead of leaving a floating pickup.
+    if (state.age > 30 || state.position[1] < -this.level.height * 2) {
+      state.phase = 'recovered';
+      this.arrows.splice(this.arrows.indexOf(a), 1);
+    }
   }
 
   /** Moves an arrow `distance` on: into the first creature in its way, unless a wall or shut door stops it first or it falls. */
@@ -1300,22 +1712,21 @@ export class Dungeon {
 
   private killed(c: Creature): void {
     this.kills++;
-    this.events.push({ type: 'sound', name: 'BODYFALL.VOC', at: { x: c.x, y: c.y } });
     // The level comes later, once a game minute passes with no monsters near (checkLevel).
-    this.stats.experience += c.info.experience + c.info.experiencePerHealth * c.maxHealth;
-    if (!this.cleared && this.creatures.every((o) => !isAlive(o))) {
+    this.stats.experience += c.experienceValue??(c.info.experience + c.info.experiencePerHealth * c.maxHealth);
+    if (!this.practiceMode && !this.cleared && this.creatures.every(isDefeated)) {
       this.cleared = true;
       this.events.push({ type: 'cleared' });
     }
   }
 
   /** The nearest living creature the swing can reach. */
-  private creatureInReach(reach = WEAPON_REACH): Creature | undefined {
+  private creatureInReach(reach = WEAPON_REACH, magical = false): Creature | undefined {
     const p = this.player;
     let best: Creature | undefined;
     let bestDist = Infinity;
     for (const c of this.creatures) {
-      if (!isAlive(c)) continue;
+      if (!(magical?isMagicTarget(c):isAlive(c))) continue;
       const d = Math.hypot(c.x - p.x, c.y - p.y);
       if (d > reach || d >= bestDist) continue;
       if (d > PLAYER_RADIUS + CREATURE_RADIUS && angleTo(p, c.x, c.y) > WEAPON_ARC) continue;
@@ -1335,7 +1746,12 @@ export class Dungeon {
 
   /** How far the dungeon can be seen, as a multiple of the usual: more under a Light spell. */
   get lightReach(): number {
-    return this.time < this.light.until ? this.light.reach : 1;
+    let reach=this.time < this.light.until ? this.light.reach : 1;
+    for(const b of this.bolts)if(b.lightUntil&&this.time<b.lightUntil){
+      const distance=Math.hypot(b.x-this.player.x,b.y-this.player.y);
+      if(lineOfSight(this.level,this.player.x,this.player.y,b.x,b.y,this.openDoors))reach=Math.max(reach,1+(b.lightPower??1)*Math.max(0,1-distance/6));
+    }
+    return reach;
   }
 
   /** Hit points left on a shield spell. */
@@ -1345,15 +1761,103 @@ export class Dungeon {
 
   /** The spells working on the player now, and paralysis, for the HUD and the magic menu. */
   activeEffects(): string[] {
-    const list: string[] = [];
-    if (this.paralysed) list.push('Paralyzed');
-    if (this.shieldPoints > 0) list.push(`Shield (${this.shieldPoints})`);
-    if (this.time < this.sanctuary.until) list.push('Sanctuary');
-    if (this.invisible) list.push('Invisible');
-    if (this.time < this.light.until) list.push('Light');
-    if (this.time < this.regen.until) list.push('Regenerating');
-    for (const f of this.fortified) list.push(`Fortified (+${f.points})`);
-    return list;
+    return this.statusEffects().map(effect => effect.name);
+  }
+
+  /** Structured effects for generated HUD icons and real remaining durations. */
+  statusEffects(): ActiveStatusEffect[] {
+    const effects: ActiveStatusEffect[] = [];
+    const timed = (id: string, name: string, icon: string, until: number, dispelType?: StatusDispelType,total?:number) => {
+      if(until<=this.time)return;
+      const duration=total??this.effectDurations.get(id)??until-this.time;
+      if(total===undefined&&!this.effectDurations.has(id))this.effectDurations.set(id,duration);
+      effects.push({id,name,icon,kind:dispelType?'debuff':'buff',dispelType,remaining:until-this.time,duration});
+    };
+    timed('paralysis', 'Paralyzed', 'paralysis', this.paralysedUntil, this.paralysisType);
+    if (this.disease) {
+      const disease=this.disease;
+      effects.push({id:'disease', name:disease.info.name, icon:DISEASE_ICONS[disease.info.id-10], kind:'debuff', dispelType:'disease', remaining:disease.until===undefined?undefined:Math.max(0,(disease.until-this.clock)/GAME_SECONDS_PER_SECOND),duration:disease.until===undefined?undefined:(disease.until-disease.started)/GAME_SECONDS_PER_SECOND});
+    }
+    if (this.shieldPoints > 0) effects.push({id: 'shield', name: `Shield (${this.shieldPoints})`, icon: 'shield', kind: 'buff', persistentLabel: `${this.shieldPoints} HP`});
+    timed('sanctuary', 'Sanctuary', 'sanctuary', this.sanctuary.until);
+    timed('invisibility', 'Invisible', 'invisibility', this.invisibleUntil);
+    timed('light', 'Light', 'light', this.light.until);
+    for(const b of this.bolts)if(b.lightUntil)timed(`wanderlight-${b.id}`,'Wanderlight','light',b.lightUntil,undefined,b.spell.effects.map(e=>duration(e,this.stats.level))[0]);
+    timed('regeneration', 'Regenerating', 'regeneration', this.regen.until);
+    timed('levitate','Levitation','light',this.levitateUntil);
+    for(const [id,w] of this.wards){
+      const name=w.effect.effect===ELEMENTAL_RESISTANCE?`Resist ${['Fire','Cold','Shock','','Poison'][w.effect.sub]}`:
+        w.effect.effect===SPELL_ABSORPTION?'Spell Absorption':w.effect.effect===SPELL_REFLECTION?'Spell Reflection':'Spell Resistance';
+      timed(id,name,'shield',w.until,undefined,w.duration);
+    }
+    this.fortified.forEach((f, i) => timed(`fortify-${f.attribute}-${i}`, `${f.points<0?'Drained':'Fortified'} (${f.points>0?'+':''}${f.points})`, 'fortify', f.until,f.points<0?f.dispel??'magic':undefined,f.duration));
+    for (const [id,harm] of this.playerHarms) if(harm.until>this.time) effects.push({id,name:harm.name,icon:harm.icon,kind:'debuff',dispelType:harm.type,remaining:harm.until-this.time,duration:harm.duration});
+    return effects;
+  }
+
+  get availablePracticeDiseases():number[]{return this.diseaseTables?.diseases.map(d=>d.id)??[];}
+
+  /** Repeatable probes for Effect Testing; these mutate the same state that gameplay reads. */
+  applyPracticeEffect(id:string,seconds=60):boolean {
+    const applied=this.applyPracticeEffectState(id,seconds);
+    if(applied)this.effectDurations.set(id,id==='paralysis'?Math.min(8,seconds):seconds);
+    if(applied && !id.startsWith('disease:')){
+      const effect=[...TEST_BUFFS,...TEST_DEBUFFS].find(e=>e.id===id)!;
+      this.events.push({type:'notify',text:`${effect.kind==='buff'?'You gained':'You have contracted'} ${effect.name} (${testEffectDescription(id)})`});
+    }
+    return applied;
+  }
+
+  private applyPracticeEffectState(id:string,seconds:number):boolean {
+    if (!this.practiceMode) return false;
+    if (id.startsWith('disease:')) {
+      const disease=Number(id.slice(8));
+      if (!this.diseaseTables?.diseases.some(d=>d.id===disease)) return false;
+      this.disease=undefined;
+      return this.infect(disease);
+    }
+    const until=this.time+seconds;
+    if(id==='levitation'){this.levitateUntil=until;this.player.z=Math.max(0,this.player.z??0);this.player.vz=0;return true;}
+    const wardTypes:Record<string,[number,number]>={
+      'resist-fire':[ELEMENTAL_RESISTANCE,0],'resist-cold':[ELEMENTAL_RESISTANCE,1],
+      'resist-shock':[ELEMENTAL_RESISTANCE,2],'resist-poison':[ELEMENTAL_RESISTANCE,4],
+      'spell-absorption':[SPELL_ABSORPTION,0],'spell-reflection':[SPELL_REFLECTION,0],'spell-resistance':[SPELL_RESISTANCE,0],
+    };
+    const ward=wardTypes[id];
+    if(ward){
+      const [effect,sub]=ward;this.wards.set(`ward-${effect}-${sub}`,{effect:{effect,sub,attribute:0,params:[100,0,1,0,1,1]},power:100,until,duration:seconds});return true;
+    }
+    switch(id) {
+      case 'shield':this.shieldPoints=60;return true;
+      case 'sanctuary':this.sanctuary={chance:100,until};return true;
+      case 'invisibility':this.invisibleUntil=until;return true;
+      case 'light':this.light={reach:3,until};return true;
+      case 'regeneration':
+        this.stats.health=Math.max(1,Math.floor(this.stats.maxHealth*.5));
+        this.regen={health:3,every:2,next:this.time+2,until};return true;
+      case 'fortify':
+        for(let i=this.fortified.length-1;i>=0;i--)if(this.fortified[i].attribute===0)this.fortified.splice(i,1);
+        this.fortified.push({attribute:0,points:10,loss:0,every:5,next:this.time+5,until,duration:seconds});this.refreshHero();return true;
+      case 'paralysis':this.paralysedUntil=this.time+Math.min(8,seconds);this.paralysisType='magic';return true;
+      default:{
+        const effect=TEST_DEBUFFS.find(e=>e.id===id);
+        if(!effect)return false;
+        const icon=id==='curse'?'calirons-curse':id;
+        const type:StatusDispelType=id==='poison'?'poison':id==='curse'?'curse':'magic';
+        this.playerHarms.set(id,{name:effect.name,icon,type,until,duration:seconds,next:this.time+2,every:2,damage:['fire','frost','shock'].includes(id)?12:['poison','drain'].includes(id)?2:0,element:({fire:0,frost:1,shock:3} as Record<string,number>)[id]});
+        this.refreshHero();return true;
+      }
+    }
+  }
+
+  /** Restore the isolated tester without touching the saved character or normal run. */
+  clearPracticeEffects():void {
+    if(!this.practiceMode)return;
+    this.playerHarms.clear();this.effectDurations.clear();this.disease=undefined;this.diseaseLosses.fill(0);
+    this.paralysedUntil=this.invisibleUntil=this.shieldPoints=this.levitateUntil=0;this.wards.clear();this.terrainSpell=undefined;for(let i=this.bolts.length-1;i>=0;i--)if(this.bolts[i].lightUntil)this.bolts.splice(i,1);
+    this.sanctuary={chance:0,until:0};this.light={reach:1,until:0};
+    this.regen={health:0,every:0,next:0,until:0};this.fortified.length=0;
+    this.refreshHero();this.stats.health=this.stats.maxHealth;this.stats.magicka=this.stats.maxMagicka;this.stats.stamina=this.stats.maxStamina;
   }
 
   /** Spell points the spell costs at the player's level. */
@@ -1363,7 +1867,7 @@ export class Dungeon {
 
   /** Casts a spell, if there are spell points enough and it has something to work on. */
   cast(spell: SpellRecord): boolean {
-    if (!this.mayCast()) return false;
+    if (!this.mayCast(spell)) return false;
     if (!castable(spell)) return false;
     const cost = this.spellCost(spell);
     if (this.stats.magicka < cost) {
@@ -1373,9 +1877,10 @@ export class Dungeon {
     return this.release(spell, this.stats.level, () => (this.stats.magicka -= cost));
   }
 
-  /** Not dead or out, held still, swinging, or just after casting. */
-  private mayCast(): boolean {
-    return !this.outcome && !this.paralysed && !this.swing && this.sinceCast >= CAST_TIME;
+  /** Casting is blocked during swings and cooldowns; paralysis still allows its own cure. */
+  private mayCast(spell?:SpellRecord): boolean {
+    const releasesParalysis=spell?.effects.some(e=>e.effect===CURE&&(e.sub===CURE_PARALYSIS||e.sub===1));
+    return !this.outcome && (!this.paralysed||!!releasesParalysis) && !this.playerHarms.has('silence') && !this.swing && this.sinceCast >= CAST_TIME;
   }
 
   /**
@@ -1385,30 +1890,37 @@ export class Dungeon {
    */
   private release(spell: SpellRecord, level: number, pay: () => void): boolean {
     const notify = (text: string) => this.events.push({ type: 'notify', text });
-    // In sanctuary, a caster may not cast offensive spells.
-    if (this.time < this.sanctuary.until && spell.target !== 'caster') {
-      notify('You can’t cast that in sanctuary');
-      return false;
-    }
     let touched: Creature | undefined;
     if (spell.target === 'touch') {
-      touched = this.creatureInReach(TOUCH_REACH);
+      touched = this.creatureInReach(TOUCH_REACH,true);
       if (!touched) {
         notify('There is nothing in reach to touch');
         return false;
       }
     }
     const opens = spell.effects.some((e) => e.effect === OPEN);
-    const door = opens ? this.ahead(OPEN_REACH) : undefined;
+    const locks = spell.effects.some((e) => e.effect === LOCK);
+    const terrain=spell.effects.find(terrainEffect);
+    const door = opens||locks ? this.ahead(OPEN_REACH) : undefined;
+    if(locks&&door?.kind!=='door'){notify('There is no door in front of you');return false;}
+    if(locks&&door?.kind==='door'&&[this.player,...this.creatures.filter(isAlive)].some(c=>cellIndex(this.level,c.x,c.y)===door.cell)){
+      notify('The doorway is occupied');return false;
+    }
     if (opens && spell.effects.length === 1 && !(door?.kind === 'door' && this.locked(door.cell))) {
       notify('There is no locked door in front of you');
       return false;
     }
 
     pay();
+    if(this.time<this.sanctuary.until&&spell.target!=='caster'&&spell.effects.some(e=>[CAUSE,DAMAGE,CONTINUOUS_DAMAGE,DRAIN,TRANSFER,SILENCE].includes(e.effect))){
+      this.sanctuary.until=0;this.events.push({type:'notify',text:'Your attack breaks Sanctuary'});
+    }
     this.sinceCast = 0;
+    this.terrainSpell=terrain?{spell,effect:terrain,remaining:terrain.params[0]}:undefined;
+    if(terrain)this.events.push({type:'notify',text:`${spell.name}: aim and interact to select ${terrain.params[0]} sections. Cast another spell to cancel.`});
     this.events.push({ type: 'cast', spell }, { type: 'sound', name: spell.target === 'caster' ? 'BURST5.VOC' : 'SLOWBALL.VOC', volume: 0.7 });
     const p = this.player;
+    if(terrain)return true;
     switch (spell.target) {
       case 'caster':
         this.onCaster(spell, door?.kind === 'door' ? door.cell : undefined, level);
@@ -1423,7 +1935,7 @@ export class Dungeon {
         // From just in front of the eyes, the way the player faces.
         const dx = Math.cos(p.yaw);
         const dy = Math.sin(p.yaw);
-        this.bolts.push({ id: this.nextBolt++, spell, level, x: p.x + dx * 0.3, y: p.y + dy * 0.3, dx, dy, travelled: 0 });
+        this.bolts.push({ id: this.nextBolt++, spell, level, x: p.x + dx * 0.3, y: p.y + dy * 0.3, dx, dy, travelled: 0, z:(p.z??0)+playerEyeOffset(this.sneaking,this.swimming),dz:Math.tan(p.pitch) });
       }
     }
     return true;
@@ -1436,47 +1948,87 @@ export class Dungeon {
       switch (e.effect) {
         case HEAL:
           if (e.sub === HEALTH) s.health = Math.min(s.maxHealth, s.health + magnitude(e, level, this.random));
-          else s.stamina = Math.min(s.maxStamina, s.stamina + magnitude(e, level, this.random));
+          else if(e.sub===0)s.stamina = Math.min(s.maxStamina, s.stamina + magnitude(e, level, this.random));
+          else if(e.sub===2)s.magicka = Math.min(s.maxMagicka,s.magicka+magnitude(e,level,this.random));
+          else {
+            const attr=attributeIndex(e),restored=Math.min(magnitude(e,level,this.random),this.diseaseLosses[attr]*100/256);
+            this.diseaseLosses[attr]=Math.max(0,this.diseaseLosses[attr]-restored*256/100);this.refreshHero();
+          }
+          break;
+        case LEVITATE:
+          this.levitateUntil=this.time+duration(e,level);this.effectDurations.set('levitate',duration(e,level));
+          this.player.z=Math.max(0,this.player.z??0);this.player.vz=0;this.swimming=false;this.climb=undefined;
+          this.events.push({type:'notify',text:'You gained Levitation (Allows you to cross pits and water)'});break;
+        case ELEMENTAL_RESISTANCE: case SPELL_ABSORPTION: case SPELL_REFLECTION: case SPELL_RESISTANCE: {
+          const lasts=duration(e,level),id=`ward-${e.effect}-${e.sub}`;
+          this.wards.set(id,{effect:e,power:chance(e,level),until:this.time+lasts,duration:lasts});
+          this.events.push({type:'notify',text:`You gained ${this.statusEffects().find(w=>w.id===id)?.name??'protection'}`});break;
+        }
+        case LOCK:
+          if(door!==undefined&&this.random()*100<Math.min(100,e.params[0])){
+            this.magicalLocks.set(door,{until:this.time+duration(e,level),strength:e.params[1]*Math.floor(level/Math.max(1,e.params[4]))});
+            this.doors.get(door)!.target=0;this.openDoors.delete(door);
+            this.events.push({type:'notify',text:'The door locks'});
+          }else this.events.push({type:'notify',text:'The lock fails'});
           break;
         case CREATE:
           this.shieldPoints = Math.max(this.shieldPoints, amount(e, level));
-          this.events.push({ type: 'notify', text: `Shielded for ${this.shieldPoints} hit points` });
+          this.events.push({ type: 'notify', text: `You gained Shield (Absorbs ${this.shieldPoints} points of incoming damage)` });
           break;
         case NON_TARGET:
-          this.sanctuary = { chance: chance(e, level), until: this.time + duration(e, level) };
+          if(this.random()*100>=chance(e,level)){this.events.push({type:'notify',text:'Sanctuary failed'});break;}
+          this.effectDurations.set('sanctuary',duration(e,level));
+          this.sanctuary = { chance: 100, until: this.time + duration(e, level) };
+          this.events.push({type:'notify',text:`You gained Sanctuary (Gives enemies a ${this.sanctuary.chance}% chance to ignore you)`});
           break;
         case INVISIBILITY:
+          this.effectDurations.set('invisibility',duration(e,level));
           this.invisibleUntil = this.time + duration(e, level);
-          this.events.push({ type: 'notify', text: 'You are invisible' });
+          this.events.push({ type: 'notify', text: 'You gained Invisibility (Makes you invisible to creatures that cannot see invisible targets)' });
           break;
         case LIGHT:
+          if(spell.flags&0x80){
+            const p=this.player,dx=Math.cos(p.yaw),dy=Math.sin(p.yaw);
+            this.bolts.push({id:this.nextBolt++,spell,level,x:p.x+dx*.3,y:p.y+dy*.3,dx,dy,z:(p.z??0)+playerEyeOffset(this.sneaking,this.swimming),dz:Math.tan(p.pitch),travelled:0,lightUntil:this.time+duration(e,level),lightPower:lightReach(e)-1});
+            this.events.push({type:'notify',text:'You gained Wanderlight (Sends a globe of light ahead)'});break;
+          }
+          this.effectDurations.set('light',duration(e,level));
           this.light = { reach: lightReach(e), until: this.time + duration(e, level) };
+          this.events.push({type:'notify',text:'You gained Light (Extends your vision in dark areas)'});
           break;
         case REGENERATE: {
+          this.effectDurations.set('regeneration',duration(e,level));
           const r = regeneration(e);
           const every = r.everyRounds * ROUND;
           this.regen = { health: r.health, every, next: this.time + every, until: this.time + duration(e, level) };
+          this.events.push({type:'notify',text:`You gained Regeneration (Restores ${r.health} health every ${every} seconds)`});
           break;
         }
         case OPEN:
           if (door === undefined || !this.locked(door)) break;
           if (this.random() * 100 < chance(e, level)) {
+            this.magicalLocks.delete(door);
             this.unlocked.add(door);
             this.events.push({ type: 'notify', text: 'The lock opens' });
             this.openDoor(door);
           } else this.events.push({ type: 'notify', text: 'The lock holds' }, { type: 'sound', name: 'LOCK.VOC', at: cellCentre(this.level, door) });
           break;
         case CURE:
-          // Nothing in the dungeons poisons or diseases the player; paralysis can be cured.
-          if (e.sub === CURE_PARALYSIS && this.paralysed && this.random() * 100 < chance(e, level)) this.paralysedUntil = this.time;
+          if (this.random() * 100 < chance(e, level)) {
+            if (e.sub === CURE_PARALYSIS || e.sub === 1) this.paralysedUntil = this.time;
+            if (e.sub === 1) this.playerHarms.delete('poison');
+            if (e.sub === 3) {this.playerHarms.delete('curse');this.playerHarms.delete('spell-curse');for(let i=this.fortified.length-1;i>=0;i--)if(this.fortified[i].dispel==='curse')this.fortified.splice(i,1);this.refreshHero();}
+            else if (e.sub === 0) this.cureDisease();
+          }
           break;
         case FORTIFY: {
           const f = fortification(e);
           const lasts = duration(e, level);
           if (f.points <= 0 || lasts <= 0) break;
           const every = f.everyRounds * ROUND;
-          this.fortified.push({ attribute: e.attribute, points: f.points, loss: f.loss, every, next: this.time + every, until: this.time + lasts });
+          this.fortified.push({ attribute: attributeIndex(e), points: f.points, loss: f.loss, every, next: this.time + every, until: this.time + lasts,duration:lasts });
           this.refreshHero();
+          this.events.push({type:'notify',text:`You gained Fortify (Raises ${['Strength','Intelligence','Willpower','Agility','Speed','Endurance','Personality','Luck'][attributeIndex(e)]??'an attribute'} by ${f.points} points)`});
           break;
         }
       }
@@ -1484,55 +2036,151 @@ export class Dungeon {
   }
 
   /** A spell cast at `level` bursting at `at`: on `hit`, or on every creature in `radius` that the burst can reach. */
-  private burst(spell: SpellRecord, at: { x: number; y: number }, level: number, hit?: Creature, radius = spell.target === 'areaTarget' ? AREA_RADIUS : 0): void {
+  private burst(spell: SpellRecord, at: { x: number; y: number }, level: number, hit?: Creature, radius = spell.target === 'areaTarget' ? AREA_RADIUS : 0,source?:Creature): void {
     this.events.push({ type: 'burst', spell, at, radius }, { type: 'sound', name: radius ? 'EXPLODE.VOC' : 'BURST5.VOC', at });
+    const nativeArea=radius>0&&!!this.spellAreaCells;
+    const reaches=(target:{x:number;y:number},padding=0)=>{
+      if(nativeArea){
+        const x=Math.floor(target.x)-Math.floor(at.x),y=Math.floor(target.y)-Math.floor(at.y);
+        return this.spellAreaCells!.some(c=>c.x===x&&c.y===y);
+      }
+      return Math.hypot(target.x-at.x,target.y-at.y)<=(radius||.4)+padding&&lineOfSight(this.level,at.x,at.y,target.x,target.y,this.openDoors);
+    };
+    // Native target 3 excludes its caster; target 4 may also hit its caster.
+    if((source||nativeArea)&&!(spell.target==='areaCaster'&&!source)&&reaches(this.player))this.receiveSpell(spell,level,source);
     if (radius === 0) {
       if (hit) this.onCreature(spell, hit, level);
       return;
     }
     for (const c of this.creatures) {
-      if (!isAlive(c) || Math.hypot(c.x - at.x, c.y - at.y) > radius + CREATURE_RADIUS) continue;
-      if (!lineOfSight(this.level, at.x, at.y, c.x, c.y, this.openDoors)) continue;
+      // Native 3cdd:090e omits death-flat actors, including subdued bodies.
+      if (!(nativeArea?isAlive(c):isMagicTarget(c)) || spell.target==='areaCaster'&&c===source || !reaches(c,CREATURE_RADIUS)) continue;
       this.onCreature(spell, c, level);
     }
   }
 
   /** A spell's effects on a creature it reached, cast at `level`. */
   private onCreature(spell: SpellRecord, c: Creature, level: number): void {
+    if(!isMagicTarget(c))return;
     let damage = 0;
+    const state=creatureMagic(c);
+    const modifier=(attribute:number,points:number,e:SpellEffect,lasts=duration(e,level))=>{
+      state.modifiers.push({attribute,points,loss:e.params[1],every:Math.max(1,e.params[4])*ROUND,next:this.time+Math.max(1,e.params[4])*ROUND,until:this.time+lasts});
+    };
     for (const e of spell.effects) {
       switch (e.effect) {
-        case DAMAGE:
-          if (e.sub === DAMAGE_HEALTH) damage += magnitude(e, level, this.random);
+        case DAMAGE: {
+          const n=magnitude(e,level,this.random);
+          if(e.sub===DAMAGE_HEALTH&&!(c.info.flags&([4,8,64,16][spell.element]??0)))damage+=n;
+          else if(e.sub===1)state.stamina=Math.max(0,state.stamina-n);
+          else if(e.sub===2)state.magicka=Math.max(0,state.magicka-n);
           break;
+        }
         case CONTINUOUS_DAMAGE:
-          if (e.sub !== DAMAGE_HEALTH) break;
-          this.afflict(c, spell, level, e, CONTINUOUS_EVERY * ROUND, duration(e, level));
-          break;
+          this.afflict(c, spell, level, e, CONTINUOUS_EVERY * ROUND, duration(e, level));break;
+        case SILENCE:
+          if(this.random()*100<chance(e,level)){
+            state.silencedUntil=this.time+duration(e,level);
+            this.events.push({type:'notify',text:`The ${c.info.name} is silenced`});
+          }break;
+        case DRAIN:
+          modifier(attributeIndex(e),-Math.min(e.params[0],creatureAttribute(c,attributeIndex(e))),e);break;
         case TRANSFER: {
-          const taken = Math.min(e.params[0], c.health);
-          damage += taken;
-          this.stats.health = Math.min(this.stats.maxHealth, this.stats.health + taken);
-          break;
+          if(e.sub===0){
+            const attribute=attributeIndex(e),taken=Math.min(e.params[0],creatureAttribute(c,attribute));
+            modifier(attribute,-taken,{...e,params:[e.params[0],0,0,0,1,e.params[5]]},duration(e,level));
+            const lasts=duration(e,level),every=Math.max(1,e.params[4])*ROUND;
+            this.fortified.push({attribute,points:taken,loss:0,every,next:this.time+every,until:this.time+lasts,duration:lasts});this.refreshHero();
+          }else {
+            const pool=transferPool(e),available=pool===0?Math.max(0,c.health-damage):pool===1?state.stamina:state.magicka;
+            const taken=Math.min(e.params[0],available);
+            if(pool===0){damage+=taken;this.stats.health=Math.min(this.stats.maxHealth,this.stats.health+taken);}
+            else if(pool===1){state.stamina-=taken;this.stats.stamina=Math.min(this.stats.maxStamina,this.stats.stamina+taken);}
+            else if(pool===2){state.magicka-=taken;this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+taken);}
+          }break;
         }
         case CAUSE:
           if (this.random() * 100 >= chance(e, level)) {
-            this.events.push({ type: 'notify', text: `The ${c.info.name} resists` });
-            break;
+            this.events.push({ type: 'notify', text: `The ${c.info.name} resists` });break;
           }
           if (e.sub === CAUSE_PARALYSIS) {
             paralyseCreature(c, duration(e, level), this.world);
             this.events.push({ type: 'notify', text: `The ${c.info.name} is paralyzed` });
           } else if (e.sub === CAUSE_POISON) {
+            if(c.info.flags&64)break;
             const p = poisonDamage(e);
             this.afflict(c, spell, level, p.damage, p.everyRounds * ROUND, duration(e, level));
             this.events.push({ type: 'notify', text: `The ${c.info.name} is poisoned` });
-          }
+          } else if(e.sub===0||e.sub===3){
+            for(const attribute of e.sub===0?[0,3,4,5]:[1,2,6,7])state.modifiers.push({attribute,points:-Math.min(e.params[2],creatureAttribute(c,attribute)),loss:0,growth:e.params[2],every:ROUND,next:this.time+ROUND,until:this.time+duration(e,level)});
+            this.events.push({type:'notify',text:`The ${c.info.name} is ${e.sub===0?'diseased':'cursed'}`});
+          } else if(e.sub===4)damage=c.health;
           break;
       }
     }
-    // Whatever the spell does, the creature knows it was attacked.
     this.hurtByMagic(c, damage);
+  }
+
+  /** Incoming monster spells share the same records as player spells. Reflection is resolved once. */
+  receiveSpell(spell:SpellRecord,level:number,source?:Creature):void {
+    if(this.outcome)return;
+    for(const type of [SPELL_REFLECTION,SPELL_ABSORPTION,SPELL_RESISTANCE]){
+      const ward=[...this.wards.values()].find(w=>w.effect.effect===type&&this.time<w.until);
+      if(!ward||this.random()*100>=ward.power)continue;
+      if(type===SPELL_REFLECTION){
+        if(!source)continue;
+        this.onCreature(spell,source,level);this.events.push({type:'notify',text:'Spell reflected'});
+      }else if(type===SPELL_ABSORPTION){
+        this.stats.magicka=Math.min(this.stats.maxMagicka,this.stats.magicka+magickaCost(spell,level));
+        this.events.push({type:'notify',text:'Spell absorbed'});
+      }else this.events.push({type:'notify',text:'Spell resisted'});
+      return;
+    }
+    const resist=[...this.wards.values()].find(w=>w.effect.effect===ELEMENTAL_RESISTANCE&&resistedElement(w.effect.sub)===spell.element&&this.time<w.until);
+    if(resist&&this.random()*100<resist.power){this.events.push({type:'notify',text:'Elemental spell resisted'});return;}
+    for(const e of spell.effects){
+      const lasts=duration(e,level),until=this.time+lasts;
+      const harm=(id:string,name:string,icon:string,type:StatusDispelType,damage=0,every=ROUND)=>{
+        this.playerHarms.set(id,{name,icon,type,until,next:this.time+every,every,damage,element:spell.element,duration:lasts});
+        this.events.push({type:'notify',text:`You have contracted ${name}`});
+      };
+      switch(e.effect){
+        case DAMAGE:
+          if(e.sub===0)this.hurtPlayer(magnitude(e,level,this.random),undefined,spell.element,true);
+          else if(e.sub===1)this.stats.stamina=Math.max(0,this.stats.stamina-magnitude(e,level,this.random));
+          else if(e.sub===2)this.stats.magicka=Math.max(0,this.stats.magicka-magnitude(e,level,this.random));
+          break;
+        case CONTINUOUS_DAMAGE:
+          harm(`continuous-${e.sub}`,e.sub===0?'Continuous Damage':e.sub===1?'Fatigue Drain':'Spell Point Drain',e.sub===0?'fire':'drain','magic',magnitude(e,level,this.random),CONTINUOUS_EVERY*ROUND);break;
+        case SILENCE:
+          if(this.random()*100<chance(e,level))harm('silence','Silence','silence','magic');break;
+        case DRAIN: case TRANSFER:{
+          if(e.effect===TRANSFER&&e.sub===1){
+            const pool=transferPool(e),taken=Math.min(e.params[0],pool===0?this.stats.health:pool===1?this.stats.stamina:this.stats.magicka);
+            if(pool===0){this.hurtPlayer(taken);if(source)source.health=Math.min(source.maxHealth,source.health+taken);}
+            else if(pool===1){this.stats.stamina-=taken;if(source)creatureMagic(source).stamina=Math.min(creatureMagic(source).maxStamina,creatureMagic(source).stamina+taken);}
+            else if(pool===2){this.stats.magicka-=taken;if(source)creatureMagic(source).magicka=Math.min(creatureMagic(source).maxMagicka,creatureMagic(source).magicka+taken);}
+          }else {
+            const attr=attributeIndex(e),every=Math.max(1,e.params[4])*ROUND;
+            this.fortified.push({attribute:attr,points:-e.params[0],loss:e.params[1],every,next:this.time+every,until,duration:lasts});this.refreshHero();
+          }break;
+        }
+        case CAUSE:
+          if(this.random()*100>=chance(e,level))break;
+          if(e.sub===CAUSE_PARALYSIS){if(this.random()*100<this.hero.paralysis)this.paralyse(lasts);}
+          else if(e.sub===CAUSE_POISON){
+            if(this.hero.cls?.id===15)break;
+            const poison=poisonDamage(e);harm('poison','Poison','poison','poison',poison.damage,poison.everyRounds*ROUND);
+          }else if(e.sub===0){
+            const diseases=this.availablePracticeDiseases.filter(id=>[10,11,12,14,15,17,19,20,21,22,24,25,26].includes(id));
+            if(diseases.length)this.infect(diseases[Math.floor(this.random()*diseases.length)]);
+          }else if(e.sub===3){
+            harm('spell-curse','Curse','calirons-curse','curse');
+            for(const attr of [1,2,6,7])this.fortified.push({attribute:attr,points:-e.params[2],loss:0,every:ROUND,next:this.time+ROUND,until,duration:lasts,dispel:'curse',growth:e.params[2]});this.refreshHero();
+          }else if(e.sub===4&&!this.practiceMode)this.die();
+          break;
+      }
+    }
   }
 
   private afflict(c: Creature, spell: SpellRecord, level: number, damage: Affliction['damage'], every: number, lasts: number): void {
@@ -1541,33 +2189,52 @@ export class Dungeon {
   }
 
   private hurtByMagic(c: Creature, damage: number): void {
-    const killed = hurtCreature(c, damage, this.world);
+    const killed = hurtCreature(c, damage, this.world, false, true);
     if (damage > 0) this.events.push({ type: 'hit', creature: c, damage, killed, far: true }, { type: 'sound', name: 'EHIT.VOC', at: { x: c.x, y: c.y } });
     if (killed) this.killed(c);
   }
 
   /** Bolts in flight, harm that lasts, and spells on the player wearing off. */
   private updateMagic(dt: number): void {
-    for (const b of [...this.bolts]) this.flyBolt(b, dt);
+    for(const [cell,lock] of this.magicalLocks)if(this.time>=lock.until)this.magicalLocks.delete(cell);
+    for(const [id,ward] of this.wards)if(this.time>=ward.until)this.wards.delete(id);
+    for (const [id,harm] of this.playerHarms) {
+      if (this.time>=harm.until) { this.playerHarms.delete(id);if(id==='curse')this.refreshHero();continue; }
+      while(harm.damage>0 && this.time>=harm.next) {
+        harm.next+=harm.every;
+        if(id==='continuous-1')this.stats.stamina=Math.max(0,this.stats.stamina-harm.damage);
+        else if(id==='drain'||id==='continuous-2')this.stats.magicka=Math.max(0,this.stats.magicka-harm.damage);
+        else this.hurtPlayer(harm.damage,undefined,harm.element);
+      }
+    }
+    for (const b of [...this.bolts]) {
+      if(b.lightUntil&&this.time>=b.lightUntil){this.bolts.splice(this.bolts.indexOf(b),1);continue;}
+      this.flyBolt(b, dt);
+    }
     for (const a of [...this.afflictions]) {
-      if (!isAlive(a.creature) || this.time > a.until + 1e-6) {
+      if (!isMagicTarget(a.creature) || this.time > a.until + 1e-6) {
         this.afflictions.splice(this.afflictions.indexOf(a), 1);
         continue;
       }
       if (this.time < a.next) continue;
       a.next += a.every;
       const damage = typeof a.damage === 'number' ? a.damage : magnitude(a.damage, a.level, this.random);
-      this.hurtByMagic(a.creature, damage);
+      if(typeof a.damage!=='number'&&a.damage.sub!==0){
+        const state=creatureMagic(a.creature);
+        if(a.damage.sub===1)state.stamina=Math.max(0,state.stamina-damage);
+        else state.magicka=Math.max(0,state.magicka-damage);
+      }else if(!(a.creature.info.flags&([4,8,64,16][a.spell.element]??0)))this.hurtByMagic(a.creature, damage);
     }
     let fortified = false;
     for (const f of [...this.fortified]) {
+      while(f.growth&&this.time>=f.next&&f.next<f.until){f.points-=f.growth;f.next+=f.every;fortified=true;}
       // Fortify wears off a few points at a time.
-      while (f.loss > 0 && f.points > 0 && this.time >= f.next) {
-        f.points -= f.loss;
+      while (f.loss > 0 && f.points !== 0 && this.time >= f.next) {
+        f.points = Math.sign(f.points)*Math.max(0,Math.abs(f.points)-f.loss);
         f.next += f.every;
         fortified = true;
       }
-      if (f.points <= 0 || this.time >= f.until) {
+      if (f.points === 0 || this.time >= f.until) {
         this.fortified.splice(this.fortified.indexOf(f), 1);
         fortified = true;
       }
@@ -1587,32 +2254,92 @@ export class Dungeon {
     }
   }
 
+  /** Monster dispatch (39cf:016c) launches every positive target type;
+   * impact collection (39cf:09b8) expands both targets 3 and 4 to an area.
+   */
+  private boltBurstRadius(spell:SpellRecord):number {
+    return spell.target==='areaTarget'||spell.target==='areaCaster'?AREA_RADIUS:0;
+  }
+
   private flyBolt(b: Bolt, dt: number): void {
+    if(b.stopped)return;
     const remove = () => this.bolts.splice(this.bolts.indexOf(b), 1);
     for (let left = BOLT_SPEED * dt; left > 0; left -= 0.1) {
       const stepLen = Math.min(0.1, left);
       const nx = b.x + b.dx * stepLen;
       const ny = b.y + b.dy * stepLen;
-      const hit = this.creatures.find((c) => isAlive(c) && Math.hypot(c.x - nx, c.y - ny) < CREATURE_RADIUS + BOLT_RADIUS);
+      const nz=b.z===undefined?undefined:b.z+(b.dz??0)*stepLen;
+      const playerFloor=this.player.z??0,playerTop=playerFloor+playerEyeOffset(this.sneaking,this.swimming)+.15;
+      if(b.source&&Math.hypot(this.player.x-nx,this.player.y-ny)<PLAYER_RADIUS+BOLT_RADIUS&&
+        (nz===undefined||nz>=playerFloor-BOLT_RADIUS&&nz<=playerTop+BOLT_RADIUS)){
+        remove();this.burst(b.spell,{x:nx,y:ny},b.level,undefined,this.boltBurstRadius(b.spell),b.source);return;
+      }
+      const hit = b.lightUntil?undefined:this.creatures.find((c) => isMagicTarget(c) && c!==b.source && Math.hypot(c.x - nx, c.y - ny) < CREATURE_RADIUS + BOLT_RADIUS&&
+        (nz===undefined||nz>=0&&nz<=(isAlive(c)?(c.collisionHeight??this.level.height):.3)));
       if (hit) {
         remove();
-        this.burst(b.spell, { x: nx, y: ny }, b.level, hit);
+        this.burst(b.spell, { x: nx, y: ny }, b.level, hit,this.boltBurstRadius(b.spell),b.source);
         return;
       }
       const cell = cellIndex(this.level, nx, ny);
-      if (cell < 0 || isBlocking(this.level.cells[cell], this.openDoors, cell)) {
+      if (cell < 0 || isBlocking(this.level.cells[cell], this.openDoors, cell)||nz!==undefined&&(nz<0||nz>ceilingHeight(this.level.cells[cell],this.level))) {
+        if(b.lightUntil){b.stopped=true;return;}
         remove();
-        this.burst(b.spell, { x: b.x, y: b.y }, b.level);
+        this.burst(b.spell, { x: b.x, y: b.y }, b.level,undefined,this.boltBurstRadius(b.spell),b.source);
         return;
       }
       b.x = nx;
       b.y = ny;
+      b.z = nz;
       b.travelled += stepLen;
       if (b.travelled > BOLT_RANGE) {
+        if(b.lightUntil){b.stopped=true;return;}
         remove();
         return;
       }
     }
+  }
+
+  private terrainTarget():number|undefined {
+    const pending=this.terrainSpell;if(!pending)return;
+    const p=this.player,e=pending.effect,wall=e.effect===DESTROY&&e.sub===0;
+    if(wall){const hit=this.ahead(6);return hit?.kind==='wall'?hit.cell:undefined;}
+    // Looking down selects a floor section. Looking level selects the section two steps ahead.
+    const reach=p.pitch<-.05?Math.min(6,Math.max(1,((p.z??0)+playerEyeOffset(this.sneaking,this.swimming))/-Math.tan(p.pitch))):2;
+    const index=cellIndex(this.level,p.x+Math.cos(p.yaw)*reach,p.y+Math.sin(p.yaw)*reach);
+    if(index<0||isBlocking(this.level.cells[index],this.openDoors,index))return;
+    const centre=cellCentre(this.level,index);
+    if(!lineOfSight(this.level,p.x,p.y,centre.x,centre.y,this.openDoors))return;
+    return index;
+  }
+
+  /** Terrain changes preserve map boundaries, exits, triggers and occupied sections. */
+  private changeTerrain():boolean {
+    const pending=this.terrainSpell,index=this.terrainTarget();if(!pending)return false;
+    const fail=()=>{this.events.push({type:'notify',text:'That section cannot be changed'});return false;};
+    if(index===undefined)return fail();
+    const {width,depth}=this.level,x=index%width,y=Math.floor(index/width),cell=this.level.cells[index];
+    if(x<=0||y<=0||x>=width-1||y>=depth-1||cell.exit||cell.kind==='door'||this.level.triggers.some(t=>cellIndex(this.level,t.x,t.y)===index))return fail();
+    if([this.player,...this.creatures.filter(isAlive),...this.items.filter(i=>!i.taken),...this.level.flats].some(o=>cellIndex(this.level,o.x,o.y)===index))return fail();
+    const e=pending.effect;
+    if(e.effect===DESTROY&&e.sub===0){
+      if(cell.kind!=='wall')return fail();cell.kind='empty';
+    }else if(e.effect===DESTROY){
+      if(cell.kind!=='empty'||cell.chasm)return fail();cell.chasm='dry';
+    }else if(e.sub===1){
+      if(cell.kind!=='empty'||cell.chasm)return fail();
+      cell.kind='wall';
+      const neighbour=[index-1,index+1,index-width,index+width].map(i=>this.level.cells[i]).find(c=>c?.kind==='wall');
+      if(neighbour)cell.wallTex=neighbour.wallTex;
+    }else {
+      if(!cell.chasm)return fail();delete cell.chasm;
+    }
+    this.terrainVersion++;
+    pending.remaining--;
+    if(pending.remaining<=0)this.terrainSpell=undefined;
+    this.events.push({type:'terrainChanged'},{type:'sound',name:'BURST5.VOC',at:cellCentre(this.level,index)},
+      {type:'notify',text:pending.remaining?`${pending.spell.name}: ${pending.remaining} sections left`:`${pending.spell.name} complete`});
+    return true;
   }
 
   /** The spells the player knows, as the magic menu lists them. */
@@ -1624,6 +2351,55 @@ export class Dungeon {
     });
   }
 
+  assignAbility(slot:number,key:string):boolean {
+    if(!Number.isInteger(slot)||slot<0||slot>=6||!this.hotbarAssignable(key))return false;
+    this.abilitySlots[slot]=key;return true;
+  }
+  hotbarAssignable(key:string):boolean {
+    const item=this.inventory.byKey(key);
+    return !!this.spellByKey(key)||!!item&&(item.kind==='potion'||item.kind==='trinket'&&!wearable(item)&&this.casts(item));
+  }
+  assignHotbar(slot:number,key:string):boolean {
+    if(!Number.isInteger(slot)||slot<0||slot>6||!this.hotbarAssignable(key))return false;
+    if(slot===0)this.inventory.hotkeys[0]=key;else this.abilitySlots[slot-1]=key;
+    return true;
+  }
+  clearHotbar(slot:number):void {
+    if(slot===0)this.inventory.hotkeys[0]=undefined;
+    else if(slot>0&&slot<=6)this.abilitySlots[slot-1]=undefined;
+  }
+  hotbarEntry(slot:number):MenuEntry|undefined {
+    const key=slot===0?this.inventory.hotkeys[0]:this.abilitySlots[slot-1];
+    if(key===undefined)return undefined;
+    if(!this.hotbarAssignable(key)){this.clearHotbar(slot);return undefined;}
+    return this.entries().concat(this.spellEntries()).find(e=>e.key===key);
+  }
+  private activateHotbarKey(key:string):boolean {
+    if(!this.hotbarAssignable(key))return false;
+    const spell=this.spellByKey(key);if(spell)return this.cast(spell);
+    const item=this.inventory.byKey(key);if(!item||this.outcome)return false;
+    const text=this.use(key);if(text)this.events.push({type:'notify',text});
+    return !!text;
+  }
+  abilitySpell(slot:number):SpellRecord|undefined {
+    const key=this.abilitySlots[slot];return key===undefined?undefined:this.spellByKey(key);
+  }
+  get spellCooldown():number {return Math.max(0,CAST_TIME-this.sinceCast);}
+  get spellCooldownDuration():number {return CAST_TIME;}
+  get canUseAbilities():boolean {return this.mayCast();}
+  canCast(spell:SpellRecord):boolean {return this.mayCast(spell)&&castable(spell)&&this.stats.magicka>=this.spellCost(spell);}
+  castAbility(slot:number):boolean {
+    if(!Number.isInteger(slot)||slot<0||slot>=6||this.outcome)return false;
+    const key=this.abilitySlots[slot];
+    if(!key){this.events.push({type:'notify',text:'Choose an item or spell and use Assign hotbar in Items or Magic'});return false;}
+    return this.activateHotbarKey(key);
+  }
+  /** D-pad Up uses the first favourite directly, including casting an assigned spell. */
+  useQuickslot():void {
+    const key=this.inventory.hotkeys[0];
+    if(key)this.activateHotbarKey(key);else this.events.push({type:'notify',text:'Choose an item or spell and assign it to the first hotbar slot'});
+  }
+
   private spellByKey(key: string): SpellRecord | undefined {
     return this.spellbook.find((s) => spellKey(s) === key);
   }
@@ -1633,6 +2409,10 @@ export class Dungeon {
   /** What the player would use now, if anything. */
   target(): Target | undefined {
     if (this.outcome) return undefined;
+    if(this.terrainSpell){
+      const cell=this.terrainTarget();
+      return cell===undefined?undefined:{kind:'spellTerrain',id:cell,name:this.terrainSpell.spell.name,verb:'Apply',note:`${this.terrainSpell.remaining} sections left`};
+    }
     const ahead = this.ahead(USE_REACH);
     let best: Target | undefined;
     let bestDist = ahead?.distance ?? Infinity;
@@ -1642,7 +2422,7 @@ export class Dungeon {
     const p = this.player;
     const consider = (x: number, y: number, make: () => Target) => {
       const d = Math.hypot(x - p.x, y - p.y);
-      if (d > ITEM_REACH || d >= bestDist || angleTo(p, x, y) > ITEM_ARC) return;
+      if (d > ITEM_REACH || d >= bestDist || (d > 0.25 && angleTo(p, x, y) > ITEM_ARC)) return;
       if (!lineOfSight(this.level, p.x, p.y, x, y, this.openDoors)) return;
       best = make();
       bestDist = d;
@@ -1654,6 +2434,22 @@ export class Dungeon {
     for (const c of this.creatures) {
       if (c.state !== 'dead' || c.info.noCorpse || this.searchedBodies.has(c.id)) continue;
       consider(c.x, c.y, () => ({ kind: 'body', id: c.id, name: c.info.name, verb: 'Search' }));
+    }
+    for (const a of this.arrows) {
+      const state = a.projectile;
+      if (!state || state.phase === 'flying' || state.phase === 'recovered') continue;
+      const carrier = this.creatures.find((c) => c.id === state.hitCreature);
+      if (carrier && isAlive(carrier)) continue;
+      if (Math.abs(state.position[1] - ((p.z ?? 0) + 0.35)) > USE_REACH) continue;
+      const x = state.position[0] - state.direction[0] * 0.35 * METRES_TO_WORLD,
+        y = state.position[2] - state.direction[2] * 0.35 * METRES_TO_WORLD;
+      consider(x, y, () => ({
+        kind: 'arrow',
+        id: a.id,
+        name: 'Steel Arrow',
+        verb: 'Take',
+        note: state.phase === 'embedded' ? 'Embedded' : 'On the ground',
+      }));
     }
     return best;
   }
@@ -1668,7 +2464,7 @@ export class Dungeon {
     const name = this.level.cells[cell].seeThrough ? 'Cell door' : 'Door';
     if (door.target === 1) return { kind: 'door', id: cell, name, verb: 'Close' };
     if (!this.locked(cell)) return { kind: 'door', id: cell, name, verb: 'Open' };
-    if (this.stats.keys.has(this.level.locks.get(cell)!)) return { kind: 'door', id: cell, name, verb: 'Unlock' };
+    if ((!this.magicalLocks.has(cell)&&this.stats.keys.has(this.level.locks.get(cell)!))) return { kind: 'door', id: cell, name, verb: 'Unlock' };
     if (this.hero.lockpicking > 0) return { kind: 'door', id: cell, name, verb: 'Pick lock', note: 'Locked' };
     return { kind: 'door', id: cell, name, verb: 'Open', note: 'Locked' };
   }
@@ -1676,30 +2472,42 @@ export class Dungeon {
   /** Chance of picking a lock: thieves get better with each level, and harder locks take more. */
   pickChance(cell: number): number {
     if (this.hero.lockpicking <= 0) return 0;
-    const chance = this.hero.lockpicking + 0.05 * (this.stats.level - 1) - (this.level.locks.get(cell) ?? 0) / 100;
+    const chance = this.hero.lockpicking + 0.05 * (this.stats.level - 1) - (this.magicalLocks.get(cell)?.strength??this.level.locks.get(cell) ?? 0) / 100;
     return Math.min(0.95, Math.max(0.05, chance));
   }
 
   activate(): void {
     const t = this.paralysed ? undefined : this.target();
     if (!t) return;
+    if(t.kind==='spellTerrain'){this.changeTerrain();return;}
     if (t.kind === 'door') this.useDoor(t.id);
     else if (t.kind === 'exit') {
       this.outcome = 'escaped';
       this.swing = undefined;
       this.quest?.update(this, this.events);
       this.events.push({ type: 'sound', name: 'FANFARE2.VOC' }, { type: 'escaped' });
+    } else if (t.kind === 'arrow') {
+      const a = this.arrows.find((a) => a.id === t.id);
+      if (a?.projectile && a.projectile.phase !== 'recovered' && a.projectile.phase !== 'flying') {
+        a.projectile.phase = 'recovered';
+        this.inventory.add(makeSteelArrows());
+        this.events.push({ type: 'notify', text: 'Steel Arrow recovered' });
+        this.arrows.splice(this.arrows.indexOf(a), 1);
+      }
     } else if (t.kind === 'item') this.useItem(this.items[t.id]);
-    else this.searchBody(this.creatures[t.id]);
+    else { const body = this.creatures.find(c => c.id === t.id); if (body) this.searchBody(body); }
   }
 
   locked(cell: number): boolean {
-    return this.level.locks.has(cell) && !this.unlocked.has(cell);
+    return this.magicalLocks.has(cell)||this.level.locks.has(cell) && !this.unlocked.has(cell);
   }
 
   private useDoor(cell: number): void {
     const door = this.doors.get(cell)!;
     const at = cellCentre(this.level, cell);
+    if(this.magicalLocks.has(cell)){
+      this.events.push({type:'notify',text:'The door is magically locked'},{type:'sound',name:'LOCK.VOC',at});return;
+    }
     if (door.target === 1) {
       // Not on anyone standing in the doorway.
       const blocked = [this.player, ...this.creatures.filter(isAlive)].some((b) => cellIndex(this.level, b.x, b.y) === cell);
@@ -1711,7 +2519,7 @@ export class Dungeon {
       return;
     }
     if (this.locked(cell)) {
-      if (!this.stats.keys.has(this.level.locks.get(cell)!) && this.hero.lockpicking > 0) {
+      if (!(!this.magicalLocks.has(cell)&&this.stats.keys.has(this.level.locks.get(cell)!)) && this.hero.lockpicking > 0) {
         if (this.time - (this.pickedAt.get(cell) ?? -Infinity) < PICK_TIME) return;
         this.pickedAt.set(cell, this.time);
         this.events.push({ type: 'sound', name: 'LOCK.VOC', at });
@@ -1719,9 +2527,10 @@ export class Dungeon {
           this.events.push({ type: 'notify', text: 'You failed to pick the lock' });
           return;
         }
+        this.magicalLocks.delete(cell);
         this.unlocked.add(cell);
         this.events.push({ type: 'notify', text: 'You picked the lock' });
-      } else if (!this.stats.keys.has(this.level.locks.get(cell)!)) {
+      } else if (!(!this.magicalLocks.has(cell)&&this.stats.keys.has(this.level.locks.get(cell)!))) {
         this.events.push({ type: 'sound', name: 'LOCK.VOC', at });
         this.events.push({
           type: 'notify',
@@ -1753,65 +2562,98 @@ export class Dungeon {
       notify('Key added');
       return;
     }
-    if (this.lootRules) {
-      // Every other item in a level is a loot spot, filled as it is first opened; taking all of it leaves nothing there.
-      item.taken = true;
-      const loot = spotLoot(this.lootRules, this.level.floor ?? 0, this.random, this.hero.cls);
-      if (!this.addLoot(loot)) notify('Nothing of value');
-      return;
-    }
-    // The remake's own loot, for a game whose tables can't be read.
-    switch (item.kind) {
-      case 'treasure':
-        item.taken = true;
-        if (this.random() < 0.3) this.addItem(healingPotion());
-        else this.addGold(roll(this.random, 10, 40));
-        return;
-      case 'equipment': {
-        item.taken = true;
-        if (this.weaponTable.length && this.random() < 0.75) this.addItem(randomGear(this.weaponTable, this.stats.level, this.random, this.armourTable));
-        else if (this.random() < 0.5) this.addItem(healingPotion());
-        else this.addGold(roll(this.random, 5, 25));
-        return;
+    let contents = this.spotContents.get(item.id);
+    if (!contents) {
+      if (this.lootRules) contents = spotLoot(this.lootRules, this.level.floor ?? 0, this.random, this.hero.cls);
+      else {
+        contents = { gold: 0, items: [] };
+        switch (item.kind) {
+          case 'treasure':
+            if (this.random() < 0.3) contents.items.push(healingPotion());
+            else contents.gold = roll(this.random, 10, 40);
+            break;
+          case 'equipment':
+            if (this.weaponTable.length && this.random() < 0.75) contents.items.push(randomGear(this.weaponTable, this.stats.level, this.random, this.armourTable));
+            else if (this.random() < 0.5) contents.items.push(healingPotion());
+            else contents.gold = roll(this.random, 5, 25);
+            break;
+          case 'corpse':
+            if (this.random() < 0.5) contents.gold = roll(this.random, 1, 20);
+            break;
+          case 'chest':
+            contents.gold = roll(this.random, 20, 80);
+            if (this.random() < 0.4) contents.items.push(healingPotion());
+            if (this.weaponTable.length && this.random() < 0.3) contents.items.push(randomGear(this.weaponTable, this.stats.level + 1, this.random, this.armourTable));
+            break;
+        }
       }
-      case 'corpse':
-        item.searched = true;
-        if (this.random() < 0.5) this.addGold(roll(this.random, 1, 20));
-        else notify('Nothing of value');
-        return;
-      case 'chest':
-        item.searched = true;
-        this.addGold(roll(this.random, 20, 80));
-        if (this.random() < 0.4) this.addItem(healingPotion());
-        if (this.weaponTable.length && this.random() < 0.3) this.addItem(randomGear(this.weaponTable, this.stats.level + 1, this.random, this.armourTable));
-        return;
+      this.spotContents.set(item.id, contents);
     }
+    this.looting = { name: item.kind === 'corpse' ? 'Remains' : item.kind === 'chest' ? 'Chest' : 'Items', contents, item };
+    if (!contents.gold && !contents.items.length) { this.finishLoot(); notify('Nothing of value'); }
+    else this.events.push({ type: 'loot' });
   }
 
   /** Gives a creature what it carries as it appears, by Arena's rules. */
   private outfit(c: Creature): Creature {
+    c.regenerationRound=Math.floor(this.clock/60);
     if (this.lootRules && c.info.id !== undefined) this.carried.set(c.id, creatureLoot(this.lootRules, c.info.id, c.info.level, this.random));
     return c;
   }
 
   private searchBody(c: Creature): void {
-    this.searchedBodies.add(c.id);
-    if (this.lootRules) {
-      const loot = this.carried.get(c.id);
-      this.carried.delete(c.id);
-      if (!loot || !this.addLoot(loot)) this.events.push({ type: 'notify', text: this.messages.nothingUsable?.replace('%s', c.info.name) ?? 'Nothing of value' });
-      return;
+    let contents = this.carried.get(c.id);
+    if (!contents) {
+      contents = { gold: 0, items: [] };
+      if (!this.lootRules && this.random() < Math.min(0.6, 0.15 * c.info.level)) contents.gold = roll(this.random, 1, 10 * c.info.level);
+      this.carried.set(c.id, contents);
     }
-    // Tougher creatures carry more.
-    if (this.random() < Math.min(0.6, 0.15 * c.info.level)) this.addGold(roll(this.random, 1, 10 * c.info.level));
-    else this.events.push({ type: 'notify', text: 'Nothing of value' });
+    this.looting = { name: c.info.name, contents, body: c.id };
+    if (!contents.gold && !contents.items.length) {
+      this.finishLoot();
+      this.events.push({ type: 'notify', text: this.messages.nothingUsable?.replace('%s', c.info.name) ?? 'Nothing of value' });
+    } else this.events.push({ type: 'loot' });
   }
 
-  /** Takes all of it; false when there was nothing. */
-  private addLoot(loot: Loot): boolean {
-    if (loot.gold > 0) this.addGold(loot.gold);
-    for (const item of loot.items) this.addItem(item);
-    return loot.gold > 0 || loot.items.length > 0;
+  /** The remaining contents; closing the window never rerolls or consumes them. */
+  get lootView(): LootView | undefined {
+    const source = this.looting;
+    if (!source) return undefined;
+    const entries: LootEntry[] = source.contents.gold > 0 ? [{ key: 'gold', name: 'Gold', count: source.contents.gold }] : [];
+    source.contents.items.forEach((item, i) => entries.push({ key: `item:${i}`, name: shownName(item), count: item.quantity ?? 1 }));
+    return { name: source.name, entries };
+  }
+
+  closeLoot(): void { this.looting = undefined; }
+
+  takeLoot(key?: string): void {
+    const source = this.looting;
+    if (!source) return;
+    const contents = source.contents;
+    if (key === undefined || key === 'gold') {
+      if (contents.gold > 0) this.addGold(contents.gold);
+      contents.gold = 0;
+    }
+    if (key === undefined) {
+      for (const item of contents.items) this.addItem(item);
+      contents.items.length = 0;
+    } else if (/^item:\d+$/.test(key)) {
+      const index = Number(key.slice(5));
+      const item = contents.items[index];
+      if (item) { this.addItem(item); contents.items.splice(index, 1); }
+    }
+    if (!contents.gold && !contents.items.length) this.finishLoot();
+  }
+
+  private finishLoot(): void {
+    const source = this.looting;
+    if (!source) return;
+    if (source.item) {
+      if (source.item.kind === 'corpse' || source.item.kind === 'chest') source.item.searched = true;
+      else source.item.taken = true;
+    }
+    if (source.body !== undefined) this.searchedBodies.add(source.body);
+    this.looting = undefined;
   }
 
   private addGold(n: number): void {
@@ -1823,6 +2665,10 @@ export class Dungeon {
     const item = this.inventory.add(gear);
     this.events.push({ type: 'notify', text: `${shownName(item)} added` });
     if (item.kind === 'weapon' || item.kind === 'armour' || item.kind === 'shield') this.events.push({ type: 'sound', name: 'CLANK.VOC', volume: 0.6 });
+    if (item.kind === 'weapon' && item.material === STEEL && [16, 17].includes(item.type)) {
+      this.inventory.add(makeSteelArrows(12));
+      this.events.push({ type: 'notify', text: '12 Steel Arrows added' });
+    }
   }
 
   /** The game's spell in that place in its list. */
@@ -1864,7 +2710,7 @@ export class Dungeon {
     const spell = this.spellRecord(item.spell);
     if (!spell) return `The ${name} has no spell to cast`;
     if (!usable(spell)) return `What the ${name} casts isn’t in the game yet`;
-    if (!this.mayCast()) return undefined;
+    if (!this.mayCast(spell)) return undefined;
     const broken = () => (this.messages.broken ?? 'The %s is worn out').replace('%s', name);
     const level = item.castLevel ?? GEAR_CAST_LEVEL;
     const wear = Math.floor(magickaCost(spell, level) / GEAR_WEAR);
@@ -1912,7 +2758,7 @@ export class Dungeon {
     const potions = new Map<number, Item[]>();
     for (const item of inv.items) {
       if (item.kind === 'potion') potions.set(item.type, [...(potions.get(item.type) ?? []), item]);
-      else list.push(entry(itemKey(item), shownName(item), categoryOf(item), 1, item));
+      else list.push(entry(itemKey(item), shownName(item), categoryOf(item), item.quantity ?? 1, item));
     }
     for (const [type, kind] of potions) list.push(entry(potionKey(type), shownName(kind[0]), 'potions', kind.length, kind[0]));
     if (this.stats.keys.size) list.push(entry('keys', 'Key', 'misc', this.stats.keys.size));
@@ -1938,6 +2784,7 @@ export class Dungeon {
     }
     const item = this.inventory.byKey(key);
     if (!item) return undefined;
+    if (item.kind === 'ammunition') return 'Steel arrows are used automatically when firing a Steel bow';
     if (item.kind === 'potion') return this.drink(item);
     if (!wearable(item)) return this.castFrom(item);
     const wasOn = this.inventory.isEquipped(item);
@@ -1994,6 +2841,7 @@ export class Dungeon {
 
   /** Puts a favourite on number key n + 1 (0 for 1). */
   setHotkey(n: number, key: string): void {
+    if(n===0&&!this.hotbarAssignable(key)){this.events.push({type:'notify',text:'The hotbar is for usable items and spells. Equip weapons and armour in Items.'});return;}
     if (this.favourable(key)) this.inventory.setHotkey(n, key);
   }
 
@@ -2036,7 +2884,7 @@ export class Dungeon {
 
 /** Which list of the item menu an item is in: trinkets that cast are used rather than worn, so they go with the rest. */
 function categoryOf(item: Item): MenuEntry['category'] {
-  if (item.kind === 'weapon') return 'weapons';
+  if (item.kind === 'weapon' || item.kind === 'ammunition') return 'weapons';
   return wearable(item) ? 'apparel' : 'misc';
 }
 

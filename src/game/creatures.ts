@@ -1,3 +1,6 @@
+import {creatureAttribute,updateCreatureMagic,type CreatureMagic} from './creatureMagic';
+import {monsterSeesInvisible} from './monsterSenses';
+import {ROUND} from './magic';
 /**
  * Creatures and what they do each moment. Pure logic (no Three.js) so it
  * can be unit tested; the renderer asks creatureFrame() which sprite to draw.
@@ -20,10 +23,15 @@ import { blowLands, MIDDLING_AGILITY, roll } from './combat';
 import { blockedFor, cellIndex, lineOfSight, nextStep } from './grid';
 import { isBlocking, type Level } from './level';
 
-export type CreatureState = 'idle' | 'look' | 'wander' | 'chase' | 'attack' | 'dying' | 'dead';
+export type CreatureState = 'idle' | 'look' | 'wander' | 'chase' | 'attack' | 'dying' | 'dead' | 'reviving';
 
 export interface Creature {
+  /** Native fixed-step accumulator and previous AI casting/body-fall flags. */
+  native?:{elapsed:number;casting:boolean;fallen:boolean};
   id: number;
+  magic?:CreatureMagic;
+  /** Actual sprite height, filled by CreatureView, for vertical projectile collisions. */
+  collisionHeight?: number;
   info: CreatureInfo;
   x: number;
   y: number;
@@ -31,6 +39,12 @@ export interface Creature {
   facing: number;
   health: number;
   maxHealth: number;
+  /** Reward calculated at spawn, before magical damage reduces maximum HP. */
+  experienceValue?: number;
+  /** Native game-minute counter at the previous regeneration update. */
+  regenerationRound?: number;
+  /** Death frame from which a resurrection reverses. */
+  reviveFrame?: number;
   state: CreatureState;
   /** Seconds since the state began. */
   time: number;
@@ -70,22 +84,29 @@ export interface CreatureWorld {
   bodyParts?: number[];
   /** Sneaking players are noticed from closer. */
   sneaking: boolean;
-  /** An invisible player can't be seen at all. */
+  /** Invisibility hides the player except from the native detecting monsters. */
   invisible?: boolean;
+  nonTarget?:boolean;
   /** Seconds of game time. */
   now: number;
+  /** Native spell rounds advance with the calendar's game minutes. */
+  round?: number;
   random: () => number;
   /** Every creature, to keep out of each other's way. */
   creatures: Creature[];
 }
 
 export interface CreatureEvents {
+  /** Runs on native AI updates; true means the creature is in a casting stance. */
+  casting?(c:Creature):boolean;
   /** Spotted the player and starts the chase. */
   notice?(c: Creature): void;
   /** Starts a swing. */
   swing?(c: Creature): void;
   /** The swing lands for `damage`, or misses (0). */
   strike?(c: Creature, damage: number): void;
+  /** Reaches the final death frame, once per fall, if it leaves a body. */
+  fall?(c: Creature): void;
 }
 
 export const CREATURE_RADIUS = 0.25;
@@ -115,6 +136,16 @@ const SHOVE = 0.35;
 /** Walk frames per voxel walked. */
 const STRIDE = 5;
 
+/** IBM PIT timer / BIOS divisor, confirmed against the isolated original IRQ timer. */
+export const monsterStepSeconds=(c:Creature)=> (c.info.timing?.timerTicks??2)*65536/1193182;
+const deathFrameSeconds=(c:Creature)=>c.info.timing?monsterStepSeconds(c):DYING_TIME/2;
+/** Native AI distance: the larger delta plus one quarter of the smaller. */
+export function monsterInReach(c:Creature,player:{x:number;y:number}):boolean {
+  if(!c.info.timing)return Math.hypot(player.x-c.x,player.y-c.y)<=REACH;
+  const x=Math.abs(Math.trunc(player.x*128)-Math.trunc(c.x*128)),y=Math.abs(Math.trunc(player.y*128)-Math.trunc(c.y*128));
+  return Math.max(x,y)+(Math.min(x,y)>>2)<=c.info.timing.reach;
+}
+
 export function spawnCreature(id: number, info: CreatureInfo, x: number, y: number, random: () => number): Creature {
   const health = roll(random, info.health[0], info.health[1]);
   return {
@@ -125,6 +156,8 @@ export function spawnCreature(id: number, info: CreatureInfo, x: number, y: numb
     facing: random() * Math.PI * 2,
     health,
     maxHealth: health,
+    experienceValue: info.experience+info.experiencePerHealth*health,
+    regenerationRound: 0,
     state: 'idle',
     time: 0,
     span: 1 + random() * 3,
@@ -139,18 +172,23 @@ export function spawnCreature(id: number, info: CreatureInfo, x: number, y: numb
   };
 }
 
-export const isAlive = (c: Creature) => c.state !== 'dying' && c.state !== 'dead';
+export const isAlive = (c: Creature) => c.state !== 'dying' && c.state !== 'dead' && c.state !== 'reviving';
+/** A subdued regenerator remains an encounter until its maximum HP is spent. */
+export const canRevive = (c:Creature) => !!c.info.regeneration?.revives && c.maxHealth>0;
+export const isDefeated = (c:Creature) => !isAlive(c) && !canRevive(c);
+export const isMagicTarget = (c:Creature) => isAlive(c) || canRevive(c);
 
 /**
  * Holds a creature still for `seconds`, and makes it hunt the player once
  * it can move again. A swing it had started does not land.
  */
 export function paralyseCreature(c: Creature, seconds: number, w: CreatureWorld): void {
-  if (!isAlive(c)) return;
+  if (!isMagicTarget(c)) return;
   c.paralysed = Math.max(c.paralysed, seconds);
+  if(!isAlive(c))return;
   if (c.state === 'attack') {
     setState(c, 'chase');
-    c.cooldown = Math.max(c.cooldown, 0.5);
+    c.cooldown = c.info.timing?0:Math.max(c.cooldown, 0.5);
   } else if (c.state !== 'chase') alert(c, w);
   c.unseen = 0;
 }
@@ -165,32 +203,80 @@ function setState(c: Creature, state: CreatureState, span = 0): void {
 }
 
 /** Cells creatures won't walk into: pits, water and lava. They wait at the edge instead, as in Arena (UESP: monsters stand at the exit of a pool). */
-function avoids(level: Level, cell: number): boolean {
-  return !!level.cells[cell]?.chasm;
+function avoids(level: Level, cell: number,c:Creature): boolean {
+  // Native sprite Y is initialized from the lift table (35ca:007f).
+  // Nonzero Y bypasses the chasm-floor check at 1000:2117.
+  return !!level.cells[cell]?.chasm&&!(c.info.timing&&c.info.lift!==0);
 }
 
 function canSee(c: Creature, w: CreatureWorld, range: number): boolean {
-  if (w.invisible) return false;
+  if (w.invisible&&!monsterSeesInvisible(c.info.id)||w.nonTarget) return false;
   const d = Math.hypot(w.player.x - c.x, w.player.y - c.y);
   return d <= range && lineOfSight(w.level, c.x, c.y, w.player.x, w.player.y, w.openDoors);
 }
 
 export function updateCreature(c: Creature, w: CreatureWorld, dt: number, events: CreatureEvents = {}): void {
+  if(!c.info.timing){stepCreature(c,w,dt,events);return;}
+  if(dt<=0)return;
+  const seconds=monsterStepSeconds(c),native=c.native??={elapsed:seconds,casting:false,fallen:false};
+  native.elapsed+=dt;
+  while(native.elapsed+1e-9>=seconds){
+    native.elapsed=Math.max(0,native.elapsed-seconds);
+    const wasAttacking=c.state==='attack';
+    stepCreature(c,w,seconds,events);
+    // Native AI returns early for attacks; the later view pass cancels an
+    // attack shown from a side angle (1000:19b8), permitting a lateral dodge.
+    if(c.state==='attack'&&viewAngle(c.x,c.y,c.facing,w.player.x,w.player.y).file>0){
+      setState(c,'chase');c.cooldown=0;
+    }
+    native.casting=wasAttacking||c.state==='attack'?false:events.casting?.(c)??false;
+  }
+}
+
+function stepCreature(c:Creature,w:CreatureWorld,dt:number,events:CreatureEvents):void {
+  updateCreatureMagic(c,w.now,dt);
+  const round=Math.floor(w.round??w.now/ROUND),previous=c.regenerationRound??round;
+  c.regenerationRound=previous;
+  const regen=c.info.regeneration;
+  if(regen&&!isDefeated(c)&&round>previous){
+    const ticks=Math.floor((round-previous)/regen.everyRounds);
+    c.health=Math.min(c.maxHealth,c.health+ticks*regen.health);
+    c.regenerationRound=previous+ticks*regen.everyRounds;
+  }else if(!regen||isDefeated(c)||round<previous)c.regenerationRound=round;
+  const previousDeathFrame=!isAlive(c)?creatureFrame(c,0).frame:0;
   c.time += dt;
   c.hurt += dt;
   c.cooldown = Math.max(0, c.cooldown - dt);
+  const frozen=c.paralysed>0;
+  c.paralysed = Math.max(0, c.paralysed - dt);
+  if(!isAlive(c)&&canRevive(c)&&c.health>0&&!frozen&&c.state!=='reviving'){
+    const frame=c.info.timing?previousDeathFrame:creatureFrame(c,0).frame;
+    setState(c,'reviving');c.reviveFrame=frame;
+    if(c.info.timing)c.time=dt;
+  }
+  if(c.state==='reviving'){
+    if(frozen)c.time-=dt;
+    else if(c.time+1e-9>=(1+(c.reviveFrame??2))*deathFrameSeconds(c))alert(c,w);
+    return;
+  }
   if (c.state === 'dead') return;
   if (c.state === 'dying') {
-    if (c.time >= DYING_TIME) setState(c, 'dead');
+    // Native 1000:2292 returns before the death/revival animation branch.
+    if(frozen){c.time-=dt;return;}
+    if (c.time+1e-9 >= (c.info.timing?c.info.timing.deathEnd*deathFrameSeconds(c):DYING_TIME)) {
+      setState(c, 'dead');
+      if(!c.info.noCorpse&&!c.native?.fallen)events.fall?.(c);
+      if(c.native)c.native.fallen=true;
+    }
     return;
   }
   // Paralysed: frozen where it stands, in the middle of whatever it was doing.
-  if (c.paralysed > 0) {
-    c.paralysed = Math.max(0, c.paralysed - dt);
+  if (frozen) {
     c.time -= dt;
     return;
   }
 
+  if(w.nonTarget&&(c.state==='chase'||c.state==='attack'))setState(c,'idle',2);
   const dist = Math.hypot(w.player.x - c.x, w.player.y - c.y);
   if (isCalm(c)) {
     if (!w.sneaking && canSee(c, w, SIGHT)) c.awareness = 1;
@@ -228,10 +314,12 @@ export function updateCreature(c: Creature, w: CreatureWorld, dt: number, events
         setState(c, 'idle', 2);
         break;
       }
-      if (dist <= REACH && sees) {
+      if (monsterInReach(c,w.player) && sees) {
         c.facing = Math.atan2(w.player.y - c.y, w.player.x - c.x);
-        if (c.cooldown <= 0) {
+        if (c.cooldown <= 0 && (c.info.timing||!c.magic||c.magic.stamina>c.magic.maxStamina*.1)&&
+          (!c.info.timing||(Math.floor(w.random()*65536)&c.info.timing.meleeMask)===0)) {
           setState(c, 'attack');
+          if(c.info.timing)c.time=dt; // AI starts frame 8; same update advances it to 9.
           c.struck = false;
           events.swing?.(c);
         }
@@ -241,24 +329,27 @@ export function updateCreature(c: Creature, w: CreatureWorld, dt: number, events
       if (sees) c.goal = { x: w.player.x, y: w.player.y };
       else if (w.now >= c.replan || !c.goal || arrived) {
         c.replan = w.now + 0.4;
-        const step = nextStep(w.level, cellIndex(w.level, c.x, c.y), cellIndex(w.level, w.player.x, w.player.y), (i) => !isBlocking(w.level.cells[i], w.openDoors, i) && !avoids(w.level, i));
+        const step = nextStep(w.level, cellIndex(w.level, c.x, c.y), cellIndex(w.level, w.player.x, w.player.y), (i) => !isBlocking(w.level.cells[i], w.openDoors, i) && !avoids(w.level, i,c));
         if (step !== undefined) c.goal = { x: (step % w.level.width) + 0.5, y: Math.floor(step / w.level.width) + 0.5 };
       }
-      if (c.goal) moveToward(c, c.goal.x, c.goal.y, CHASE_SPEED, dt, w);
+      if (c.goal&&!c.native?.casting) moveToward(c, c.goal.x, c.goal.y, CHASE_SPEED, dt, w);
       break;
     }
     case 'attack':
-      c.facing = Math.atan2(w.player.y - c.y, w.player.x - c.x);
-      if (!c.struck && c.time >= STRIKE_AT) {
+      if(!c.info.timing)c.facing = Math.atan2(w.player.y - c.y, w.player.x - c.x);
+      if (!c.struck && c.time+1e-9 >= (c.info.timing?(c.info.timing.strikeFrame-c.info.timing.attackFirst+1)*dt:STRIKE_AT)) {
         c.struck = true;
         const p = w.player;
         const defender = { level: p.level, agility: p.agility ?? MIDDLING_AGILITY, protection: p.protection ?? [], evasive: !!p.evasive };
-        const lands = dist <= REACH + 0.35 && blowLands({ level: c.info.level, agility: c.info.agility ?? MIDDLING_AGILITY }, defender, w.random, w.bodyParts);
-        events.strike?.(c, lands ? roll(w.random, c.info.damage[0], c.info.damage[1]) : 0);
+        // Original 3aa1:00d8/058b resolves the attempted blow's hit chance;
+        // it does not repeat a spatial check after the AI starts the attack.
+        const lands = (c.info.timing||dist <= REACH + 0.35) && blowLands({ level: c.info.level, agility: c.magic ? creatureAttribute(c,3)*256/100 : c.info.agility ?? MIDDLING_AGILITY }, defender, w.random, w.bodyParts);
+        const strength=c.magic ? creatureAttribute(c,0)/Math.max(1,(c.info.attributes?.[0]??128)*100/256) : 1;
+        events.strike?.(c, lands ? Math.max(0,Math.round(roll(w.random, c.info.damage[0], c.info.damage[1])*strength*(c.magic?Math.min(1,c.magic.stamina/Math.max(1,c.magic.maxStamina)):1))) : 0);
       }
-      if (c.time >= ATTACK_TIME) {
+      if (c.time+1e-9 >= (c.info.timing?(c.info.timing.attackEnd-c.info.timing.attackFirst)*dt:ATTACK_TIME)) {
         setState(c, 'chase');
-        c.cooldown = 0.5 + w.random() * 0.9;
+        c.cooldown = c.info.timing?0:0.5 + w.random() * 0.9;
       }
       break;
   }
@@ -279,8 +370,7 @@ const PARALYSING = [3, 9];
  * (its program at 0x2AD6D), or 0: a creature that paralyses does so on a
  * roll out of 100 no more than its chance of special harm, and then only on
  * a second roll below the player's chance of being paralysed, for 1 to 6
- * rounds. The other creatures' special harm is disease, which the remake
- * doesn't have yet.
+ * rounds. Disease transmission is handled separately in diseases.ts.
  */
 export function paralysisFrom(info: CreatureInfo, chance: number, random: () => number): number {
   if (!PARALYSING.includes(info.id ?? 0) || info.special <= 0) return 0;
@@ -289,18 +379,22 @@ export function paralysisFrom(info: CreatureInfo, chance: number, random: () => 
 }
 
 /**
- * Hurts a creature; returns true when the blow kills it. A staggering blow
+ * Hurts a creature; returns true only for a permanent kill. A staggering blow
  * (a power attack) also stops a swing that has not landed yet.
  */
-export function hurtCreature(c: Creature, damage: number, w: CreatureWorld, stagger = false): boolean {
-  if (!isAlive(c)) return false;
+export function hurtCreature(c: Creature, damage: number, w: CreatureWorld, stagger = false, magical = false): boolean {
+  if (!(magical?isMagicTarget(c):isAlive(c)) || damage<=0) return false;
+  const standing=isAlive(c);
+  if(magical&&c.info.regeneration)c.maxHealth-=damage;
   c.health -= damage;
   c.hurt = 0;
   if (c.health <= 0) {
-    c.health = 0;
-    setState(c, 'dying');
-    return true;
+    // Signed overkill is retained for regenerators, as in the original words.
+    if(!c.info.regeneration)c.health=0;
+    if(standing||c.state==='reviving')setState(c, 'dying');
+    return isDefeated(c);
   }
+  if(!standing)return false;
   if (stagger && c.state === 'attack' && !c.struck) {
     setState(c, 'chase');
     c.cooldown = STAGGER_TIME;
@@ -322,7 +416,7 @@ export function staggerCreature(c: Creature, w: CreatureWorld, from: { x: number
   const d = Math.hypot(c.x - from.x, c.y - from.y) || 1;
   const nx = c.x + ((c.x - from.x) / d) * SHOVE;
   const ny = c.y + ((c.y - from.y) / d) * SHOVE;
-  const avoid = (i: number) => avoids(w.level, i);
+  const avoid = (i: number) => avoids(w.level, i,c);
   if (!blockedFor(w.level, nx, c.y, CREATURE_RADIUS, w.openDoors, avoid)) c.x = nx;
   if (!blockedFor(w.level, c.x, ny, CREATURE_RADIUS, w.openDoors, avoid)) c.y = ny;
 }
@@ -333,7 +427,7 @@ function wanderSomewhere(c: Creature, w: CreatureWorld): void {
   // A short random walk of one or two cells.
   for (let steps = 1 + Math.floor(w.random() * 2); steps > 0; steps--) {
     const options = [cell - level.width, cell + level.width, cell - 1, cell + 1].filter(
-      (n) => n >= 0 && n < level.cells.length && !isBlocking(level.cells[n], w.openDoors, n) && !avoids(level, n),
+      (n) => n >= 0 && n < level.cells.length && !isBlocking(level.cells[n], w.openDoors, n) && !avoids(level, n,c),
     );
     if (!options.length) break;
     cell = options[Math.floor(w.random() * options.length)];
@@ -352,7 +446,11 @@ function moveToward(c: Creature, gx: number, gy: number, speed: number, dt: numb
   const d = Math.hypot(dx, dy);
   if (d < 0.05) return false;
   c.facing = Math.atan2(dy, dx);
-  const stepLen = Math.min(d, speed * dt);
+  const timing=c.info.timing;
+  const speedStat=Math.max(0,Math.min(255,Math.floor(c.magic?creatureAttribute(c,4)*256/100:c.info.attributes?.[4]??128)));
+  if(timing)speed=2*(timing.speedBase+((speedStat*timing.speedMultiplier)>>8))/128/monsterStepSeconds(c);
+  const pace=timing?1:c.magic ? Math.min(2,creatureAttribute(c,4)/Math.max(1,(c.info.attributes?.[4]??128)*100/256)) : 1;
+  const stepLen = Math.min(d, speed * pace * dt);
   let mx = (dx / d) * stepLen;
   let my = (dy / d) * stepLen;
   // Keep a little apart from the others.
@@ -366,7 +464,7 @@ function moveToward(c: Creature, gx: number, gy: number, speed: number, dt: numb
       my += (oy / od) * stepLen * 0.5;
     }
   }
-  const avoid = (i: number) => avoids(w.level, i);
+  const avoid = (i: number) => avoids(w.level, i,c);
   const free = (x: number, y: number) => {
     if (blockedFor(w.level, x, y, CREATURE_RADIUS, w.openDoors, avoid)) return false;
     const pd = Math.hypot(w.player.x - x, w.player.y - y);
@@ -383,13 +481,17 @@ function moveToward(c: Creature, gx: number, gy: number, speed: number, dt: numb
 
 /** Which sprite to draw: a frame of the view files, or of the death file. */
 export function creatureFrame(c: Creature, attackFrames: number): { death: boolean; frame: number } {
+  if(c.native?.casting&&isAlive(c)&&c.state!=='attack')return {death:false,frame:0};
   switch (c.state) {
     case 'dying':
-      return { death: true, frame: Math.min(1, Math.floor((c.time / DYING_TIME) * 2)) };
+      return { death: true, frame: Math.min(c.info.timing?2:1, Math.floor(c.time/deathFrameSeconds(c)+1e-9)) };
     case 'dead':
       return { death: true, frame: 2 };
+    case 'reviving':
+      return {death:true,frame:Math.max(0,(c.reviveFrame??2)-Math.floor(c.time/deathFrameSeconds(c)+1e-9))};
     case 'attack': {
       if (attackFrames <= 0) return { death: false, frame: 0 };
+      if(c.info.timing)return {death:false,frame:Math.min(c.info.timing.attackEnd-1,c.info.timing.attackFirst+Math.floor(c.time/monsterStepSeconds(c)+1e-9))};
       const f = Math.min(attackFrames - 1, Math.floor((c.time / ATTACK_TIME) * attackFrames));
       return { death: false, frame: 8 + f };
     }

@@ -405,6 +405,7 @@ export function heroFor(character: Character, cls: ClassInfo, { levelled = false
   const step = (i: number) => Math.trunc((a[i] - 50) / 5);
   return {
     cls,
+    attributes: [...a],
     // A character from before health was rolled at creation gets the die's highest.
     health: character.health ?? 25 + cls.healthDie,
     stamina: maxFatigue(a),

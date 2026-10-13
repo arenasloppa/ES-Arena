@@ -28,3 +28,40 @@ ARENA/
 *.65
 *.00
 *.64
+
+
+
+
+# Local workspace clutter and generated development output.
+.DS_Store
+__pycache__/
+.pytest_cache/
+coverage/
+*.tsbuildinfo
+.local/
+Backups/
+Verification/
+*.app/
+
+# Original Arena data, including mixed/lowercase file extensions.
+*.[Bb][Ss][Aa]
+*.[Mm][Ii][Ff]
+*.[Rr][Mm][Dd]
+*.[Ii][Nn][Ff]
+*.[Vv][Oo][Cc]
+*.[Ff][Ll][Cc]
+*.[Ee][Xx][Ee]
+*.[Cc][Oo][Ll]
+*.[Ii][Mm][Gg]
+*.[Ss][Ee][Tt]
+*.[Cc][Ii][Ff]
+*.[Cc][Ff][Aa]
+*.[Dd][Ff][Aa]
+*.[Xx][Mm][Ii]
+*.[Rr][Cc][Ii]
+*.[Mm][Nn][Uu]
+*.[Dd][Aa][Tt]
+[Qq][Uu][Ee][Ss][Tt][Ii][Oo][Nn].[Tt][Xx][Tt]
+[Tt][Aa][Vv][Ee][Rr][Nn].[Tt][Xx][Tt]
+
+# Runtime animation data and its test fixtures are required by the game build.

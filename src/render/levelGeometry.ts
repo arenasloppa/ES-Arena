@@ -5,9 +5,9 @@
  * World axes: X = MIF column, Z = MIF row, Y = up. One voxel is 1x1 wide
  * and Level.height tall.
  */
-import { chasmFloor, type Cell, type DoorKind, type Level, type Side } from '../game/level';
+import { chasmFloor, isWaterTunnel, type Cell, type DoorKind, type Level, type Side } from '../game/level';
 
-/** "wall:3", "floor:1", "glass:8" (index 0 transparent) or "liquid:wet" (animated chasm surface). */
+/** "wall:3", "floor:1", "glass:8" (index 0 transparent) "wallcap:0", "liquid:wet" or "chasm:wet:8" (liquid behind a masked side). */
 export type TextureKey = string;
 
 export interface QuadBatch {
@@ -90,7 +90,7 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
         for (const s of SIDES) {
           if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(wallKey), x, y, s.normal, 0, h);
         }
-        continue;
+        if (!isWaterTunnel(c)) continue;
       }
 
       // Floor (or chasm surface) and ceiling.
@@ -100,14 +100,19 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
         const d = chasmDepth(c, h);
         horizontal(batch(c.chasm === 'dry' ? key : `liquid:${c.chasm}`), x, y, d, true);
         // Its sides show the top of the chasm's wall texture, as deep as it is: Arena's water and lava
-        // textures are stone above the waterline and black below, a pit's the whole height of a room.
+        // textures are stone with transparent openings onto the animated liquid, a pit's the whole height of a room.
         // As in Arena they are drawn on every side but another chasm's, so a wall that comes down
         // into the water shows the chasm's stone below the floor's level, not its own.
         for (const s of SIDES) {
-          if (!at(x + s.dx, y + s.dy)?.chasm) sideFace(batch(key), x, y, s.normal, d, 0, true, 1, false, 1 + d / h);
+          if (!at(x + s.dx, y + s.dy)?.chasm) sideFace(batch(c.chasm === 'dry' ? key : `chasm:${c.chasm}:${tex ?? 0}`), x, y, s.normal, d, 0, true, 1, false, 1 + d / h);
         }
       } else if (c.kind !== 'raised') {
         horizontal(batch(`floor:${c.floorTex}`), x, y, 0, true);
+      }
+      if (isWaterTunnel(c)) {
+        // Solid walls use the original hardcoded texture 45, independently of *CEILING.
+        horizontal(batch(level.wallCapTexture ? 'wallcap:0' : `floor:${level.ceilingTex}`), x, y, 0, false);
+        continue;
       }
       horizontal(batch(`floor:${level.ceilingTex}`), x, y, h, false);
 
@@ -116,7 +121,7 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
           const bottom = c.raisedBottom ?? 0;
           const top = Math.max(bottom, c.raisedTop ?? h);
           for (const s of SIDES) {
-            if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(wallKey), x, y, s.normal, bottom, top, false, (top - bottom) / h);
+            if (!solid(at(x + s.dx, y + s.dy))) sideFace(batch(`maskedwall:${c.wallTex}`), x, y, s.normal, bottom, top, false, top / h, false, bottom / h);
           }
           const capKey = c.capTex === undefined ? wallKey : `${c.capIsWall ? 'wall' : 'floor'}:${c.capTex}`;
           horizontal(batch(capKey), x, y, top, true);
@@ -133,7 +138,7 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
           break;
         }
         case 'transparent':
-          for (const s of SIDES) sideFace(batch(`glass:${c.wallTex}`), x, y, s.normal, 0, h);
+          for (const s of SIDES) sideFace(batch(`arch:${c.wallTex}`), x, y, s.normal, 0, h);
           break;
         case 'diagonal':
           diagonal(batch(wallKey), x, y, h, !!c.diagonalFlip);
@@ -160,7 +165,7 @@ export function buildLevelGeometry(level: Level): LevelGeometry {
           }
           // A sliding door goes into the walls beside it.
           const alongX = solid(at(x - 1, y)) || solid(at(x + 1, y));
-          doors.push({ cellIndex: i, x, y, key: c.seeThrough ? `glass:${c.wallTex}` : wallKey, batch: b, panels, kind: c.door ?? 'raising', alongX });
+          doors.push({ cellIndex: i, x, y, key: `glass:${c.wallTex}`, batch: b, panels, kind: c.door ?? 'raising', alongX });
           break;
         }
         default:

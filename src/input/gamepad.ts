@@ -111,6 +111,13 @@ export class GamepadInput {
     return this.down.has(BUTTON[button]);
   }
 
+  /** Resume with current holds, without replaying menu/focus-change button presses. */
+  resync(now = performance.now()): void {
+    this.lastPoll=Number.NaN;
+    this.poll(now);
+    this.pressed.clear();
+  }
+
   /** True once per press: whoever reads the press first handles it. */
   take(button: ButtonName): boolean {
     return this.pressed.delete(BUTTON[button]);

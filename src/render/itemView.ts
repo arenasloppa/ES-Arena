@@ -36,7 +36,7 @@ export class ItemView {
   private readonly pivot = new THREE.Group();
   private readonly material = new THREE.MeshLambertMaterial({ vertexColors: true });
   private readonly models = new WeakMap<HTMLCanvasElement, { geometry: THREE.BufferGeometry; halfWidth: number; halfHeight: number; radius: number }>();
-  private mesh: THREE.Mesh | undefined;
+  private mesh: THREE.Object3D | undefined;
   private shown: { halfWidth: number; halfHeight: number; radius: number } | undefined;
   private yaw = 0;
   private tip = 0;
@@ -96,6 +96,30 @@ export class ItemView {
     this.mesh = new THREE.Mesh(model.geometry, this.material);
     this.pivot.add(this.mesh);
     this.shown = model;
+    this.yaw = this.turnTo = this.tip = 0;
+    this.zoom = this.zoomTo = 1;
+    this.draw();
+    return true;
+  }
+
+  /** Displays the authored mesh and atlas, with shared assets left intact. */
+  showObject(model: THREE.Object3D): boolean {
+    if (!this.ready()) return false;
+    if (this.mesh) this.pivot.remove(this.mesh);
+    const group = new THREE.Group();
+    const bounds = new THREE.Box3().setFromObject(model),
+      center = bounds.getCenter(new THREE.Vector3()),
+      size = bounds.getSize(new THREE.Vector3());
+    model.position.sub(center);
+    group.add(model);
+    group.scale.setScalar(100);
+    this.mesh = group;
+    this.pivot.add(group);
+    this.shown = {
+      halfWidth: Math.max(0.01, size.x) * 50,
+      halfHeight: Math.max(0.01, size.y) * 50,
+      radius: size.length() * 50,
+    };
     this.yaw = this.turnTo = this.tip = 0;
     this.zoom = this.zoomTo = 1;
     this.draw();

@@ -13,7 +13,8 @@
  * Each frame is run-length coded: a count byte with the high bit set
  * repeats the next byte (count & 0x7F) + 1 times, otherwise the next
  * count + 1 bytes are copied. The result is rows of bit-packed colour table
- * values, most significant bit first; value 0 is transparent.
+ * values, most significant bit first. At 8 bits per pixel the bytes are
+ * direct palette indices, with no lookup table. Palette index 0 is transparent.
  */
 
 export interface CfaFile {
@@ -59,7 +60,7 @@ export function parseCfa(data: Uint8Array): CfaFile {
       for (let col = 0; col < width; col++) {
         let v = 0;
         for (let b = 0; b < bpp; b++, bit++) v = (v << 1) | ((packed[bit >> 3] >> (7 - (bit & 7))) & 1);
-        pixels[row * width + col] = v ? (table[v] ?? 0) : 0;
+        pixels[row * width + col] = bpp === 8 ? v : (v ? (table[v] ?? 0) : 0);
       }
     }
     return pixels;

@@ -504,10 +504,12 @@ describe('a run through a dungeon', () => {
     tick(d, 0.3, click);
     const hit = d.events.find((e) => e.type === 'hit');
     expect(hit).toMatchObject({ damage: 4, killed: true });
-    expect(sounds(d.events)).toEqual(expect.arrayContaining(['SWISH.VOC', 'EHIT.VOC', 'BODYFALL.VOC']));
+    expect(sounds(d.events)).toEqual(expect.arrayContaining(['SWISH.VOC', 'EHIT.VOC']));
+    expect(sounds(d.events)).not.toContain('BODYFALL.VOC');
     expect(d.kills).toBe(1);
     expect(d.stats.experience).toBe(10 + 2 * 3);
     tick(d, 1);
+    expect(sounds(d.events)).toContain('BODYFALL.VOC');
     expect(d.target()).toMatchObject({ kind: 'body', name: 'Mudcrab', verb: 'Search' });
   });
 
@@ -542,6 +544,7 @@ describe('a run through a dungeon', () => {
     // The plain shortsword every character starts with.
     expect(d.stats.weapon.name).toBe('Shortsword');
     d.activate();
+    d.takeLoot();
     expect(notes(d.events)).toContain('Steel Broadsword added');
     expect(d.stats.weapon.name).toBe('Shortsword');
     const found = d.entries().find((e) => e.name === 'Steel Broadsword')!;
@@ -801,7 +804,8 @@ describe('the character in the dungeon', () => {
     };
     expect(blow({ levelDamage: true }).hit).toMatchObject({ damage: 4 + 5 });
     const undead = { ...TABLES, creatures: [fakeCreature({ id: 7, health: [3, 3] })], hits: { bodyParts: BODY_PARTS, undead: [7] } };
-    expect(blow({ levelDamage: true }, undead).hit).toMatchObject({ damage: 4 });
+    // Skeletons receive no Ranger bonus, then halve the edged weapon's damage.
+    expect(blow({ levelDamage: true }, undead).hit).toMatchObject({ damage: 2 });
     // A critical hit doubles the blow before the Ranger's level is added.
     expect(blow({ levelDamage: true, critical: 1 }).hit).toMatchObject({ damage: 4 * 2 + 5 });
     const archer = blow({ critical: 1, criticalWith: 'bows' });
@@ -829,7 +833,7 @@ describe('the character in the dungeon', () => {
     const d = new Dungeon(arena(), tables, () => roll, hero({ paralysis: 20 }));
     tick(d, 2);
     expect(d.paralysed).toBe(true);
-    expect(notes(d.events)).toContain('You are paralyzed');
+    expect(notes(d.events)).toContain('You have contracted Paralysis (Prevents movement, attacks and casting)');
     expect(d.activeEffects()).toContain('Paralyzed');
     // From now on the blows miss; meanwhile the player can't walk, swing or jump.
     roll = 0.99;

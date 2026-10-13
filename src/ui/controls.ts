@@ -14,6 +14,7 @@ type PadInput =
   | 'X'
   | 'Y'
   | 'LB'
+  | 'RB'
   | 'LT'
   | 'RT'
   | 'Start'
@@ -23,6 +24,7 @@ type PadInput =
   | 'LStickPress'
   | 'RStickPress'
   | 'DPad'
+  | 'DUp' | 'DDown' | 'DLeft' | 'DRight'
   | 'DUpDown'
   | 'DLeftRight';
 
@@ -57,7 +59,10 @@ export type Action =
   | 'setHotkey'
   | 'turnItem'
   | 'zoomItem'
-  | 'close';
+  | 'close'
+  | 'assignHotbar' | 'cancelHotbar' | 'lootTakeAll'
+  | 'ability1' | 'ability2' | 'ability3' | 'ability4' | 'ability5' | 'ability6' | 'quickslot'
+  | 'testBuff' | 'testDebuff' | 'testClear' | 'testAutoBuff' | 'testAutoDebuff';
 
 interface Binding {
   label: string;
@@ -66,21 +71,36 @@ interface Binding {
 }
 
 export const BINDINGS: Record<Action, Binding> = {
+  lootTakeAll:{label:'Take all loot',keys:['R'],pad:['Y']},
+  assignHotbar:{label:'Assign hotbar',keys:['H'],pad:['Y']},
+  cancelHotbar:{label:'Cancel assignment',keys:['Esc'],pad:['Y']},
+  ability1:{label:'Use hotbar slot 4',keys:['4'],pad:['X']},
+  ability2:{label:'Use hotbar slot 5',keys:['5'],pad:['B']},
+  ability3:{label:'Use hotbar slot 6',keys:['6'],pad:['LB']},
+  ability4:{label:'Use hotbar slot 7',keys:['7'],pad:['RB']},
+  ability5:{label:'Use hotbar slot 1',keys:['1'],pad:['DLeft']},
+  ability6:{label:'Use hotbar slot 3',keys:['3'],pad:['DRight']},
+  quickslot:{label:'Use hotbar slot 2',keys:['2'],pad:['DUp']},
+  testBuff:{label:'Effect Testing: add next buff',keys:['F6'],pad:[]},
+  testDebuff:{label:'Effect Testing: add next debuff',keys:['F7'],pad:[]},
+  testClear:{label:'Effect Testing: clear effects',keys:['F8'],pad:[]},
+  testAutoBuff:{label:'Effect Testing: cycle buffs',keys:['F9'],pad:[]},
+  testAutoDebuff:{label:'Effect Testing: cycle debuffs',keys:['F10'],pad:[]},
   move: { label: 'Move', keys: ['W', 'A', 'S', 'D'], pad: ['LStick'] },
   look: { label: 'Look', keys: ['Mouse'], pad: ['RStick'] },
   attack: { label: 'Attack, hold to power attack', keys: ['Click'], pad: ['RT'] },
-  block: { label: 'Block, attack while blocking to bash; casts the readied spell instead', keys: ['RClick'], pad: ['LT'] },
+  block: { label: 'Block and bash (right mouse casts a readied spell)', keys: ['RClick'], pad: ['LT'] },
   activate: { label: 'Use, take, open', keys: ['E'], pad: ['A'] },
   jump: { label: 'Jump', keys: ['Space'], pad: ['Y'] },
-  sprint: { label: 'Sprint', keys: ['Shift'], pad: ['LB'] },
-  sneak: { label: 'Sneak', keys: ['C'], pad: ['LStickPress'] },
-  favourites: { label: 'Favourites', keys: ['Q'], pad: ['DUpDown'] },
-  hotkey: { label: 'Use the favourite on a hotkey', keys: ['1–8'], pad: ['DLeftRight'] },
-  tween: { label: 'Character, items, magic and map', keys: ['Tab'], pad: ['B'] },
+  sprint: { label: 'Sprint', keys: ['Shift'], pad: ['LStickPress'] },
+  sneak: { label: 'Sneak', keys: ['C'], pad: ['RStickPress'] },
+  favourites: { label: 'Favourites', keys: [], pad: [] },
+  hotkey: { label: 'Use hotbar slot 1', keys: ['1'], pad: ['DUp'] },
+  tween: { label: 'Character, items, magic and map', keys: ['Tab'], pad: ['View'] },
   items: { label: 'Items', keys: ['I'], pad: [] },
   magic: { label: 'Magic', keys: ['P'], pad: [] },
   map: { label: 'Map', keys: ['M'], pad: [] },
-  wait: { label: 'Wait: camp a while or until healed; again to wake', keys: ['T'], pad: ['View'] },
+  wait: { label: 'Wait: camp a while or until healed; again to wake', keys: ['T'], pad: ['DDown'] },
   menu: { label: 'Pause menu', keys: ['Esc'], pad: ['Start'] },
   select: { label: 'Select', keys: ['Enter'], pad: ['A'] },
   back: { label: 'Back', keys: ['Esc'], pad: ['B'] },
@@ -91,10 +111,10 @@ export const BINDINGS: Record<Action, Binding> = {
   mapClose: { label: 'Close', keys: ['M'], pad: ['B'] },
   // In the item, favourites and character menus.
   use: { label: 'Use', keys: ['E'], pad: ['A'] },
-  favourite: { label: 'Favourite', keys: ['F'], pad: ['Y'] },
-  drop: { label: 'Drop', keys: ['R'], pad: ['X'] },
+  favourite: { label: 'Favourite', keys: ['F'], pad: ['X'] },
+  drop: { label: 'Drop', keys: ['R'], pad: [] },
   cast: { label: 'Cast', keys: ['C'], pad: ['RT'] },
-  setHotkey: { label: 'Hotkey', keys: ['1–8'], pad: ['DLeftRight'] },
+  setHotkey: { label: 'Assign D-pad Up favourite', keys: ['1'], pad: ['DLeft'] },
   turnItem: { label: 'Turn', keys: ['Drag'], pad: ['RStick'] },
   zoomItem: { label: 'Zoom', keys: ['Wheel'], pad: ['RStickPress'] },
   close: { label: 'Close', keys: ['Tab'], pad: ['B'] },
@@ -110,8 +130,8 @@ export const GAME_ACTIONS: Action[] = [
   'jump',
   'sprint',
   'sneak',
-  'favourites',
-  'hotkey',
+  'quickslot',
+  'ability1', 'ability2', 'ability3', 'ability4', 'ability5', 'ability6',
   'tween',
   'items',
   'magic',
@@ -137,6 +157,8 @@ const ICONS: Record<string, string> = {
     '<path class="dim" d="M6.2 2.5h3.6v3.7h3.7v3.6H9.8v3.7H6.2V9.8H2.5V6.2h3.7z"/><path d="M6.2 2.5h3.6v3.7H6.2zM6.2 9.8h3.6v3.7H6.2z"/>',
   dleftright:
     '<path class="dim" d="M6.2 2.5h3.6v3.7h3.7v3.6H9.8v3.7H6.2V9.8H2.5V6.2h3.7z"/><path d="M2.5 6.2h3.7v3.6H2.5zM9.8 6.2h3.7v3.6H9.8z"/>',
+  dup:'<path d="M8 13V3M4 7l4-4 4 4"/>',
+  ddown:'<path d="M8 3v10M4 9l4 4 4-4"/>',
   dleft: '<path class="dim" d="M6.2 2.5h3.6v3.7h3.7v3.6H9.8v3.7H6.2V9.8H2.5V6.2h3.7z"/><path d="M2.5 6.2h3.7v3.6H2.5z"/>',
   dright: '<path class="dim" d="M6.2 2.5h3.6v3.7h3.7v3.6H9.8v3.7H6.2V9.8H2.5V6.2h3.7z"/><path d="M9.8 6.2h3.7v3.6H9.8z"/>',
   Mouse: '<rect x="4.5" y="2" width="7" height="12" rx="3.5"/><path d="M8 2v4.5M4.5 6.5h7"/>',
@@ -162,14 +184,15 @@ const FACE: Record<PadStyle, Record<'A' | 'B' | 'X' | 'Y', Face>> = {
   nintendo: { A: { text: 'B' }, B: { text: 'A' }, X: { text: 'Y' }, Y: { text: 'X' } },
 };
 
-const OTHER: Record<PadStyle, Record<'LB' | 'LT' | 'RT' | 'Start' | 'View' | 'LStickPress' | 'RStickPress', Face>> = {
-  xbox: { LB: { text: 'LB' }, LT: { text: 'LT' }, RT: { text: 'RT' }, Start: { icon: 'menu' }, View: { icon: 'view' }, LStickPress: { text: 'LS' }, RStickPress: { text: 'RS' } },
-  playstation: { LB: { text: 'L1' }, LT: { text: 'L2' }, RT: { text: 'R2' }, Start: { text: 'OPTIONS' }, View: { text: 'SHARE' }, LStickPress: { text: 'L3' }, RStickPress: { text: 'R3' } },
-  nintendo: { LB: { text: 'L' }, LT: { text: 'ZL' }, RT: { text: 'ZR' }, Start: { text: '+' }, View: { text: '−' }, LStickPress: { text: 'LS' }, RStickPress: { text: 'RS' } },
+const OTHER: Record<PadStyle, Record<'LB' | 'RB' | 'LT' | 'RT' | 'Start' | 'View' | 'LStickPress' | 'RStickPress', Face>> = {
+  xbox: { RB: { text: 'RB' }, LB: { text: 'LB' }, LT: { text: 'LT' }, RT: { text: 'RT' }, Start: { icon: 'menu' }, View: { icon: 'view' }, LStickPress: { text: 'LS' }, RStickPress: { text: 'RS' } },
+  playstation: { RB: { text: 'R1' }, LB: { text: 'L1' }, LT: { text: 'L2' }, RT: { text: 'R2' }, Start: { text: 'OPTIONS' }, View: { text: 'SHARE' }, LStickPress: { text: 'L3' }, RStickPress: { text: 'R3' } },
+  nintendo: { RB: { text: 'R' }, LB: { text: 'L' }, LT: { text: 'ZL' }, RT: { text: 'ZR' }, Start: { text: '+' }, View: { text: '−' }, LStickPress: { text: 'LS' }, RStickPress: { text: 'RS' } },
 };
 
 function fill(el: HTMLElement, face: Face): HTMLElement {
   if ('icon' in face) el.append(icon(face.icon));
+  else if(el.classList.contains('large-button-label')){const label=document.createElement('span');label.className='controller-caption';label.textContent=face.text;el.append(label);}
   else el.textContent = face.text;
   return el;
 }
@@ -183,6 +206,9 @@ function keyCap(key: string): HTMLElement {
 function padGlyph(input: PadInput, style: PadStyle): HTMLElement {
   const g = document.createElement('span');
   g.className = 'glyph pad';
+  const atlas=['A','B','X','Y','LB','RB','LT','RT','LStickPress','RStickPress','Start','View','DUp','DDown','DLeft','DRight'].indexOf(input);
+  if(['LB','RB','LT','RT'].includes(input))g.classList.add('large-button-label');
+  if(atlas>=0){g.classList.add('controller-art');g.style.backgroundPosition=`${(atlas%4)/3*100}% ${Math.floor(atlas/4)/3*100}%`;g.setAttribute('aria-label',input);}
   if (input === 'A' || input === 'B' || input === 'X' || input === 'Y') {
     g.classList.add('face', `face-${input.toLowerCase()}`);
     return fill(g, FACE[style][input]);
@@ -192,7 +218,7 @@ function padGlyph(input: PadInput, style: PadStyle): HTMLElement {
     g.textContent = input[0];
     return g;
   }
-  if (input === 'DPad' || input === 'DUpDown' || input === 'DLeftRight') {
+  if (input === 'DPad' || input === 'DUpDown' || input === 'DLeftRight' || input === 'DUp' || input === 'DDown' || input === 'DLeft' || input === 'DRight') {
     g.classList.add('dpad');
     return fill(g, { icon: input.toLowerCase() });
   }

@@ -33,19 +33,26 @@
  * The character tables (classes, races, creation texts) are in classes.ts,
  * armour's in armour.ts and what turns up as loot in loot.ts.
  */
+import {readDiseaseTables, type DiseaseTables} from './diseases';
 import { readArmourTables, readHitTables, type ArmourTables, type HitTables } from './armour';
 import { readCalendar, type Calendar } from './calendar';
 import { readCharacterTables, type CharacterTables } from './classes';
 import { cString, ExeLayoutError, find, stringsAt } from './cstrings';
 import { readLootTables, type LootTables } from './loot';
 import { readMessages, type GameMessages } from './messages';
+import {readMonsterSpells} from './monsterSpells';
+import {readMonsterRegeneration,type MonsterRegeneration} from './monsterRegeneration';
+import {readSpellAreaCells,type SpellAreaCell} from './spellArea';
+import {readMonsterTiming,type MonsterTiming} from './monsterTiming';
 
 export { ExeLayoutError };
 
 export interface CreatureInfo {
+  /** Original CD AI gates and frame timing, when its code layout validates. */
+  timing?:MonsterTiming;
   /** e.g. "Goblin". */
   name: string;
-  /** Its number in the game's list, 1 (the rat) to 23; missing for creatures of the remake's own. */
+  /** Its number in the game's list, 1 (the rat) to 24 (the final boss); missing for creatures of the remake's own. */
   id?: number;
   level: number;
   /** Hit points are rolled between these. */
@@ -66,6 +73,15 @@ export interface CreatureInfo {
   flags: number;
   /** Agility on Arena's scale of 0 to 255, when the program's creature attributes can be read: the quicker land more blows. */
   agility?: number;
+  /** Strength through Luck on Arena's original 0–255 scale. */
+  attributes?: number[];
+  /** The original final boss, outside the random encounter roster. */
+  boss?: boolean;
+  /** Native spell IDs and casting level, when the executable layout is verified. */
+  spells?: number[];
+  spellLevel?: number;
+  /** Native indefinite healing; only Trolls and Vampires also revive. */
+  regeneration?: MonsterRegeneration;
   /**
    * How often, in percent less 1, a blow that lands does the creature's
    * special harm (see game/creatures.ts's paralysisFrom); 0 for none, and below
@@ -99,6 +115,11 @@ export interface RaisedPlatforms {
 }
 
 export interface ExeData {
+  /** Native area-spell footprint, relative to the impact/caster's map cell. */
+  spellAreaCells?: SpellAreaCell[];
+  diseases?: DiseaseTables;
+  /** Fire daemon, Medusa, Vampire and Lich minimum weapon materials. */
+  creatureMaterialRequirements?: number[];
   /** Indexed like the levels' creature items: *ITEM 32 is creatures[0]. */
   creatures: CreatureInfo[];
   weapons: WeaponInfo[];
@@ -134,6 +155,9 @@ const WEAPONS = 18;
 
 export function readExeData(image: Uint8Array): ExeData {
   const data: ExeData = {
+    spellAreaCells: readSpellAreaCells(image),
+    diseases: readDiseaseTables(image),
+    creatureMaterialRequirements: readCreatureMaterialRequirements(image),
     creatures: readCreatures(image),
     weapons: readWeapons(image),
     platforms: readRaisedPlatforms(image),
@@ -152,7 +176,17 @@ export function readExeData(image: Uint8Array): ExeData {
     if (!(err instanceof ExeLayoutError)) throw err;
     console.warn('Could not read the class tables:', err.message);
   }
+  const animations = stringsAt(image, find(image, 'rat@.cfa\0', 'creature animations'), TABLE_ENTRIES);
+  if (animations[CREATURES].toLowerCase() === 'tharn0@.cfa') data.creatures = readCreatures(image, true);
+
   return data;
+}
+
+/** CD material resistance table, independently validated against the original. */
+export function readCreatureMaterialRequirements(image: Uint8Array): number[] | undefined {
+  if (cString(image,0x3f508)!=='exp_ab.cfa' || image.length<=0x43ca3) return undefined;
+  const requirements=Array.from(image.subarray(0x43c9f,0x43ca3));
+  return requirements.every(n=>n>=3&&n<=7)?requirements:undefined;
 }
 
 /** Where each version keeps the platform tables, found by a string that sits at a known place in it. */
@@ -229,7 +263,7 @@ export function readRaisedPlatforms(image: Uint8Array): RaisedPlatforms | undefi
   return { heights, thicknesses };
 }
 
-export function readCreatures(image: Uint8Array): CreatureInfo[] {
+export function readCreatures(image: Uint8Array, includeBoss = false): CreatureInfo[] {
   const names = stringsAt(image, find(image, 'Rat\0Goblin\0', 'creature names'), CREATURES);
   const animStart = find(image, 'rat@.cfa\0', 'creature animations');
   const anims = stringsAt(image, animStart, TABLE_ENTRIES);
@@ -252,12 +286,15 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
   const u16 = (back: number, i: number) => view.getUint16(at(back) + i * 2, true);
 
   const attributes = readCreatureAttributes(image);
+  const spellLists = readMonsterSpells(image, animStart);
+  const regeneration = readMonsterRegeneration(image);
+  const timing=readMonsterTiming(image);
   const creatures: CreatureInfo[] = [];
-  for (let i = 0; i < CREATURES; i++) {
+  for (let i = 0; i < (includeBoss ? TABLE_ENTRIES : CREATURES); i++) {
     const anim = anims[i].toUpperCase();
     if (!anim.endsWith('@.CFA')) throw new ExeLayoutError(`unexpected creature animation name "${anims[i]}"`);
     const c: CreatureInfo = {
-      name: names[i],
+      name: names[i] ?? 'Jagar Tharn',
       id: i + 1,
       level: u8(0x195, i),
       health: [u16(0x14d, i * 2), u16(0x14d, i * 2 + 1)],
@@ -283,7 +320,11 @@ export function readCreatures(image: Uint8Array): CreatureInfo[] {
       c.special >= -8 &&
       c.special <= 100;
     if (!sane) throw new ExeLayoutError(`creature ${i} (${c.name}) has implausible stats`);
-    if (attributes) c.agility = attributes[i][AGILITY];
+    if (attributes) { c.agility = attributes[i][AGILITY]; c.attributes = attributes[i]; }
+    if (spellLists) Object.assign(c,spellLists[i]);
+    if (regeneration?.[i]) c.regeneration=regeneration[i];
+    if(timing)c.timing=timing;
+    if (i === CREATURES) c.boss = true;
     creatures.push(c);
   }
   return creatures;

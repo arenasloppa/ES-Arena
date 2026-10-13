@@ -184,8 +184,9 @@ describe('level geometry', () => {
   it('emits only wall faces that border open cells', () => {
     const g = buildLevelGeometry(level());
     const walls = g.batches.get('wall:1')!;
-    // Inner faces of the 3x3 room (12) + raised platform sides (3 open neighbours) + its cap.
-    expect(walls.indices.length / 6).toBe(12 + 3 + 1);
+    // Ordinary wall faces stay opaque; raised sides alpha-test palette index 0.
+    expect(walls.indices.length / 6).toBe(12 + 1);
+    expect(g.batches.get('maskedwall:1')!.indices.length / 6).toBe(3);
     expect(g.doors).toHaveLength(1);
     expect(g.batches.has('liquid:wet')).toBe(true);
     for (const b of g.batches.values()) expect(b.positions.length / 3).toBe((b.indices.length / 6) * 4);
@@ -196,9 +197,9 @@ describe('level geometry', () => {
     const l = textLevel(['####', '#~.#', '####'], { chasmTextures: { wet: 7 } });
     const g = buildLevelGeometry(l);
     const heights = (key: string) => g.batches.get(key)!.positions.filter((_, i) => i % 3 === 1);
-    expect(g.batches.get('wall:7')!.indices.length / 6).toBe(4);
-    expect(Math.min(...heights('wall:7'))).toBeCloseTo(chasmDepth(l.cells[5], l.height));
-    expect(Math.max(...heights('wall:7'))).toBe(0);
+    expect(g.batches.get('chasm:wet:7')!.indices.length / 6).toBe(4);
+    expect(Math.min(...heights('chasm:wet:7'))).toBeCloseTo(chasmDepth(l.cells[5], l.height));
+    expect(Math.max(...heights('chasm:wet:7'))).toBe(0);
     expect(Math.min(...heights('wall:0'))).toBe(0);
   });
 });

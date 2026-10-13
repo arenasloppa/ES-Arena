@@ -1,10 +1,11 @@
 import * as THREE from 'three';
+import { makeLiquidMaterial } from './liquidMaterial';
 import type { DoorKind, Level, LevelFlat } from '../game/level';
 import { buildLevelGeometry, type DoorGeometry, type QuadBatch } from './levelGeometry';
 
 /** Where level textures come from: the player's game files (TextureCache) or the built-in backdrop. */
 export interface TextureProvider {
-  tile(file: string, frame?: number): Promise<THREE.DataTexture | undefined>;
+  tile(file: string, frame?: number, transparentZero?: boolean): Promise<THREE.DataTexture | undefined>;
   sprite(file: string): Promise<THREE.DataTexture | undefined>;
   /** Every frame of an animated decoration (DFA). */
   spriteFrames?(file: string): Promise<THREE.DataTexture[]>;
@@ -82,6 +83,7 @@ export interface LevelScene {
   animate(seconds: number): void;
   /** Flats that could not be drawn (missing or unreadable files). */
   skippedFlats: string[];
+  refreshTerrain?():Promise<void>;
 }
 
 /**
@@ -118,30 +120,33 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
   const geo = buildLevelGeometry(level);
   const materials = new Map<string, THREE.Material>();
 
-  const animated: Array<{ mat: THREE.MeshBasicMaterial; frames: THREE.DataTexture[] }> = [];
+  const animated: Array<{ mat: THREE.MeshBasicMaterial; frames: THREE.DataTexture[]; frame?: { value: THREE.DataTexture } }> = [];
   const LIQUID_FILES: Record<string, string> = { wet: 'WATERANI.RCI', lava: 'LAVAANI.RCI' };
 
   const material = async (key: string): Promise<THREE.Material> => {
     const cached = materials.get(key);
     if (cached) return cached;
-    const [kind, idxStr] = key.split(':');
-    if (kind === 'liquid') {
+    const [kind, idxStr, layerIndex] = key.split(':');
+    if (kind === 'liquid' || kind === 'chasm') {
       const frames = await textures.liquid(LIQUID_FILES[idxStr]);
       const fallback = level.chasmTextures[idxStr as 'wet' | 'lava'];
       if (!frames.length && fallback !== undefined) return material(`wall:${fallback}`);
-      const mat = new THREE.MeshBasicMaterial({ map: frames[0] ?? null, color: frames.length ? 0xffffff : 0x203040 });
-      if (frames.length > 1) animated.push({ mat, frames });
+      const entry = kind === 'chasm' ? level.wallTextures[Number(layerIndex)] : undefined;
+      const layer = entry && await textures.tile(entry.file, entry.frame, true);
+      const result = frames.length ? makeLiquidMaterial(frames[0], layer) : undefined;
+      const mat = result?.material ?? new THREE.MeshBasicMaterial({ color: 0x203040 });
+      if (result) animated.push({ mat, frames, frame: result.frame });
       materials.set(key, mat);
       return mat;
     }
     const idx = Number(idxStr);
-    const entry = kind === 'floor' ? level.floorTextures[idx] : level.wallTextures[idx];
-    const glass = kind === 'glass';
-    const tex = entry && (glass ? await textures.sprite(entry.file) : await textures.tile(entry.file, entry.frame));
+    const entry = kind === 'wallcap' ? level.wallCapTexture : kind === 'floor' ? level.floorTextures[idx] : level.wallTextures[idx];
+    const glass = kind === 'glass' || kind === 'arch' || kind === 'maskedwall';
+    const tex = entry && await textures.tile(entry.file, entry.frame, glass);
     const mat = new THREE.MeshBasicMaterial({
       map: tex ?? null,
       color: tex ? 0xffffff : 0x555555,
-      side: THREE.DoubleSide,
+      side: kind === 'arch' ? THREE.FrontSide : THREE.DoubleSide,
       alphaTest: glass ? 0.5 : 0,
       transparent: false,
     });
@@ -149,9 +154,16 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
     return mat;
   };
 
-  for (const [key, batch] of geo.batches) {
-    group.add(new THREE.Mesh(toGeometry(batch), await material(key)));
-  }
+  let terrainMeshes:THREE.Mesh[]=[];
+  let revision=0;
+  const refreshTerrain=async()=>{
+    const current=++revision,next:THREE.Mesh[]=[];
+    for(const [key,batch] of buildLevelGeometry(level).batches)next.push(new THREE.Mesh(toGeometry(batch),await material(key)));
+    if(current!==revision){for(const m of next)m.geometry.dispose();return;}
+    for(const m of terrainMeshes){group.remove(m);m.geometry.dispose();}
+    terrainMeshes=next;group.add(...next);
+  };
+  await refreshTerrain();
 
   const doors = new Map<number, DoorMesh>();
   for (const d of geo.doors) {
@@ -180,6 +192,7 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
     const scale = flat.scale ?? 1;
     const bottom = flat.ceiling ? level.height - img.height * scale * PIXEL_HEIGHT : (flat.base ?? 0) + liftFor(flat.yOffset);
     placeSprite(sprite, flat.x, flat.y, img.width * scale, img.height * scale, bottom);
+    flat.collisionWidth=img.width*scale/128;flat.collisionHeight=img.height*scale*PIXEL_HEIGHT;
     group.add(sprite);
     billboards.push(sprite);
     return sprite;
@@ -189,9 +202,13 @@ export async function buildLevelScene(level: Level, textures: TextureProvider): 
   for (const item of level.items) items.push(await flatSprite(item));
 
   const animate = (seconds: number) => {
-    for (const a of animated) a.mat.map = a.frames[Math.floor(seconds * 6) % a.frames.length];
+    for (const a of animated) {
+      const texture = a.frames[Math.floor(seconds * 6) % a.frames.length];
+      if (a.frame) a.frame.value = texture;
+      else a.mat.map = texture;
+    }
     for (const a of animatedFlats) a.mat.map = a.frames[Math.floor(seconds * 12) % a.frames.length];
   };
 
-  return { group, doors, billboards, items, material, animate, skippedFlats };
+  return { group, doors, billboards, items, material, animate, skippedFlats, refreshTerrain };
 }

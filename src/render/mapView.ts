@@ -59,7 +59,7 @@ export class MapView {
   /** Brings the map up to date and centres it on the player, north at the top. */
   async open(): Promise<void> {
     const d = this.dungeon;
-    const key = `${d.explored.version}:${[...d.openDoors].join(',')}`;
+    const key = `${d.explored.version}:${d.terrainVersion}:${[...d.openDoors].join(',')}`;
     if (key !== this.builtKey) {
       this.builtKey = key;
       await this.rebuild();

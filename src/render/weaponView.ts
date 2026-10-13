@@ -13,8 +13,15 @@
  * then none once it is loosed until the next is nocked.
  * Blood from Arena's BLOODEXP.CFA splashes on the view when a blow lands.
  */
+import { WEAPON_MOTION_FOV } from './weaponMotion';
 import type { Swing, SwingKind } from '../game/dungeon';
 import type { ScreenImage } from './textures';
+import * as THREE from 'three';
+import type { Weapon } from '../game/combat';
+import type { SurfaceMaterial } from '../game/projectilePhysics';
+import { steelWeapons } from './steelWeaponAssets';
+import {weaponModelDefinition,weaponModelKey} from './weaponModelDefinitions';
+import { SteelWeaponRig, type WeaponEnvironment } from './steelWeaponRig';
 
 export const VIEW_WIDTH = 320;
 export const VIEW_HEIGHT = 147;
@@ -59,6 +66,7 @@ export function swingFrame(swing: Swing | undefined, set: FrameSet = SWING_SET):
 }
 
 export interface WeaponPose {
+  charging?: boolean;
   swing?: Swing;
   /** How far the player has walked, for the sway of each step. */
   walked: number;
@@ -68,9 +76,18 @@ export interface WeaponPose {
   guard: boolean;
   /** Seconds since the last draw. */
   dt: number;
+  arrowReady?: boolean;
+  sneaking?: boolean;
+  look?: { yaw: number; pitch: number };
 }
 
 export class WeaponView {
+  private readonly scene = new THREE.Scene();
+  private readonly camera = new THREE.PerspectiveCamera(65, 1, 0.015, 8);
+  private selection = '';
+  private rig: SteelWeaponRig | undefined;
+  private replaceSprite = false;
+  private environment: WeaponEnvironment | undefined;
   private readonly ctx: CanvasRenderingContext2D;
   private frames: ScreenImage[] = [];
   private blood: ScreenImage[] = [];
@@ -85,6 +102,10 @@ export class WeaponView {
     canvas: HTMLCanvasElement,
     private readonly load: (file: string) => Promise<ScreenImage[]>,
   ) {
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x696969, 2.0));
+    const key = new THREE.DirectionalLight(0xffffff, 2.4);
+    key.position.set(-1, 2, 2);
+    this.scene.add(key);
     canvas.width = VIEW_WIDTH;
     canvas.height = VIEW_HEIGHT;
     this.ctx = canvas.getContext('2d')!;
@@ -93,11 +114,35 @@ export class WeaponView {
   }
 
   /** Switches to another weapon's swing set; resolves once it is loaded. */
-  async use(file: string): Promise<void> {
-    if (file === this.file) return;
+  async use(weapon: Weapon | string): Promise<void> {
+    const file = typeof weapon === 'string' ? weapon : weapon.cif;
+    const definition = typeof weapon === 'string' ? undefined : weaponModelDefinition(weapon);
+    const selection = definition ? weaponModelKey(definition) : file;
+    if (selection === this.selection) return;
+    this.selection = selection;
+    this.camera.fov = definition ? WEAPON_MOTION_FOV : 65;
+    this.camera.updateProjectionMatrix();
+    this.rig?.dispose();
+    this.rig = undefined;
+    this.frames = [];
+    this.replaceSprite = !!definition;
+    this.drawn = '';
     this.file = file;
+    if (definition) {
+      try {
+        const model = await steelWeapons.load(definition);
+        if (this.selection !== selection) return;
+        this.rig = new SteelWeaponRig(model, definition, this.scene);
+        this.raising = 0;
+        return;
+      } catch (error) {
+        if (this.selection !== selection) return;
+        console.warn(`Could not load ${definition.name}; using its original sprite:`, error);
+        this.replaceSprite = false;
+      }
+    }
     const frames = await this.load(file);
-    if (this.file === file) {
+    if (this.selection === selection) {
       this.frames = frames;
       this.drawn = '';
       this.raising = 0;
@@ -115,8 +160,12 @@ export class WeaponView {
   }
 
   /** Draws `file`'s frame for the pose: a swing, the guard, or at rest, swaying with the player's steps. */
-  draw(file: string, pose: WeaponPose): void {
-    if (file !== this.file) void this.use(file);
+  draw(weapon: Weapon | string, pose: WeaponPose): void {
+    const file = typeof weapon === 'string' ? weapon : weapon.cif,
+      definition = typeof weapon === 'string' ? undefined : weaponModelDefinition(weapon),
+      selection = definition ? weaponModelKey(definition) : file;
+    if (selection !== this.selection) void this.use(weapon);
+    this.rig?.update(pose.swing, pose.guard, pose.walked, pose.lowered, pose.dt, pose.arrowReady ?? true, this.environment, pose.look, pose.sneaking, pose.charging);
     const { swing, guard, dt } = pose;
     if (swing) this.swinging = true;
     else if (this.swinging) {
@@ -163,6 +212,33 @@ export class WeaponView {
     const blood = this.blood[splash];
     if (blood) this.ctx.drawImage(blood.image, blood.x, blood.y);
     const frame = this.frames[index];
-    if (frame) this.ctx.drawImage(frame.image, frame.x + dx, frame.y + dy);
+    if (frame && !this.replaceSprite) this.ctx.drawImage(frame.image, frame.x + dx, frame.y + dy);
+  }
+
+  setEnvironment(environment: WeaponEnvironment): void {
+    this.environment = environment;
+  }
+  impact(material: SurfaceMaterial, bash = false): void {
+    this.rig?.terrainImpact(material, bash);
+  }
+  /** Viewmodels have their own close camera and render after the dungeon's depth pass. */
+  render(renderer: THREE.WebGLRenderer): void {
+    if (!this.rig) return;
+    const size = renderer.getSize(new THREE.Vector2());
+    this.camera.aspect = size.x / size.y;
+    this.rig.viewportAspect=this.camera.aspect;
+    this.camera.updateProjectionMatrix();
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.clearDepth();
+    renderer.render(this.scene, this.camera);
+    renderer.autoClear = autoClear;
+  }
+  dispose(): void {
+    this.selection = '';
+    this.rig?.dispose();
+    this.rig = undefined;
+    this.frames = [];
+    this.ctx.clearRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
   }
 }

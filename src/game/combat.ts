@@ -128,6 +128,10 @@ export function elementalDamage(damage: number, element: number, t: SpellDefence
 export interface Weapon {
   name: string;
   damage: [number, number];
+  /** Exact inventory weapon and material indices; a CIF is shared by several families. */
+  type?: number;
+  material?: number;
+  twoHanded?: boolean;
   /** First-person pictures: a swing set such as SWORD.CIF or AXE.CIF, or a bow's ARROWHLF.CFA. */
   cif: string;
   /** A bow, which shoots arrows rather than swinging. */
@@ -189,6 +193,8 @@ export interface PlayerStats {
 
 /** What the player's character brings to a fight; see character.ts. */
 export interface Hero {
+  /** Character attributes on the displayed 0–100 scale, for disease depletion. */
+  attributes?: number[];
   /** The class, for what it may use; none means anything goes. */
   cls?: ClassInfo;
   /** Health and stamina at level 1. */

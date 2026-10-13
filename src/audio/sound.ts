@@ -4,6 +4,7 @@
  * or round a corner, and come from the side they are on.
  */
 import { parseVoc } from '../formats/voc';
+import {declickSamples} from './declick';
 
 /** How far away a sound can still be heard, in voxels. */
 const HEARING = 12;
@@ -34,7 +35,8 @@ export class SoundBank {
 
   /** Browsers start sound only after a click or key press; call this from one. */
   wake(): void {
-    void this.audio()?.resume().catch(() => {});
+    const ctx = this.audio();
+    if (ctx?.state === 'suspended') void ctx.resume().catch(() => {});
   }
 
   setVolume(volume: number): void {
@@ -140,7 +142,7 @@ export class SoundBank {
         const sound = parseVoc(await this.files.read(name));
         // Low-rate sounds are stretched to a rate every browser takes, filling in between samples.
         const factor = Math.ceil(MIN_RATE / sound.sampleRate);
-        const s = sound.samples;
+        const s = declickSamples(sound.samples,sound.sampleRate);
         const buffer = ctx.createBuffer(1, Math.max(1, s.length * factor), sound.sampleRate * factor);
         const out = buffer.getChannelData(0);
         for (let i = 0; i < s.length; i++) {

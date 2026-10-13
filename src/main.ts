@@ -1,3 +1,4 @@
+import {TEST_SECTION_NAMES,type TestAreaMode} from './game/testEffects';
 import '@fontsource/cinzel/latin-500.css';
 import '@fontsource/cinzel/latin-600.css';
 import '@fontsource/cinzel/latin-700.css';
@@ -29,7 +30,11 @@ import { parseInf } from './formats/inf';
 import { unpackExe, UnsupportedExeError } from './formats/pklite';
 import { attributeRoom, creationData, heroFor, loadCharacter, saveCharacter, type Character, type CreationData } from './game/character';
 import { Dungeon, type Vision } from './game/dungeon';
-import { ATTRIBUTE_MAX } from './game/items';
+import { steelWeaponThumbnail } from './render/steelWeaponThumbnail';
+import { weaponModelDefinition } from './render/weaponModelDefinitions';
+import { ATTRIBUTE_MAX, itemFrame } from './game/items';
+import {steelTestRoom} from './game/steelTestRoom';
+import {TestArea} from './game/testArea';
 import { buildLevel } from './game/level';
 import { Engine, type GameMenu } from './game/engine';
 import { GamepadInput } from './input/gamepad';
@@ -47,6 +52,7 @@ import { Director, Film } from './game/flythrough';
 import { BINDINGS, GAME_ACTIONS, InputModeWatcher, type InputMode } from './ui/controls';
 import { CharacterCreation } from './ui/creation';
 import { Cutscenes, deathVision, dreamVisions, firstVision, NEW_GAME, OPENING } from './ui/cutscene';
+import {LootMenu} from './ui/lootMenu';
 import { GameMenus } from './ui/gameMenus';
 import { Hud } from './ui/hud';
 import { LevelUp } from './ui/levelUp';
@@ -69,6 +75,12 @@ const canvas = $<HTMLCanvasElement>('view');
 
 /** Arena begins in the Imperial Dungeons. Development builds can start elsewhere with ?map=NAME.MIF. */
 const DEFAULT_MAP = 'START.MIF';
+const TEST_AREA='@TEST_AREA';
+let pendingTestArea=new URLSearchParams(location.search).has('test-area');
+let pendingTestMode:TestAreaMode=new URLSearchParams(location.search).get('test-mode')==='effects'?'effects':'weapons';
+let currentTesting:TestArea|undefined;
+const hotbarArtPending=new Set<string>();
+let playerHeadKey='';
 const startMapName = () => (import.meta.env.DEV && new URLSearchParams(location.search).get('map')?.toUpperCase()) || DEFAULT_MAP;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -105,10 +117,11 @@ const playing = () => engineMap !== undefined && !engine?.dungeon.outcome;
 
 // ---- Menu screens ----
 
-type Screen = 'folder' | 'play' | 'create' | 'controls' | 'wait' | 'level' | 'dead' | 'escaped';
+type Screen = 'folder' | 'play' | 'testing' | 'create' | 'controls' | 'wait' | 'level' | 'dead' | 'escaped';
 const screens: Record<Screen, HTMLElement> = {
   folder: $('screen-folder'),
   play: $('screen-play'),
+  testing: $('screen-testing'),
   create: $('screen-create'),
   controls: $('screen-controls'),
   wait: $('screen-wait'),
@@ -118,6 +131,7 @@ const screens: Record<Screen, HTMLElement> = {
 };
 let screen: Screen = 'folder';
 let screenBeforeControls: Screen = 'folder';
+let screenBeforeTesting:Screen='folder';
 const creator = new CharacterCreation(screens.create);
 const levelSheet = new LevelUp(screens.level);
 const cutscenes = new Cutscenes($('cutscene'), pad, () => data, () => sounds);
@@ -127,7 +141,12 @@ input.render($('cutscene'));
 /** Plays cutscenes over everything, with a song; the menu's focus comes back after. */
 async function showCutscene(shots: Parameters<Cutscenes['play']>[0], song?: string) {
   if (song) music?.play(song);
-  await cutscenes.play(shots);
+  const wasHidden=menu.hidden;
+  menu.hidden=true;
+  const playback=cutscenes.play(shots);
+  $('startup-cover').hidden=true;
+  try { await playback; }
+  finally { menu.hidden=wasHidden; }
   nav.focusFirst();
 }
 
@@ -142,6 +161,7 @@ const nav = new MenuNav(menu, pad, input, {
   back: () => {
     if (screen === 'create') creator.back();
     else if (screen === 'controls') showScreen(screenBeforeControls);
+    else if (screen === 'testing') showScreen(screenBeforeTesting);
     else if (screen === 'level') levelSheet.back();
     else if (playing()) resume();
   },
@@ -152,6 +172,7 @@ const nav = new MenuNav(menu, pad, input, {
 });
 
 function showScreen(next: Screen) {
+  if(next==='testing' && screen!=='testing')screenBeforeTesting=screen;
   if (next === 'controls' && screen !== 'controls') screenBeforeControls = screen;
   screen = next;
   for (const [name, el] of Object.entries(screens)) el.hidden = name !== next;
@@ -165,8 +186,8 @@ function showScreen(next: Screen) {
 /** The button hints along the bottom: Back steps back through character creation, closes the Controls screen, or returns to the game. */
 function updateHints() {
   // The level-up sheet has no way back: the points have to be shared out first.
-  $('hint-back').hidden = screen === 'level' || (screen !== 'controls' && screen !== 'create' && !playing());
-  $('hint-back-label').textContent = screen === 'controls' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
+  $('hint-back').hidden = screen === 'level' || (screen !== 'controls' && screen !== 'testing' && screen !== 'create' && !playing());
+  $('hint-back-label').textContent = screen === 'controls' || screen === 'testing' || screen === 'create' ? 'Back' : screen === 'wait' ? 'Cancel' : 'Resume';
   $('hint-change').hidden = screen !== 'controls' && screen !== 'create' && screen !== 'wait' && screen !== 'level';
 }
 
@@ -213,6 +234,9 @@ let engineChanges = 0;
 
 /** Stops the running engine (map or backdrop) and makes `next` the current one. */
 function setEngine(next?: Engine, map?: string) {
+  currentTesting=undefined;hotbarArtPending.clear();hud.clearHotbarArtwork();playerHeadKey='';
+  $('effect-test-controls').hidden=true;
+  lootMenu?.close(false);
   engineChanges++;
   menu.classList.remove('film');
   engine?.dispose();
@@ -399,32 +423,36 @@ async function startMap(name: string, character: Character) {
   playButton.disabled = true;
   try {
     setStatus(`Loading ${name}…`);
-    const mif = parseMif(await data.read(name));
-    const levelIndex = Math.min(mif.startingLevelIndex, mif.levels.length - 1);
-    const infName = mif.levels[levelIndex].info;
-    const inf = parseInf(await data.read(infName));
-    if (tables === undefined) tables = await loadTables(data);
-    const level = buildLevel(mif, levelIndex, inf, tables?.platforms);
-    // Arena's first dungeon, under the Imperial Palace.
-    if (name === DEFAULT_MAP) level.name = 'Imperial Dungeons';
+    const practice=name===TEST_AREA||name.startsWith(TEST_AREA+':');
+    const testMode:TestAreaMode=name.endsWith(':effects')?'effects':'weapons';
+    const level=practice?steelTestRoom():await(async()=>{
+      const mif=parseMif(await data!.read(name)),index=Math.min(mif.startingLevelIndex,mif.levels.length-1),inf=parseInf(await data!.read(mif.levels[index].info));
+      if(tables===undefined)tables=await loadTables(data!);
+      return buildLevel(mif,index,inf,tables?.platforms);
+    })();
+    if(practice)level.name=TEST_SECTION_NAMES[testMode];
+    else if(name===DEFAULT_MAP)level.name='Imperial Dungeons';
     const palette = parseCol(await data.read('PAL.COL'));
     if (tables === undefined) tables = await loadTables(data);
     if (spells === undefined) spells = await loadSpells(data);
     const cache = new TextureCache(data, palette);
     const dungeon = new Dungeon(level, tables ?? undefined, Math.random, heroFor(character, made.classes[character.cls]), spells);
+    if(practice&&!tables)throw new Error('Creature and weapon tables are needed for the Test Area');
+    const testArea=practice?new TestArea(dungeon,tables!.creatures,tables!.weapons,testMode):undefined;
     // Enchanted gear, trinkets and Fortify raise attributes for a while; the character is worked out again with them.
     dungeon.heroWith = (bonus) => {
       const c = runCharacter ?? character;
-      const raised = { ...c, attributes: c.attributes.map((a, i) => Math.min(ATTRIBUTE_MAX, a + (bonus[i] ?? 0))) };
+      const raised = { ...c, attributes: c.attributes.map((a, i) => Math.max(0, Math.min(ATTRIBUTE_MAX, a + (bonus[i] ?? 0)))) };
       return heroFor(raised, made.classes[c.cls], { levelled: dungeon.stats.level > 1 });
     };
     const scene = await buildLevelScene(level, cache);
     const creatures = await CreatureView.create(dungeon.creatures, (stem) => cache.creature(stem), level);
     // A bow's arrow is a CFA, the swing sets CIFs.
     const weapon = new WeaponView($<HTMLCanvasElement>('weapon'), (file) => (file.endsWith('.CFA') ? cache.screenAnimation(file) : cache.screenImages(file)));
-    await weapon.use(dungeon.stats.weapon.cif);
+    await weapon.use(dungeon.stats.weapon);
     weapon.useBlood(await cache.screenAnimation('BLOODEXP.CFA'));
     const next = new Engine(renderer, dungeon, scene, {
+      testArea,
       pad,
       hud,
       controls: settings,
@@ -436,6 +464,11 @@ async function startMap(name: string, character: Character) {
       spells: new SpellView(),
       arrows: new ArrowView(cache.cfaFrames('ARROW02.CFA')),
     });
+    next.onLoot = () => {
+      next.pause();
+      if (document.pointerLockElement) document.exitPointerLock();
+      lootMenu.open(next.dungeon);
+    };
     next.onPause = pause;
     next.onMenu = openGameMenu;
     next.onDeath = died;
@@ -448,7 +481,11 @@ async function startMap(name: string, character: Character) {
       hudEl.hidden = open;
     };
     setEngine(next, name);
+    currentTesting=testArea;
+    $('effect-test-controls').hidden=!practice||testMode!=='effects';
     runCharacter = character;
+    hud.character(character.name,dungeon.stats.level);
+    await updatePlayerPortrait();
     music?.play(SONGS.dungeons);
     textures = cache;
     $('map-name').textContent = level.name || name;
@@ -464,8 +501,8 @@ async function startMap(name: string, character: Character) {
     hud.fade(1, 0);
     resume();
     hud.fade(0, 1.4);
-    hud.banner(level.name || name);
-    if (!tipsShown) {
+    hud.banner(level.name || name,practice?'Practice':undefined,practice?(testMode==='weapons'?'Immortal · All monsters cycle one at a time · Every weapon and material in inventory':'Stack buffs and debuffs · Automatic cycles every 8 seconds'):undefined);
+    if (!practice&&!tipsShown) {
       tipsShown = true;
       hud.showTips();
     }
@@ -479,7 +516,20 @@ async function startMap(name: string, character: Character) {
   }
 }
 
+/** Enter the same Engine/HUD/menus as a normal run, without creating or saving a character. */
+async function enterTestArea(mode:TestAreaMode=pendingTestMode){
+  pendingTestMode=mode;
+  pendingTestArea=true;
+  if(!data){showScreen('folder');setStatus('Choose your ARENA folder to enter Testing.');return;}
+  const made=await creationFor();if(!made)return;
+  const saved=loadCharacter(made),warrior=made.classes.findIndex(c=>c.id===16||/warrior/i.test(c.name)),mage=made.classes.findIndex(c=>/^mage$/i.test(c.name)),cls=mode==='effects'&&mage>=0?mage:warrior>=0?warrior:Math.max(0,made.classes.findIndex(c=>!c.weapons?.length));
+  const character:Character={name:saved?.name??'Adventurer',gender:saved?.gender??'male',race:saved?.race??2,cls,attributes:[70,60,60,70,60,70,60,60],face:saved?.face??0};
+  pendingTestArea=false;
+  await startMap(TEST_AREA+':'+mode,character);
+}
+
 function resume() {
+  lootMenu.close(false);
   if (!engine || !playing()) return;
   gameMenus.close();
   menu.hidden = true;
@@ -506,6 +556,8 @@ function openMap() {
   engine.start();
 }
 
+const lootMenu = new LootMenu(pad, input, resume);
+
 const gameMenus = new GameMenus($('game-menu'), pad, input, {
   run: () => (engine && playing() && runCharacter && creationLoaded ? { dungeon: engine.dungeon, character: runCharacter, data: creationLoaded } : undefined),
   portraits: () => portraits,
@@ -519,6 +571,7 @@ function showMenu(next: Screen) {
   engine?.pause();
   if (document.pointerLockElement) document.exitPointerLock();
   gameMenus.close();
+  lootMenu.close(false);
   hudEl.hidden = true;
   mapScreen.hidden = true;
   menu.hidden = false;
@@ -677,13 +730,30 @@ function formatTime(seconds: number): string {
  * Reads the controller for the menu and the button prompts, every frame. The running
  * map reads it too, in the same frame, and gets the same presses.
  */
+async function updatePlayerPortrait():Promise<void>{
+ if(!engine || !playing() || !runCharacter || !portraits)return;
+ const c=runCharacter,look={race:c.race,gender:c.gender,face:c.face,robe:!!creationLoaded?.classes[c.cls]?.spellcaster,equipment:engine.dungeon.inventory.pictureFrames()};
+ const key=JSON.stringify(look);if(key===playerHeadKey)return;playerHeadKey=key;
+ await portraits.drawHead($<HTMLCanvasElement>('player-portrait'),look);
+}
+
 let padWasConnected = false;
 function uiFrame(now: number) {
   pad.poll(now);
   input.update(pad);
+  void updatePlayerPortrait();
+  void updateHotbarArtwork();
+  if(currentTesting?.mode==='effects'){
+   $('test-next-buff').textContent=currentTesting.nextBuffName;
+   $('test-next-debuff').textContent=currentTesting.nextDebuffName;
+   for(const [id,enabled] of [['test-auto-buffs',currentTesting.autoBuffs],['test-auto-debuffs',currentTesting.autoDebuffs]] as const){
+    const button=$(id);button.setAttribute('aria-pressed',String(enabled));button.querySelector('.test-toggle-state')!.textContent=enabled?'On':'Off';
+   }
+  }
   if (cutscenes.isPlaying) cutscenes.frame();
   else if (!menu.hidden) nav.frame(now);
   else if (gameMenus.isOpen) gameMenus.frame(now);
+  else if (lootMenu.isOpen) lootMenu.frame(now);
   // Like Skyrim, pause if the controller goes away mid-game.
   else if (padWasConnected && !pad.connected && playing()) pause();
   padWasConnected = pad.connected;
@@ -721,6 +791,8 @@ async function useSource(source: FileSource): Promise<boolean> {
     return false;
   }
   setStatus('Reading GLOBAL.BSA…');
+  const opening=settings.intro&&!openingShown&&!pendingTestArea;
+  if(opening)menu.hidden=true;
   try {
     data = await GameData.open(source);
     tables = undefined;
@@ -740,6 +812,7 @@ async function useSource(source: FileSource): Promise<boolean> {
     folderError.textContent = `Could not read the game data: ${(err as Error).message}`;
     folderError.hidden = false;
     setStatus('');
+    menu.hidden=false;
     return false;
   }
   updatePlayOptions();
@@ -750,10 +823,13 @@ async function useSource(source: FileSource): Promise<boolean> {
   // Read the classes now, to say who plays and to have character creation ready.
   void creationFor().then(updatePlayOptions);
   music.play(SONGS.menu);
-  if (settings.intro && !openingShown) {
+  if (opening) {
     openingShown = true;
-    await showCutscene(OPENING);
+    try { await showCutscene(OPENING); }
+    finally { menu.hidden=false;nav.focusFirst(); }
   }
+  else menu.hidden=false;
+  if(pendingTestArea)await enterTestArea();
   return true;
 }
 
@@ -797,12 +873,14 @@ if (desktop) {
   // The desktop app reads the folder itself and opens the one from last time on launch.
   const bridge = desktop;
   pickButton.addEventListener('click', () => useDesktopFolder(bridge.chooseFolder()));
-  void useDesktopFolder(bridge.reopenFolder());
+  void useDesktopFolder(bridge.reopenFolder()).finally(()=>{menu.hidden=playing();$('startup-cover').hidden=true;if(!playing())nav.focusFirst();});
   for (const quit of document.querySelectorAll<HTMLButtonElement>('.quit')) {
     quit.hidden = false;
     quit.addEventListener('click', () => void bridge.quit());
   }
 } else if (supportsDirectoryPicker() && !embedded) {
+  $('startup-cover').hidden=true;
+  menu.hidden=false;
   pickButton.addEventListener('click', async () => {
     if (needsClick()) return;
     try {
@@ -830,6 +908,8 @@ if (desktop) {
     if (screen === 'folder') nav.focusFirst();
   });
 } else {
+  $('startup-cover').hidden=true;
+  menu.hidden=false;
   pickButton.hidden = true;
   fallbackLabel.hidden = false;
 }
@@ -871,6 +951,14 @@ mainMenuButton.addEventListener('click', () => {
   updatePlayOptions();
   showScreen('play');
 });
+for(const button of document.querySelectorAll<HTMLElement>('[data-test-mode]'))button.addEventListener('click',()=>void enterTestArea(button.dataset.testMode as TestAreaMode));
+$('testing-back').addEventListener('click',()=>showScreen(screenBeforeTesting));
+for(const button of document.querySelectorAll<HTMLButtonElement>('[data-test-action]'))button.addEventListener('click',()=>{
+ const area=currentTesting;if(area?.mode!=='effects')return;
+ const action=button.dataset.testAction;
+ if(action==='buff')area.addBuff();else if(action==='debuff')area.addDebuff();else if(action==='clear')area.clearEffects();else if(action==='auto-buff')area.toggleAutoBuffs();else if(action==='auto-debuff')area.toggleAutoDebuffs();
+ button.blur();
+});
 $('try-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
 $('play-again').addEventListener('click', () => engineMap && enterDungeon(engineMap));
 
@@ -893,3 +981,33 @@ fillBindings();
 showScreen('folder');
 void showBackdrop();
 requestAnimationFrame(uiFrame);
+
+// Local development uses the same read-only Arena source as the former review range.
+if(import.meta.env.DEV&&pendingTestArea&&!desktop){
+ void(async()=>{
+  try{
+   const response=await fetch('/__arena/files');if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))return;
+   const names=await response.json() as string[];
+   await useSource(sourceFromPaths(names,async name=>{const file=await fetch('/__arena/file/'+encodeURIComponent(name));if(!file.ok)throw new Error('Cannot read '+name);return new Uint8Array(await file.arrayBuffer());}));
+  }catch(err){setStatus('Choose your ARENA folder to enter Testing.');console.warn(err);}
+ })();
+}
+
+for(const button of document.querySelectorAll<HTMLButtonElement>('[data-ability]'))button.addEventListener('click',()=>{if(playing())engine?.dungeon.castAbility(Number(button.dataset.ability));button.blur();});
+document.querySelector<HTMLButtonElement>('[data-quickslot]')!.addEventListener('click',e=>{if(playing())engine?.dungeon.useQuickslot();(e.currentTarget as HTMLButtonElement).blur();});
+
+async function updateHotbarArtwork():Promise<void>{
+ const run=engine;if(!run||!portraits||!runCharacter)return;
+ for(let slot=0;slot<7;slot++){
+  if(engine!==run)return;
+  const entry=run.dungeon.hotbarEntry(slot),item=entry?.item;
+  if(!entry||!item||hotbarArtPending.has(entry.key))continue;
+  hotbarArtPending.add(entry.key);
+  const frame=itemFrame(item);let picture:HTMLCanvasElement|undefined;
+  try{
+   if(item.kind==='weapon'&&weaponModelDefinition(item))picture=await steelWeaponThumbnail(item);
+   else if(frame!==undefined)picture=await portraits.item(frame,runCharacter.gender);
+   if(engine===run&&picture)hud.setHotbarArtwork(entry.key,picture.toDataURL());
+  }catch(error){console.warn('Hotbar item picture unavailable',error);}
+ }
+}

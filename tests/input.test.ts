@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BUTTON, GamepadInput, Repeater, deadzone, padStyle, type ButtonName } from '../src/input/gamepad';
 import { BINDINGS, GAME_ACTIONS, type Action } from '../src/ui/controls';
+import {HOTBAR_ORDER} from '../src/input/hotbar';
 import { compassHeading } from '../src/ui/hud';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, stepSetting } from '../src/ui/settings';
 
@@ -204,4 +205,13 @@ describe('controls', () => {
   it('gives each thing to do in the item menus its own key and its own button', () => {
     expect(distinct(['use', 'favourite', 'drop', 'cast', 'setHotkey', 'back'])).toEqual([true, true]);
   });
+});
+
+describe('hotbar display order',()=>{
+ it('shows Left, Up, Right before the face and shoulder controls, with matching keyboard keys',()=>{
+  const actions=['quickslot','ability1','ability2','ability3','ability4','ability5','ability6'] as const;
+  expect(HOTBAR_ORDER.map(i=>BINDINGS[actions[i]].pad[0])).toEqual(['DLeft','DUp','DRight','X','B','LB','RB']);
+  expect(HOTBAR_ORDER.map(i=>BINDINGS[actions[i]].keys[0])).toEqual(['1','2','3','4','5','6','7']);
+  expect(BINDINGS.close.pad).toEqual(['B']);
+ });
 });

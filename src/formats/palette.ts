@@ -40,3 +40,20 @@ export function indicesToRgba(indices: Uint8Array, palette: Palette, transparent
   }
   return out;
 }
+
+/** Ghost texels 1–13 darken the scene through their silhouette; 14/15 are the eyes.
+ * RGBA blending approximates the original indexed light-table composition.
+ */
+export function spectralRgba(indices: Uint8Array, palette: Palette): Uint8Array {
+  const out = indicesToRgba(indices, palette, true);
+  for (let i = 0; i < indices.length; i++) {
+    const index = indices[i], offset = i * 4;
+    if (index >= 1 && index <= 13) {
+      out[offset] = out[offset + 1] = out[offset + 2] = 0;
+      out[offset + 3] = Math.round((index - 1) * 255 / 12);
+    } else if (index === 14 || index === 15) {
+      out.set(palette.subarray((index + 144) * 4, (index + 145) * 4), offset);
+    }
+  }
+  return out;
+}

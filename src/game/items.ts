@@ -84,7 +84,7 @@ export const ATTRIBUTE_MAX = 100;
 /** The attributes, Strength to Luck. */
 export const ATTRIBUTES = 8;
 
-export type ItemKind = 'weapon' | 'armour' | 'shield' | 'trinket' | 'potion';
+export type ItemKind = 'weapon' | 'armour' | 'shield' | 'trinket' | 'potion' | 'ammunition';
 
 /** Trinkets that cast a spell (Arena's marks, crystals, bracers and rings), raise an attribute, or protect. */
 export type TrinketKind = 'spell' | 'attribute' | 'protective';
@@ -102,6 +102,8 @@ export interface Item {
   type: number;
   /** 0 Iron to 7 Ebony; chain, leather and plain plate have none. */
   material?: number;
+  /** Ammunition is one stack; other equipment remains individual items. */
+  quantity?: number;
   /** Armour: 0 plate, 1 chain, 2 leather. */
   armour?: number;
   damage?: [number, number];
@@ -147,7 +149,9 @@ export function shownName(item: Pick<Item, 'name' | 'unidentified' | 'plainName'
 
 /** Whether the item is worn rather than used up: gear, and trinkets that raise or protect. */
 export function wearable(item: Pick<Item, 'kind' | 'trinket'>): boolean {
-  return item.kind === 'weapon' || item.kind === 'armour' || item.kind === 'shield' || (item.kind === 'trinket' && item.trinket !== 'spell');
+  return (
+    item.kind === 'weapon' || item.kind === 'armour' || item.kind === 'shield' || (item.kind === 'trinket' && item.trinket !== 'spell')
+  );
 }
 
 /**
@@ -223,7 +227,23 @@ export function armourRating(item: Pick<Item, 'protection'>): number {
 
 /** The weapon as the fighting rules and the first-person view need it. */
 export function weaponOf(item: Item): Weapon {
-  return { name: item.name, damage: item.damage ?? [1, 2], cif: weaponCif(item.type) ?? 'SWORD.CIF', bow: BOWS.includes(item.type) };
+  return { name: item.name, damage: item.damage ?? [1, 2], cif: weaponCif(item.type) ?? 'SWORD.CIF', bow: BOWS.includes(item.type),
+    type: item.type,
+    material: item.material,
+    twoHanded: item.twoHanded,
+  };
+}
+
+export function makeSteelArrows(quantity = 1): NewItem {
+  return {
+    kind: 'ammunition',
+    name: 'Steel Arrow',
+    type: 0,
+    material: STEEL,
+    quantity: Math.max(1, Math.trunc(quantity)),
+    weight: 0.03,
+    value: 1,
+  };
 }
 
 /** The weapons that can be used, by place in the game's list: every one Arena has pictures to fight with, the bows too. */
@@ -325,6 +345,13 @@ export class Inventory {
   ) {}
 
   add(item: NewItem): Item {
+    if (item.kind === 'ammunition') {
+      const stack = this.items.find((i) => i.kind === 'ammunition' && i.material === item.material && i.type === item.type);
+      if (stack) {
+        stack.quantity = (stack.quantity ?? 1) + (item.quantity ?? 1);
+        return stack;
+      }
+    }
     const added = { ...item, id: this.nextId++ };
     if (added.kind === 'potion') {
       if (!added.unidentified) this.knownPotions.add(added.type);
@@ -418,7 +445,18 @@ export class Inventory {
 
   /** Kilograms carried. */
   weight(): number {
-    return round1(this.items.reduce((sum, i) => sum + i.weight, 0));
+    return round1(this.items.reduce((sum, i) => sum + i.weight * (i.quantity ?? 1), 0));
+  }
+
+  steelArrowCount(): number {
+    return this.items.filter((i) => i.kind === 'ammunition' && i.material === STEEL).reduce((s, i) => s + (i.quantity ?? 1), 0);
+  }
+  takeSteelArrow(): boolean {
+    const stack = this.items.find((i) => i.kind === 'ammunition' && i.material === STEEL);
+    if (!stack) return false;
+    stack.quantity = (stack.quantity ?? 1) - 1;
+    if (!stack.quantity) this.remove(stack);
+    return true;
   }
 
   /** Why the class may not use the item, or undefined when it may. */

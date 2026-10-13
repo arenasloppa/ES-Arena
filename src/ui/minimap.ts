@@ -42,7 +42,7 @@ export class Minimap {
 
   draw(): void {
     const d = this.dungeon;
-    const key = `${d.explored.version}:${d.openDoors.size}`;
+    const key = `${d.explored.version}:${d.terrainVersion}:${[...d.openDoors].join(',')}`;
     if (key !== this.chartKey) {
       this.chartKey = key;
       this.paintChart();

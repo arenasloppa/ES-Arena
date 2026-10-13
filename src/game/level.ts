@@ -92,6 +92,9 @@ export interface LevelFlat {
   base?: number;
   /** From the INF's F: and S: modifiers: it stops you, it is drawn larger, it hangs from the ceiling, the light it gives. */
   solid?: boolean;
+  /** Visual sprite dimensions, filled when its art loads; shared with prop contacts. */
+  collisionWidth?: number;
+  collisionHeight?: number;
   scale?: number;
   ceiling?: boolean;
   seeThrough?: boolean;
@@ -138,6 +141,8 @@ export interface Level {
   chasmTextures: Partial<Record<ChasmKind, number>>;
   /** Index into floorTextures used for the whole ceiling. */
   ceilingTex: number;
+  /** Original hardcoded voxel texture 45 for solid wall tops/undersides, resolved through this INF. */
+  wallCapTexture?: { file: string; frame: number };
   /** Decoration that can't be picked up. */
   flats: LevelFlat[];
   items: LevelItem[];
@@ -326,6 +331,8 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile, platf
   const start = startPoint ? { x: width - startPoint.x, y: startPoint.y } : findOpenCell(cells, width, depth);
 
   const ceilingTex = clampFloor(inf.ceilingTexture ?? 0);
+  const voxelTextures = [...floorTextures, ...wallTextures];
+  const wallCapTexture = voxelTextures[45] ?? voxelTextures[0];
 
   return {
     name: ml.name,
@@ -338,6 +345,7 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile, platf
     floorTextures,
     chasmTextures,
     ceilingTex,
+    wallCapTexture,
     flats,
     items,
     creatures,
@@ -354,6 +362,18 @@ export function buildLevel(mif: MifFile, levelIndex: number, inf: InfFile, platf
 export const STEP_HEIGHT = 32 * ARENA_HEIGHT;
 /** How tall the player stands, to the top of the head: 61 Arena units (the eye is at 60). */
 export const PLAYER_HEIGHT = 61 * ARENA_HEIGHT;
+/** The swimming eye is at 12 units, with one more unit to the top of the head. */
+export const SWIMMING_HEIGHT = 13 * ARENA_HEIGHT;
+
+/** A wall over liquid is the roof of a submerged passage, not a solid column below the floor. */
+export function isWaterTunnel(cell: Cell | undefined): boolean {
+  return cell?.kind === 'wall' && (cell.chasm === 'wet' || cell.chasm === 'lava');
+}
+
+/** The local ceiling; liquid passages beneath walls are covered at the normal floor line. */
+export function ceilingHeight(cell: Cell | undefined, level: Pick<Level, 'height'>): number {
+  return isWaterTunnel(cell) ? 0 : level.height;
+}
 
 /**
  * True when nothing standing on the floor can be in this cell: walls,

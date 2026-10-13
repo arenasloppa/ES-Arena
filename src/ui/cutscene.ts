@@ -76,6 +76,9 @@ export class Cutscenes {
     if (!files || this.playing) return;
     this.playing = true;
     this.next = this.skip = false;
+    // A reused canvas must not flash the last menu/title/vision while the next shot loads.
+    this.ctx.fillStyle = '#000';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this.root.hidden = false;
     this.subtitle.textContent = '';
     try {

@@ -178,3 +178,82 @@ describe('magic in the dungeon', () => {
     expect(d.spellbook.map((s) => s.name)).toEqual(known);
   });
 });
+
+describe('direct ability slots and the controller guard',()=>{
+  const fresh=()=>new Dungeon(room(),TABLES,always(0),caster(),SPELLS);
+  it('assigns only known spells, independently from equipment favourites',()=>{
+    const d=fresh(),key=spellKey(spell('Dart'));
+    expect(d.assignAbility(3,key)).toBe(true);
+    expect(d.assignAbility(2,spellKey(spell('Blast')))).toBe(false);
+    expect(d.assignAbility(-1,key)).toBe(false);
+    expect(d.assignAbility(6,key)).toBe(false);
+    expect(d.abilitySpell(3)?.name).toBe('Dart');
+    expect(d.inventory.hotkeys[0]).toBeUndefined();
+  });
+  it('casts immediately on a slot press and respects the shared spell recovery',()=>{
+    const d=fresh();d.assignAbility(0,spellKey(spell('Dart')));
+    expect(d.castAbility(0)).toBe(true);
+    expect(d.bolts).toHaveLength(1);expect(d.stats.magicka).toBe(90);
+    expect(d.spellCooldown).toBeCloseTo(.7);
+    expect(d.castAbility(0)).toBe(false);expect(d.stats.magicka).toBe(90);
+    tick(d,.8);expect(d.castAbility(0)).toBe(true);
+  });
+  it('keeps LT blocking and bashing available when a spell is readied',()=>{
+    const d=fresh();d.update(.05,{...IDLE_INPUT,block:true,guardOnly:true});
+    expect(d.blocking).toBe(true);expect(d.bolts).toHaveLength(0);expect(d.stats.magicka).toBe(100);
+    d.update(.05,{...IDLE_INPUT,block:true,guardOnly:true,attack:{held:true,pressed:true,released:false}});
+    expect(d.swing?.bash).toBe(true);
+  });
+  it('casts a favourite from D-pad Up without a separate ready step',()=>{
+    const d=fresh();d.setHotkey(0,spellKey(spell('Dart')));d.readied=undefined;
+    d.useQuickslot();expect(d.bolts).toHaveLength(1);expect(d.stats.magicka).toBe(90);expect(d.readied).toBeUndefined();
+  });
+  it('rejects direct casts while silenced, without mana loss',()=>{
+    const d=fresh();d.practiceMode=true;d.applyPracticeEffect('silence');
+    expect(d.castAbility(0)).toBe(false);expect(d.stats.magicka).toBe(100);
+    d.clearPracticeEffects();d.stats.magicka=0;
+    expect(d.castAbility(0)).toBe(false);expect(d.events.some(e=>e.type==='noMagicka')).toBe(true);
+  });
+});
+
+describe('items and spells on any hotbar slot',()=>{
+  const fresh=()=>new Dungeon(room(),TABLES,always(0),caster(),SPELLS);
+  it('rejects weapons, armour, shields, ammunition and passive jewellery without changing normal equipment use',()=>{
+    const d=fresh(),weapon=d.inventory.add({kind:'weapon',name:'Test blade',type:0,material:1,damage:[1,4],spell:spell('Dart').index,weight:1,value:1});
+    const gear=[weapon,d.inventory.add({kind:'armour',name:'Robe',type:0,weight:1,value:1}),d.inventory.add({kind:'shield',name:'Shield',type:0,weight:1,value:1}),d.inventory.add({kind:'ammunition',name:'Arrows',type:0,weight:1,value:1}),d.inventory.add({kind:'trinket',trinket:'protective',name:'Ring',type:0,weight:1,value:1})];
+    for(const item of gear){const key=`item:${item.id}`;expect(d.hotbarAssignable(key)).toBe(false);for(let i=0;i<7;i++)expect(d.assignHotbar(i,key)).toBe(false);}
+    const key=`item:${weapon.id}`;d.setHotkey(0,key);expect(d.inventory.hotkeys[0]).toBeUndefined();
+    d.abilitySlots[1]=key;expect(d.castAbility(1)).toBe(false);expect(d.hotbarEntry(2)).toBeUndefined();expect(d.abilitySlots[1]).toBeUndefined();
+    d.inventory.hotkeys[0]=key;d.useQuickslot();expect(d.inventory.weapon).not.toBe(weapon);expect(d.hotbarEntry(0)).toBeUndefined();
+    d.use(key);expect(d.inventory.weapon).toBe(weapon);
+  });
+  it('assigns a usable magic item without requiring favourites and spends its charge',()=>{
+    const d=fresh(),item=d.inventory.add({kind:'trinket',trinket:'spell',name:'Healing mark',type:0,spell:spell('Mend').index,charges:2,weight:0,value:1});
+    const key=`item:${item.id}`;expect(d.assignHotbar(2,key)).toBe(true);expect(d.inventory.isFavourite(key)).toBe(false);
+    d.stats.health=Math.max(1,d.stats.maxHealth-12);const before=d.stats.health;
+    expect(d.castAbility(1)).toBe(true);expect(item.charges).toBe(1);expect(d.stats.health).toBeGreaterThan(before);
+  });
+  it('drinks an owned potion from an ability slot and removes its exhausted entry',()=>{
+    const d=fresh(),potion=d.inventory.add({kind:'potion',name:'Mend',type:0,spell:spell('Mend').index,weight:0,value:1});
+    expect(d.assignHotbar(4,`potion:${potion.type}`)).toBe(true);
+    d.stats.health=Math.max(1,d.stats.maxHealth-12);const before=d.stats.health;
+    expect(d.castAbility(3)).toBe(true);expect(d.stats.health).toBeGreaterThan(before);
+    expect(d.hotbarEntry(4)).toBeUndefined();expect(d.castAbility(3)).toBe(false);
+  });
+  it('accepts a known spell on the first slot, rejects missing entries and clears slots',()=>{
+    const d=fresh(),key=spellKey(spell('Dart'));
+    expect(d.assignHotbar(0,key)).toBe(true);expect(d.hotbarEntry(0)?.spell?.name).toBe('Dart');
+    expect(d.assignHotbar(7,key)).toBe(false);expect(d.assignHotbar(1,'item:999')).toBe(false);
+    expect(d.assignHotbar(1,spellKey(spell('Blast')))).toBe(false);
+    d.clearHotbar(0);expect(d.hotbarEntry(0)).toBeUndefined();
+  });
+});
+
+describe('extra hotbar slots',()=>{
+ it('assigns usable spells to slots six and seven and casts them through the same rules',()=>{
+  const d=new Dungeon(room(),TABLES,always(0),caster(),SPELLS),key=spellKey(spell('Dart'));
+  expect(d.assignHotbar(5,key)).toBe(true);expect(d.assignHotbar(6,key)).toBe(true);
+  expect(d.castAbility(4)).toBe(true);tick(d,.8);expect(d.castAbility(5)).toBe(true);
+  expect(d.stats.magicka).toBe(80);
+ });
+});

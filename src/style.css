@@ -255,13 +255,21 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 .bar::before { left: -1px; }
 .bar::after { left: calc(100% + 1px); }
 .bar-fill { position: absolute; inset: 1px 2px; transform: scaleX(var(--fill, 1)); transition: transform 0.18s ease-out; }
-#vitals { position: absolute; left: 0; right: 0; bottom: calc(30px + env(safe-area-inset-bottom, 0px)); height: 11px; }
-#health { left: 50%; width: min(320px, 42vw); margin-left: calc(min(320px, 42vw) / -2); }
-#health .bar-fill { background: linear-gradient(#d4584b, #8e2519); transform-origin: center; }
-#stamina { right: max(32px, 5vw); width: min(260px, 28vw); }
-#stamina .bar-fill { background: linear-gradient(#62b066, #2c6a30); transform-origin: right; }
-#magicka { left: max(32px, 5vw); width: min(260px, 28vw); }
-#magicka .bar-fill { background: linear-gradient(#5d8ee0, #23428a); transform-origin: left; }
+#vitals { position:absolute; left:calc(20px + env(safe-area-inset-left,0px)); top:calc(20px + env(safe-area-inset-top,0px)); width:min(330px,42vw); display:flex; align-items:flex-end; gap:10px; }
+#player-portrait-wrap { position:relative; flex:none; width:80px; height:80px; border:2px solid #ded7c2; border-radius:0; background:radial-gradient(#333c3d,#0b0c0e); box-shadow:0 0 0 2px #101010,0 2px 10px #000c; }
+#player-portrait { width:100%; height:100%; border-radius:0; image-rendering:pixelated; }
+#player-level { position:absolute; bottom:-6px; right:-4px; width:27px; height:27px; display:grid; place-items:center; border:2px solid #cabe98; border-radius:50%; background:#171b20; color:#f7e2a0; font:600 16px/1 var(--font-ui); text-shadow:0 1px 2px #000; }
+#player-bars { flex:1; min-width:0; display:grid; gap:4px; }
+#player-name { font:600 18px/1.2 var(--font-ui); letter-spacing:.025em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
+#vitals .bar { position:relative; height:24px; width:100%; margin:0; left:auto; right:auto; border-color:#b9b6a380; background:#0c1013dc; box-shadow:0 1px 4px #0009; }
+#vitals .bar::before,#vitals .bar::after { display:none; }
+#vitals .bar.faded { opacity:1; }
+#vitals .bar-fill { inset:1px; transform-origin:left; }
+#vitals .bar-value { position:absolute; inset:0; display:grid; place-items:center; font:500 12px/1 var(--font-ui); color:#fff; text-shadow:0 1px 2px #000,1px 0 2px #000; }
+#health .bar-fill { background:linear-gradient(#c55247,#8e2519); }
+#stamina .bar-fill { background:linear-gradient(#62b066,#2c6a30); }
+#magicka .bar-fill { background:linear-gradient(#5d8ee0,#23428a); }
+#magicka.unavailable .bar-value { color:#8e9297; }
 #magicka.short { animation: short 0.5s ease-out 2; }
 @keyframes short { 50% { border-color: #e05a4b; box-shadow: 0 0 12px rgba(224, 90, 75, 0.9); } }
 
@@ -281,9 +289,23 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #hand.cast { animation: cast 0.6s ease-out; }
 @keyframes cast { 0% { opacity: 0.75; } 100% { opacity: 0.16; } }
 #effects {
-  position: absolute; left: max(32px, 5vw); bottom: calc(72px + env(safe-area-inset-bottom, 0px)); margin: 0; padding: 0; list-style: none;
-  font: 500 13px/1.5 'Barlow Condensed', sans-serif; letter-spacing: 0.05em; color: rgba(243, 240, 232, 0.8); text-shadow: 0 1px 3px #000;
+  position:absolute; top:calc(140px + env(safe-area-inset-top,0px)); left:calc(110px + env(safe-area-inset-left,0px));
+  right:calc(20px + env(safe-area-inset-right,0px));
+  display:grid; gap:6px;
+  font: 600 12px/1.2 'Barlow Condensed', sans-serif; color: #f3f0e8; text-shadow: 0 1px 3px #000;
 }
+#effects[hidden], .effect-row[hidden] { display: none; }
+.effect-row { display: flex; flex-wrap: wrap; justify-content:flex-start; gap:4px; margin:0; padding:0; list-style:none; }
+.status-effect { display: grid; justify-items: center; gap:2px; min-width:28px; }
+.status-effect img { display: block; width:28px; height:28px; object-fit:cover; image-rendering:pixelated; border: 1px solid rgba(243, 240, 232, 0.8); box-shadow: 0 1px 5px #000; }
+.status-effect[data-kind="debuff"] { --effect-glow: #a8dfff; }
+.status-effect[data-dispel-type="magic"] { --effect-glow: #a8dfff; }
+.status-effect[data-dispel-type="poison"] { --effect-glow: #70d956; }
+.status-effect[data-dispel-type="disease"] { --effect-glow: #c28b40; }
+.status-effect[data-dispel-type="curse"] { --effect-glow: #bb79ee; }
+.status-effect[data-kind="debuff"] img { border-color: var(--effect-glow); box-shadow: 0 0 6px var(--effect-glow), 0 1px 5px #000; }
+.effect-timer { white-space: nowrap; }
+
 
 #enemy {
   position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
@@ -296,7 +318,7 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 
 /* The minimap: one plain circle, clear of the screen's edges. */
 #minimap-frame {
-  position: absolute; top: calc(44px + env(safe-area-inset-top, 0px)); right: max(44px, 4vw);
+  position: absolute; top: calc(20px + env(safe-area-inset-top, 0px)); right: calc(20px + env(safe-area-inset-right,0px));
   width: clamp(132px, 13.5vw, 188px); aspect-ratio: 1; border-radius: 50%;
   border: 1px solid rgba(243, 240, 232, 0.7);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 26px rgba(0, 0, 0, 0.75);
@@ -304,7 +326,7 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #minimap { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; }
 
 #corner {
-  position: absolute; top: calc(24px + env(safe-area-inset-top, 0px)); left: 24px;
+  position: absolute; top: calc(152px + env(safe-area-inset-top, 0px)); left: 24px;
   display: grid; gap: 16px; justify-items: start; max-width: min(460px, 40vw);
 }
 #notes { display: grid; gap: 4px; }
@@ -360,11 +382,12 @@ body[data-pad='playstation'] .face-y { color: #4fc3a7; }
 #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; }
 @keyframes note-in { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
 #compass {
-  position: absolute; top: calc(18px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
-  width: min(500px, 76vw); height: 30px;
+  position:absolute; top:calc(20px + env(safe-area-inset-top,0px)); left:50%; transform:translateX(-50%);
+  width:min(500px,calc(100vw - 40px)); height:30px;
 }
 /* Diamond caps at both ends of the bar. */
 #compass::before, #compass::after {
+  display:none;
   content: ''; position: absolute; top: 50%; width: 9px; height: 9px;
   border: 1px solid var(--line-strong); background: rgba(0, 0, 0, 0.6);
   transform: translate(-50%, -50%) rotate(45deg);
@@ -580,7 +603,7 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 .gm-stat.over b { color: var(--error); }
 .gm-who { font: 600 21px/1 var(--font-title); letter-spacing: 0.14em; }
 .gm-xp { position: relative; width: min(220px, 22vw); }
-.gm-xp .bar-fill { background: linear-gradient(#ece6d6, #a39d8e); transform-origin: left; }
+.gm-xp .bar-fill { background: url('/hud-textures/xp-fill.png') center / 100% 100%; image-rendering:pixelated; transform-origin: left; }
 .gm-hints .hint { padding: 2px 4px; cursor: pointer; font: inherit !important; letter-spacing: inherit; text-transform: inherit; }
 .gm-hints .hint:hover { text-shadow: 0 0 12px var(--glow); }
 .gm-message {
@@ -717,7 +740,7 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
   .support-link span { display: none; }
   #minimap-frame { width: 112px; top: calc(52px + env(safe-area-inset-top, 0px)); right: 16px; }
   #banner { top: calc(12vh + env(safe-area-inset-top, 0px)); }
-  #stamina, #magicka { width: 22vw; }
+  #vitals { left:20px; }
   #compass { top: calc(10px + env(safe-area-inset-top, 0px)); }
   .bindings { font-size: 15px; }
   .bindings th { font-size: 12px; letter-spacing: 0.1em; }
@@ -757,3 +780,163 @@ body[data-input='gamepad'] .create-hint { visibility: hidden; }
 }
 .cutscene-hints { top: 0; bottom: auto; left: auto; right: 0; padding: 14px 20px; background: none; opacity: 0.6; font-size: 14px; }
 .cutscene-hints::before { display: none; }
+
+/* Persistent quest objectives sit below the minimap. */
+#quest-tracker { position: absolute; top: calc(40px + clamp(132px, 13.5vw, 188px) + env(safe-area-inset-top, 0px)); right:calc(20px + env(safe-area-inset-right,0px)); width: min(260px, 27vw); color: #f3f0e8; text-shadow: 0 1px 4px #000; }
+#quest-tracker .objective { margin: 0; display: flex; align-items: baseline; gap: 9px; font-size: 16px; line-height: 1.3; }
+#quest-tracker .box { flex-shrink: 0; width: 7px; height: 7px; border: 1px solid #c8ac73; }
+
+/* Loot uses the same subdued panels and input glyphs as the main inventory. */
+#loot-menu { position: fixed; z-index: 32; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(480px,90vw); padding: 24px; background: rgba(12,15,19,.97); border: 1px solid rgba(240,237,226,.7); box-shadow: 0 8px 60px #000b; color: #efede4; }
+#loot-menu[hidden] { display: none; }
+#loot-menu h2 { margin: 0 0 18px; font-size: 24px; }
+.loot-drops { list-style: none; padding: 0; margin: 0 0 20px; max-height: 45vh; overflow: auto; }
+.loot-drops button { width: 100%; text-align: left; padding: 10px 12px; border: 1px solid transparent; background: transparent; color: inherit; cursor: pointer; }
+.loot-drops button.selected, .loot-drops button:hover, .loot-drops button:focus-visible { background: #ffffff12; border-color: #e6e3d9a0; }
+#loot-menu footer { display: flex; gap: 10px; flex-wrap: wrap; }
+#loot-menu footer button { color: inherit; background: #ffffff08; border: 1px solid #e6e3d94a; padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+#loot-menu kbd { font: inherit; border: 1px solid #e6e3d980; padding: 1px 4px; }
+
+#effect-test-controls { position:absolute; bottom:112px; left:50%; transform:translateX(-50%); width:min(720px,90vw); pointer-events:auto; padding:12px; background:#0d1115ed; border:1px solid #eee9dc80; color:#eee9dc; }
+#effect-test-controls[hidden] { display:none; }
+.test-effect-actions,.test-effect-cycles { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+.test-effect-cycles { margin-top:8px; }
+#effect-test-controls button { padding:9px 14px; border:1px solid #eee9dc70; background:#ffffff09; color:inherit; cursor:pointer; }
+#effect-test-controls button:hover,#effect-test-controls button:focus-visible { background:#ffffff20; border-color:#eee9dc; }
+#effect-test-controls button[aria-pressed=true] { border-color:#abd7a6; }
+#effect-test-controls small { display:block; font-size:12px; margin-top:5px; opacity:.8; }
+/* Leave room for the player frame when the center HUD gets close to it. */
+@media (max-width:1100px) {
+  #enemy { top:calc(56px + env(safe-area-inset-top,0px)); left:calc(50% + (min(330px,42vw) - clamp(132px,13.5vw,188px))/2); width:min(300px,calc(100vw - min(330px,42vw) - clamp(132px,13.5vw,188px) - 80px)); }
+  #corner { top:auto; bottom:14px; max-height:64px; overflow:hidden; }
+  #notes { display:flex; flex-direction:column; justify-content:flex-end; }
+  .note { font-size:18px; }
+}
+
+/* The event log stays beneath the scene and clear of the testing controls. */
+#corner { top:auto; bottom:calc(20px + env(safe-area-inset-bottom,0px)); left:calc(20px + env(safe-area-inset-left,0px)); max-width:min(480px,44vw); max-height:84px; overflow:hidden; }
+#notes { display:flex; flex-direction:column; justify-content:flex-end; max-height:84px; overflow:hidden; gap:4px; }
+.note { flex-shrink:0; font-size:17px; line-height:1.3; letter-spacing:.015em; }
+/* Both corner widgets share the same screen inset at smaller window sizes too. */
+@media(max-width:740px) { #vitals{left:20px;} #minimap-frame{top:20px;right:20px;} }
+
+.effect-icon { position:relative; display:block; width:28px; height:28px; }
+.status-effect[data-kind] .effect-expired { position:absolute; inset:1px; width:26px; height:26px; border:none; box-shadow:none; filter:grayscale(1) brightness(.8); mask-image:conic-gradient(from 0deg,#000 0deg var(--elapsed-angle,0deg),transparent var(--elapsed-angle,0deg) 360deg); -webkit-mask-image:conic-gradient(from 0deg,#000 0deg var(--elapsed-angle,0deg),transparent var(--elapsed-angle,0deg) 360deg); pointer-events:none; }
+.effect-clock { position:absolute; top:1px; left:calc(50% - .5px); width:1px; height:13px; transform:rotate(var(--elapsed-angle,0deg)); transform-origin:50% 100%; background:linear-gradient(#fff9,#fff); box-shadow:0 0 2px #000; transition:transform .15s linear; pointer-events:none; }
+.effect-clock::after { content:''; position:absolute; width:3px; height:3px; bottom:-1px; left:-1px; border-radius:50%; background:#fff; }
+.effect-icon[data-timed=false] .effect-expired,.effect-icon[data-timed=false] .effect-clock { display:none; }
+.effect-icon.restarted .effect-clock { transition:none; }
+
+.status-effect[data-kind=buff] .effect-icon,.status-effect[data-kind=buff] img { border-radius:50%; }
+/* Keep the compass centered without overlapping the corner panels in narrow windows. */
+@media(max-width:1100px) {
+  #compass { top:calc(1px + env(safe-area-inset-top,0px)); height:18px; }
+  #compass .mark.letter { font-size:15px; }
+}
+
+#ability-bar { position:absolute; left:50%; bottom:24px; transform:translateX(-50%); display:flex; align-items:flex-start; gap:8px; pointer-events:auto; }
+.ability-slot { position:relative; width:72px; padding:0; border:0; background:transparent; color:#eee9dc; cursor:pointer; text-shadow:0 1px 3px #000; }
+.ability-art { position:relative; width:48px; height:48px; display:grid; place-items:center; margin:auto; border:2px solid #c2b695; background:linear-gradient(#161a20,#080b0e); box-shadow:inset 0 0 5px #000,0 1px 6px #000; overflow:hidden; }
+.ability-art img { width:100%; height:100%; object-fit:cover; image-rendering:pixelated; }
+.ability-art img[hidden],.ability-empty[hidden] { display:none; }
+.ability-empty { font:24px/1 var(--font-ui); color:#a49c88; }
+.ability-slot.unavailable .ability-art img { filter:grayscale(.8) brightness(.55); }
+.ability-cost { display:block; font:11px/1.2 var(--font-ui); min-height:14px; margin-top:3px; }
+.ability-binding { position:absolute; top:36px; left:50%; transform:translateX(-50%); }
+.ability-binding .glyph { width:22px; height:22px; min-width:22px; background:#090c10; border-color:#ddd5bf; font-size:12px; }
+.ability-name { display:block; margin-top:3px; font:13px/1.1 var(--font-ui); max-width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ability-slot.quickslot { margin-right:14px; }
+.quickslot .ability-art { border-radius:50%; }
+.ability-cooldown { position:absolute; inset:0; background:conic-gradient(#000b 0deg var(--cooldown-angle,0deg),transparent var(--cooldown-angle,0deg) 360deg); pointer-events:none; }
+.ability-slot:hover .ability-art,.ability-slot:focus-visible .ability-art { border-color:#fff3c3; }
+#spell-readied { bottom:28px; left:20px; }
+.effect-timer { font-size:11px; }
+
+body[data-input=gamepad] #spell-readied { display:none; }
+#vitals .bar { border:1px solid #a9a399; border-radius:2px; box-shadow:0 0 0 1px #070a0c,0 1px 4px #0009,inset 0 0 4px #000; }
+#vitals .bar-fill { background-size:100% 100%; background-position:center; image-rendering:pixelated; box-shadow:inset 0 1px 1px #ffffff40,inset 0 -1px 2px #0008; }
+#health .bar-fill { background-image:url('/hud-textures/health-fill.png'); }
+#magicka .bar-fill { background-image:url('/hud-textures/magicka-fill.png'); }
+#stamina .bar-fill { background-image:url('/hud-textures/stamina-fill.png'); }
+
+/* Compact player frame and a single effect flow bounded by the resource bars. */
+#vitals { display:grid; grid-template-columns:80px minmax(0,1fr); column-gap:10px; row-gap:6px; }
+#player-name { grid-column:1 / -1; margin:0; }
+#player-bars { grid-column:2; }
+#effects { display:flex; flex-wrap:wrap; align-items:flex-start; gap:6px 4px; right:auto; width:240px; }
+#effects .effect-row { display:contents; }
+#effects .effect-row[hidden] { display:none; }
+.effect-timer { font-size:10px; }
+#ability-bar { gap:3px; }
+.ability-slot { width:52px; }
+.ability-name { max-width:52px; font-size:11px; }
+.ability-slot.quickslot { margin-right:7px; }
+#corner { max-width:min(360px,calc(50vw - 170px)); max-height:80px; }
+#notes { gap:2px; max-height:80px; }
+.note { font-size:13px; line-height:1.15; letter-spacing:0; }
+#spell-readied { display:none; }
+
+/* Five tightly spaced controls at the bottom edge, matching the reference's icon row. */
+#ability-bar { bottom:18px; gap:4px; }
+.ability-slot { width:42px; }
+.ability-art { width:42px; height:42px; border-radius:0; }
+.ability-slot.quickslot { margin-right:0; }
+.quickslot .ability-art { border-radius:0; }
+.ability-name,.ability-cost { display:none; }
+.ability-binding { top:32px; }
+
+.ability-art img.item-artwork { object-fit:contain; padding:2px; image-rendering:pixelated; }
+.hotbar-picker { position:fixed; inset:0; z-index:10; display:grid; place-items:center; background:#000b; }
+.hotbar-picker-card { width:min(680px,94vw); padding:24px; border:1px solid #d4c9ae; background:#10151af7; box-shadow:0 10px 40px #000; text-align:center; }
+.hotbar-picker-card h2 { margin:0 0 8px; font-size:24px; }
+.hotbar-picker-card p { margin:0 0 20px; color:#c2bcaf; }
+.hotbar-picker-slots { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin-bottom:20px; }
+#game-menu .hotbar-picker-slot { display:grid; justify-items:center; gap:8px; border:1px solid #ddd4bb66; padding:12px 6px; background:#ffffff08; cursor:pointer; }
+#game-menu .hotbar-picker-slot:hover,#game-menu .hotbar-picker-slot.picked { border-color:#f0dfb4; background:#ffffff14; }
+.hotbar-picker-slot small { font-size:12px; line-height:1.2; }
+.hotbar-picker-slot .glyph { width:32px; height:32px; }
+#game-menu .hotbar-picker-card>button { padding:8px 12px; border:1px solid #ddd4bb66; margin:0 5px; cursor:pointer; }
+body[data-pad=xbox] { --controller-atlas:url('/controller-buttons/xbox.png'); }
+body[data-pad=playstation] { --controller-atlas:url('/controller-buttons/playstation.png'); }
+body[data-pad=nintendo] { --controller-atlas:url('/controller-buttons/nintendo.png'); }
+.glyph.pad.controller-art { background-image:var(--controller-atlas); background-size:400% 400%; background-repeat:no-repeat; background-color:transparent; border:0; border-radius:0; color:transparent; text-shadow:none; padding:0; box-shadow:none; }
+.glyph.pad.controller-art svg { visibility:hidden; }
+
+.glyph.pad.controller-art { width:28px; height:28px; min-width:28px; }
+.ability-binding .glyph.pad.controller-art { width:26px; height:26px; min-width:26px; }
+.ability-binding { top:30px; }
+.gm-hotkey .glyph.pad.controller-art { width:20px; height:20px; }
+
+.glyph.pad.large-button-label { position:relative; }
+.controller-caption { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:grid; place-items:center; width:72%; height:38%; border-radius:3px; background:#141719; color:#f4f1e8; font:600 10px/1 var(--font-ui); text-shadow:0 1px 1px #000; }
+
+#quest-tracker { right:auto; display:grid; gap:8px; padding:0; max-height:calc(100vh - 360px); overflow:auto; scrollbar-width:thin; }
+#quest-tracker .objective { align-items:flex-start; gap:7px; font-size:14px; line-height:1.35; overflow-wrap:anywhere; }
+#quest-tracker .box { margin-top:5px; }
+#enemy .bar-fill { background-image:url('/hud-textures/health-fill.png'); background-size:100% 100%; image-rendering:pixelated; transform-origin:left; }
+.bar::before,.bar::after { display:none; }
+#game-menu .gm-hotkey { display:none; }
+body[data-input=keyboard] #game-menu [data-glyph] { display:none; }
+.hotbar-picker-slots { grid-template-columns:repeat(7,minmax(0,1fr)); }
+#corner { max-width:min(360px,calc(50vw - 200px)); }
+
+/* A smaller player frame, with the bars tucked closer to the portrait. */
+#vitals { width:min(292px,38vw); grid-template-columns:68px minmax(0,1fr); column-gap:6px; }
+#player-portrait-wrap { width:68px; height:68px; }
+#player-name { font-size:16px; }
+#player-level { width:23px; height:23px; font-size:14px; }
+#vitals .bar { height:20px; }
+#vitals .bar-value { font-size:11px; }
+@media(max-width:1100px) { #enemy { left:calc(50% + (min(292px,38vw) - clamp(132px,13.5vw,188px))/2); width:min(300px,calc(100vw - min(292px,38vw) - clamp(132px,13.5vw,188px) - 80px)); } }
+
+#quest-tracker,#quest-tracker .objective { text-align:center; }
+#quest-tracker .objective { display:block; }
+#quest-tracker .box { display:none; }
+
+#xp-bar { position:absolute; left:0; right:0; top:-23px; height:14px; border:1px solid #c9c0ac99; background:#080b0de6; box-shadow:0 1px 4px #000; overflow:hidden; }
+.xp-fill { position:absolute; inset:1px; transform:scaleX(var(--xp-fill,0)); transform-origin:left; background:url('/hud-textures/xp-fill.png') center / 100% 100%; image-rendering:pixelated; }
+#xp-value { position:absolute; inset:0; display:grid; place-items:center; color:#f3eee1; font:600 10px/1 var(--font-ui); text-shadow:0 1px 2px #000; }
+#enemy-name { font:600 16px/1.2 var(--font-ui); letter-spacing:.025em; margin-bottom:2px; }
+#quest-tracker .quest-title { margin:0 0 4px; text-align:left; font:600 14px/1.2 var(--font-ui); color:#ead79d; }
+#quest-tracker .objective { display:flex; align-items:flex-start; text-align:left; padding-left:10px; gap:7px; }
+#quest-tracker .box { display:block; margin-top:5px; }

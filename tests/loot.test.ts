@@ -3,6 +3,7 @@ import type { ExeData } from '../src/formats/exe';
 import { ATTRIBUTE, JUMPING, RESTORE_POWER, type LootChances, type LootTables, type MagicInfo } from '../src/formats/loot';
 import { parseSpells } from '../src/formats/spells';
 import { DEFAULT_HERO, type Hero } from '../src/game/combat';
+import {spawnCreature} from '../src/game/creatures';
 import { Dungeon, IDLE_INPUT, type DungeonEvent, type DungeonInput } from '../src/game/dungeon';
 import { FALLBACK_ARMOUR, itemKey, type NewItem } from '../src/game/items';
 import { conditionFor, creatureLoot, fineArmour, fineWeapon, plainArmour, potion, spotLoot, trinket, type LootRules } from '../src/game/loot';
@@ -202,10 +203,14 @@ function tick(d: Dungeon, seconds: number, i: DungeonInput = IDLE_INPUT): void {
 const click = { ...IDLE_INPUT, attack: { held: false, pressed: true, released: true } };
 
 describe('loot in the dungeon', () => {
-  it('fills a loot spot as it is opened and takes all of it', () => {
+  it('fills a loot spot on opening, then takes all only when requested', () => {
     const level = textLevel(['######', '#@...#', '######'], { items: [{ x: 2.5, y: 1.5, name: 'TREASURE.IMG', kind: 'treasure' }], floor: 2 });
     const d = new Dungeon(level, { ...EXE, loot: { ...TABLES, places: [none, none, none, [100, 0, 0, 0], none] } }, always(0));
     d.activate();
+    expect(notes(d.events)).toEqual([]);
+    expect(d.items[0].taken).toBeFalsy();
+    expect(d.lootView?.entries).toEqual([{key:'gold', name:'Gold', count:5}]);
+    d.takeLoot();
     expect(notes(d.events)).toEqual(['5 gold added']);
     expect(d.items[0].taken).toBe(true);
   });
@@ -220,8 +225,55 @@ describe('loot in the dungeon', () => {
       tick(d, 0.3, click);
       tick(d, 1);
       d.activate();
+      d.takeLoot();
       expect(notes(d.events)).toContain(found);
     }
+  });
+
+  it('keeps unopened drops on Close, takes individual rows, and never rerolls a spot', () => {
+    const level = textLevel(['######', '#@...#', '######'], { items: [{x:2.5,y:1.5,name:'CHEST.IMG',kind:'chest'}] });
+    let rolls = 0;
+    const d = new Dungeon(level, undefined, () => { rolls++; return 0; });
+    const gold = d.stats.gold, items = d.inventory.items.length;
+    d.activate();
+    const original = d.lootView!;
+    expect(original.entries.some(e => e.key === 'gold')).toBe(true);
+    expect(original.entries.some(e => e.key.startsWith('item:'))).toBe(true);
+    const rolled = rolls;
+    d.closeLoot();
+    expect(d.lootView).toBeUndefined();
+    expect(d.stats.gold).toBe(gold);
+    expect(d.items[0].searched).toBeFalsy();
+    d.activate();
+    expect(rolls).toBe(rolled);
+    expect(d.lootView).toEqual(original);
+    d.takeLoot('gold');
+    expect(d.stats.gold).toBe(gold + original.entries.find(e=>e.key==='gold')!.count);
+    expect(d.inventory.items.length).toBe(items);
+    expect(d.items[0].searched).toBeFalsy();
+    d.takeLoot('item:999');
+    expect(d.inventory.items.length).toBe(items);
+    d.closeLoot(); d.activate();
+    expect(d.lootView?.entries.every(e=>e.key!=='gold')).toBe(true);
+    d.takeLoot();
+    expect(d.inventory.items.length).toBeGreaterThan(items);
+    expect(d.lootView).toBeUndefined();
+    expect(d.items[0].searched).toBe(true);
+    expect(d.target()).toBeUndefined();
+  });
+
+  it('finds a corpse by its stable id after earlier creatures are retired', () => {
+    const d = new Dungeon(textLevel(['######','#@...#','######']), undefined, always(0));
+    const c = spawnCreature(57, fakeCreature({id:1,level:1}),2.5,1.5,always(0));
+    d.creatures.push(c);
+    c.health=0; c.state='dead';
+    // Spawn ids need not match the current array index after Test Area cleanup.
+    c.id=57;
+    d.activate();
+    expect(d.lootView?.name).toBe(c.info.name);
+    d.closeLoot(); d.activate();
+    d.takeLoot();
+    expect(d.target()).toBeUndefined();
   });
 
   it('drinks a potion, casting its spell, and knows every potion of its kind from then on', () => {
@@ -255,13 +307,13 @@ describe('loot in the dungeon', () => {
     expect(d.use(itemKey(charm))).toBe('The Charm of Darts is worn out');
   });
 
-  it('says why a trinket’s spell can’t go, and keeps the charge', () => {
+  it('offensive trinkets break Sanctuary and spend their charge', () => {
     const d = new Dungeon(textLevel(['#######', '#@....#', '#######']), EXE, always(0), hero(), SPELLS);
     const charm = d.inventory.add({ kind: 'trinket', trinket: 'spell', name: 'Charm of Darts', type: 0, spell: 0, castLevel: 4, charges: 3, weight: 0, value: 1 });
     (d as unknown as { sanctuary: { until: number } }).sanctuary.until = Infinity;
-    expect(d.use(itemKey(charm))).toBe('You can’t cast that in sanctuary');
-    expect(notes(d.events)).toEqual([]);
-    expect(charm.charges).toBe(3);
+    expect(d.use(itemKey(charm))).toBe('Dart cast with the Charm of Darts');
+    expect(notes(d.events)).toContain('Your attack breaks Sanctuary');
+    expect(charm.charges).toBe(2);
   });
 
   it('raises attributes while trinkets and Fortify spells are on the player, and works the character out again', () => {

@@ -42,7 +42,7 @@ export class SpellView {
         this.boltSprites.set(b.id, sprite);
         this.group.add(sprite);
       }
-      sprite.position.set(b.x, height, b.y);
+      sprite.position.set(b.x, b.z??height, b.y);
     }
     for (const [id, sprite] of this.boltSprites) {
       if (live.has(id)) continue;

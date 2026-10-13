@@ -11,7 +11,7 @@
  * out of, only climbed out of (see dungeon.ts).
  */
 import { blockedFor, cellIndex } from './grid';
-import { ARENA_HEIGHT, floorHeight, isBlocking, PLAYER_HEIGHT, STEP_HEIGHT, type Cell, type Level } from './level';
+import { ARENA_HEIGHT, floorHeight, isBlocking, isWaterTunnel, PLAYER_HEIGHT, SWIMMING_HEIGHT, STEP_HEIGHT, type Cell, type Level } from './level';
 
 export { cellIndex };
 
@@ -72,6 +72,7 @@ export function inChasm(level: Level, p: PlayerState): boolean {
  */
 function blocksPlayer(level: Level, cell: Cell | undefined, index: number, z: number, openDoors: Set<number>, fromChasm: boolean): boolean {
   if (!cell) return true;
+  if (fromChasm && isWaterTunnel(cell) && z + SWIMMING_HEIGHT <= EPSILON) return false;
   if (cell.kind === 'raised') {
     if (fromChasm) return true;
     const bottom = cell.raisedBottom ?? 0;

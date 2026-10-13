@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import type { GameData } from '../data/files';
 import { parseCfa } from '../formats/cfa';
 import { parseCif } from '../formats/cif';
-import { crop, parseImg, parseRci, parseSet, RCI_HEIGHT, RCI_WIDTH, TILE, type IndexedImage } from '../formats/img';
-import { indicesToRgba, parseCol, type Palette } from '../formats/palette';
+import { parseImg, parseRci, parseSet, type IndexedImage } from '../formats/img';
+import { indicesToRgba, parseCol, spectralRgba, type Palette } from '../formats/palette';
 
 /** One animation file: its frame size and a texture per frame. */
 export interface SpriteFile {
@@ -17,6 +17,7 @@ export interface SpriteFile {
 export interface CreatureSprite {
   views: SpriteFile[];
   death: SpriteFile;
+  spectral?: boolean;
 }
 
 /** An image drawn straight onto the screen, placed on Arena's 320x147 game view. */
@@ -36,11 +37,11 @@ export class TextureCache {
   constructor(private readonly data: GameData, private readonly palette: Palette) {}
 
   /** A 64x64 wall/floor tile: frame n of a SET, or a single IMG. */
-  tile(file: string, frame = 0): Promise<THREE.DataTexture | undefined> {
-    return this.load(`${file}#${frame}`, async () => {
+  tile(file: string, frame = 0, transparentZero = false): Promise<THREE.DataTexture | undefined> {
+    return this.load(`${file}#${frame}${transparentZero ? ":masked" : ""}`, async () => {
       const bytes = await this.data.read(file);
       const img = file.endsWith('.SET') ? parseSet(bytes)[frame] : parseImg(bytes);
-      return img && toTexture(img, this.palette, true);
+      return img && toTexture(img, this.palette, true, transparentZero);
     });
   }
 
@@ -81,8 +82,7 @@ export class TextureCache {
 
   /**
    * Animated liquid frames from WATERANI.RCI / LAVAANI.RCI. Arena draws these
-   * in screen space; we cut a 64x64 tile from the near (bottom) part of each
-   * frame and tile it across the surface. Empty when the file is missing.
+   * in screen space; keep the complete 320x100 frame for the liquid shader. Empty when the file is missing.
    */
   liquid(file: string): Promise<THREE.DataTexture[]> {
     let p = this.animCache.get(file);
@@ -90,8 +90,7 @@ export class TextureCache {
       p = (async () => {
         if (!this.data.has(file)) return [];
         const frames = parseRci(await this.data.read(file));
-        const x = (RCI_WIDTH - TILE) / 2;
-        return frames.map((f) => toTexture(crop(f, x, RCI_HEIGHT - TILE, TILE, TILE), this.palette, true));
+        return frames.map((f) => toTexture(f, this.palette, false));
       })().catch((err) => {
         console.warn(`Could not load ${file}:`, err);
         return [];
@@ -106,16 +105,18 @@ export class TextureCache {
     let p = this.creatureCache.get(stem);
     if (!p) {
       p = (async () => {
+        const spectral = /^(GHOST|WRAITH)$/i.test(stem);
         const files = await Promise.all(
           [1, 2, 3, 4, 5, 6].map(async (n) => {
             const cfa = parseCfa(await this.data.read(`${stem}${n}.CFA`));
             const frames = cfa.frames.map((pixels) =>
+              spectral ? rgbaTexture(spectralRgba(pixels, this.palette), cfa.width, cfa.height, false) :
               toTexture({ width: cfa.width, height: cfa.height, xOffset: 0, yOffset: 0, pixels }, this.palette, false, true),
             );
             return { width: cfa.width, height: cfa.height, frames };
           }),
         );
-        return { views: files.slice(0, 5), death: files[5] };
+        return { views: files.slice(0, 5), death: files[5], spectral };
       })().catch((err) => {
         console.warn(`Could not load the ${stem} animations:`, err);
         return undefined;

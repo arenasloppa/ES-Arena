@@ -1,3 +1,4 @@
+import {HOTBAR_ORDER} from '../input/hotbar';
 /**
  * The menus over the game, after Skyrim's. Tab (B on a controller) opens the
  * menu of menus, Skyrim's separated plus: the character sheet above, magic to
@@ -17,13 +18,15 @@ import { experienceFor, knackDamage } from '../game/combat';
 import { FALLBACK_ATTRIBUTES, type Character, type CreationData } from '../game/character';
 import type { Dungeon, MenuEntry } from '../game/dungeon';
 import type { GameMenu } from '../game/engine';
-import { ARMOUR_TYPES, armourRating, HOTKEYS, itemFrame, wearable, type Item } from '../game/items';
+import { ARMOUR_TYPES, armourRating, itemFrame, wearable, type Item } from '../game/items';
 import { describe as describeSpell, elementName, targetWords } from '../game/magic';
 import { spellColour } from '../render/spellView';
 import { Repeater, type Direction, type GamepadInput } from '../input/gamepad';
+import { steelWeapons } from '../render/steelWeaponAssets';
+import { weaponModelDefinition } from '../render/weaponModelDefinitions';
 import { ItemView, STICK_TURN } from '../render/itemView';
 import type { Portraits } from '../render/portrait';
-import { padHotkeyGlyph, type Action, type InputModeWatcher } from './controls';
+import { glyphs, type Action, type InputModeWatcher } from './controls';
 
 /** The run the menus show: the dungeon being played and its character. */
 export interface MenuRun {
@@ -56,14 +59,13 @@ interface Category {
 }
 
 const CATEGORIES: Category[] = [
-  { name: 'Favourites', holds: (e) => e.favourite },
   { name: 'All', holds: () => true },
   { name: 'Weapons', holds: (e) => e.category === 'weapons' },
   { name: 'Apparel', holds: (e) => e.category === 'apparel' },
   { name: 'Potions', holds: (e) => e.category === 'potions' },
   { name: 'Misc', holds: (e) => e.category === 'misc' },
 ];
-const ALL = 1;
+const ALL = 0;
 const MESSAGE_MS = 3500;
 
 /** A button hint along the bottom, which the mouse can also click. */
@@ -83,6 +85,9 @@ export class GameMenus {
   /** The key aiming at an arm of the plus menu: its menu opens when the key comes up. */
   private aimKey: string | undefined;
   private category = ALL;
+  private assignmentEntry:MenuEntry|undefined;
+  private assignmentSlot=0;
+  private readonly hotbarPicker:HTMLElement;
   private column: 'categories' | 'list' = 'list';
   private row = 0;
   private spellRow = 0;
@@ -135,7 +140,7 @@ export class GameMenus {
     for (const [direction, pick] of Object.entries(TWEEN) as Array<[Direction, TweenPick]>) {
       const arm = el('span', `tween-arm tween-arm-${direction}`);
       const b = el('button', `tween-option tween-${direction}`, TWEEN_LABELS[pick]);
-      b.addEventListener('mouseenter', () => this.pickTween(pick));
+      b.addEventListener('mousemove', (e) => {if(this.mouseMoved(e))this.pickTween(pick);});
       b.addEventListener('click', () => this.openTween(pick));
       this.tweenOptions[pick] = b;
       this.tweenArms[pick] = arm;
@@ -195,7 +200,9 @@ export class GameMenus {
     this.message.setAttribute('role', 'status');
     this.bar = el('div', 'gm-bar');
     this.hints = el('div', 'hints gm-hints');
-    root.append(...Object.values(this.panels), this.message, this.bar, this.hints);
+    root.append(...Object.entries(this.panels).filter(([name])=>name!=='favourites').map(([,panel])=>panel), this.message, this.bar, this.hints);
+    this.hotbarPicker=el('section','hotbar-picker');this.hotbarPicker.hidden=true;
+    this.hotbarPicker.setAttribute('role','dialog');this.hotbarPicker.setAttribute('aria-modal','true');this.hotbarPicker.setAttribute('aria-label','Assign hotbar');root.append(this.hotbarPicker);
 
     // Clicking the dark around the favourites list goes back to the game.
     root.addEventListener('mousedown', (e) => {
@@ -203,7 +210,7 @@ export class GameMenus {
     });
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
-    input.onChange(() => this.which && this.render());
+    input.onChange(() => {if(this.which)this.input.render(this.root);});
   }
 
   get isOpen(): boolean {
@@ -216,6 +223,7 @@ export class GameMenus {
 
   /** Opens one of the menus; the caller has paused the game. */
   open(which: GameMenu): void {
+    if(which==='favourites')return;
     if (!this.host.run()) return;
     this.which = which;
     this.root.hidden = false;
@@ -229,13 +237,13 @@ export class GameMenus {
       this.padHeld = this.pad.connected && this.pushed();
     }
     if (which === 'items') this.column = this.shown().length ? 'list' : 'categories';
-    if (which === 'favourites') this.favouriteRow = 0;
     this.showMessage('');
     this.render();
   }
 
   close(): void {
     if (!this.which) return;
+    this.cancelAssignment();
     this.which = undefined;
     this.root.hidden = true;
     clearTimeout(this.messageTimer);
@@ -246,16 +254,24 @@ export class GameMenus {
     const pad = this.pad;
     if (!this.which || !pad.connected) return;
     if (pad.take('Start')) return this.host.pause();
+    if(this.assignmentEntry){
+      if(pad.take('Y'))return this.cancelAssignment();
+      for(const [slot,button] of ['Up','X','B','LB','RB','Left','Right'].entries())if(pad.take(button as 'Up'|'X'|'B'|'LB'|'RB'|'Left'|'Right')){this.finishAssignment(slot);return;}
+      if(pad.take('A'))return this.finishAssignment(HOTBAR_ORDER[this.assignmentSlot]);
+      const direction=this.repeater.update(pad.direction(),now);
+      if(direction==='left'||direction==='right'){this.assignmentSlot=step(this.assignmentSlot,direction==='left'?-1:1,7);this.renderAssignment();}
+      return;
+    }
     if (pad.take('B')) return this.back();
     const which = this.which;
     if (which === 'favourites') {
       // The D-pad's left and right are the controller's two hotkeys.
       if (pad.take('Left')) this.setHotkey(0);
-      if (pad.take('Right')) this.setHotkey(1);
+
     }
     if (pad.take('A')) this.choose();
-    if (pad.take('Y')) this.toggleFavourite();
-    if (pad.take('X') && which === 'items') this.drop();
+    if(pad.take('Y')&&which!=='tween'&&which!=='character')this.beginAssignment();
+
     if (pad.take('RT') && which === 'items') this.cast();
     if (which === 'items') {
       if (pad.take('LB')) this.moveCategory(-1);
@@ -348,6 +364,11 @@ export class GameMenus {
     } else this.host.resume();
   }
 
+  /** Rebuilding a list under a resting cursor must not override controller selection. */
+  private mouseMoved(event: MouseEvent): boolean {
+    return this.input.mode === 'keyboard' && (event.movementX !== 0 || event.movementY !== 0);
+  }
+
   private pickTween(pick: TweenPick): void {
     this.tweenPick = pick;
     this.render();
@@ -373,15 +394,6 @@ export class GameMenus {
     this.render();
   }
 
-  private toggleFavourite(): void {
-    const d = this.host.run()?.dungeon;
-    const entry = this.picked();
-    if (!d || !entry || (!entry.item && !entry.spell)) return;
-    const now = d.favourite(entry.key);
-    this.showMessage(`${entry.name} ${now ? 'added to' : 'taken off'} the favourites`);
-    this.render();
-  }
-
   /** Casts the spell of the picked piece of gear or trinket. */
   private cast(): void {
     const d = this.host.run()?.dungeon;
@@ -399,13 +411,42 @@ export class GameMenus {
     this.render();
   }
 
+  private beginAssignment():void {
+    const d=this.host.run()?.dungeon,entry=this.picked();
+    if(!d||!entry||!d.hotbarAssignable(entry.key))return;
+    this.assignmentEntry=entry;this.assignmentSlot=0;this.renderAssignment();
+  }
+  private cancelAssignment():void {this.assignmentEntry=undefined;this.hotbarPicker.hidden=true;}
+  private finishAssignment(slot:number):void {
+    const d=this.host.run()?.dungeon,entry=this.assignmentEntry;
+    if(!d||!entry||!d.assignHotbar(slot,entry.key))return;
+    this.cancelAssignment();this.showMessage(`${entry.name} assigned to ${['D-pad Up','X','B','LB','RB','D-pad Left','D-pad Right'][slot]} (${HOTBAR_ORDER.findIndex(value=>value===slot)+1})`);this.render();
+  }
+  private renderAssignment():void {
+    const d=this.host.run()?.dungeon,entry=this.assignmentEntry;if(!d||!entry)return;
+    this.hotbarPicker.hidden=false;
+    const card=el('div','hotbar-picker-card'),row=el('div','hotbar-picker-slots');
+    card.append(el('h2','',`Assign ${entry.name}`),el('p','', 'Choose a hotbar slot'));
+    for(let i=0;i<7;i++){
+      const slot=HOTBAR_ORDER[i];
+      const button=el('button','hotbar-picker-slot');button.classList.toggle('picked',i===this.assignmentSlot);button.dataset.hotbarSlot=String(slot);
+      const glyph=el('span');glyph.dataset.glyph=slot===0?'quickslot':`ability${slot}`;
+      button.append(glyph,el('strong','',`Slot ${i+1}`),el('small','',d.hotbarEntry(slot)?.name??'Empty'));
+      button.addEventListener('mousemove',(e)=>{if(!this.mouseMoved(e))return;this.assignmentSlot=i;for(const el of row.children)el.classList.toggle('picked',(el as HTMLElement).dataset.hotbarSlot===String(slot));const clear=this.hotbarPicker.querySelector('.hotbar-clear');if(clear)clear.textContent=`Clear slot ${i+1}`;});
+      button.addEventListener('click',()=>this.finishAssignment(slot));row.append(button);
+    }
+    const clear=el('button','hotbar-clear',`Clear slot ${this.assignmentSlot+1}`);clear.addEventListener('click',()=>{d.clearHotbar(HOTBAR_ORDER[this.assignmentSlot]);this.cancelAssignment();this.render();});
+    const cancel=el('button','');const glyph=el('span');glyph.dataset.glyph='cancelHotbar';cancel.append(glyph,' Cancel');cancel.addEventListener('click',()=>this.cancelAssignment());
+    card.append(row,clear,cancel);this.hotbarPicker.replaceChildren(card);this.input.render(this.hotbarPicker);
+  }
+
   /** Puts the picked entry on number key n + 1, making it a favourite if it isn't. */
   private setHotkey(n: number): void {
     const d = this.host.run()?.dungeon;
     const entry = this.which === 'items' && this.column !== 'list' ? undefined : this.picked();
     if (!d || !entry || (!entry.item && !entry.spell)) return;
     d.setHotkey(n, entry.key);
-    const where = this.input.mode === 'gamepad' && n < 2 ? `the D-pad's ${n === 0 ? 'left' : 'right'}` : String(n + 1);
+    const where=this.input.mode==='gamepad'&&n===0?'D-pad Up':String(n+1);
     this.showMessage(`${entry.name} put on ${where}`);
     this.render();
   }
@@ -527,13 +568,14 @@ export class GameMenus {
       ...(shown.length
         ? shown.map((entry, i) => {
             const li = this.entryRow(entry, i === this.row && this.column === 'list');
-            li.addEventListener('mouseenter', () => {
+            li.addEventListener('mousemove', (e) => {
+              if (!this.mouseMoved(e)) return;
               if (this.row === i && this.column === 'list') return;
               this.row = i;
               this.column = 'list';
               this.render();
             });
-            li.addEventListener('click', () => this.use(entry));
+            li.addEventListener('click', () => { this.row = i; this.column = 'list'; this.use(entry); });
             return li;
           })
         : [el('li', 'gm-nothing', 'Nothing')]),
@@ -547,7 +589,7 @@ export class GameMenus {
       if (verb) hints.push({ action: 'use', label: verb, run: () => this.use(picked) });
       if (picked.item && wearable(picked.item) && run.dungeon.castsSpell(picked.key)) hints.push({ action: 'cast', label: 'Cast', run: () => this.cast() });
       if (picked.item) {
-        hints.push({ action: 'favourite', label: picked.favourite ? 'Unfavourite' : 'Favourite', run: () => this.toggleFavourite() });
+        if(run.dungeon.hotbarAssignable(picked.key))hints.push({action:'assignHotbar',label:'Assign hotbar',run:()=>this.beginAssignment()});
         if (picked.item.kind !== 'potion') hints.push({ action: 'drop', label: 'Drop', run: () => this.drop() });
       }
       // The item's picture is there to turn, where the screen is wide enough to show it.
@@ -570,7 +612,6 @@ export class GameMenus {
     const name = el('span', 'gm-name', entry.name);
     li.append(mark, name);
     if (entry.count > 1) li.append(el('span', 'gm-count', `(${entry.count})`));
-    if (entry.favourite) li.append(el('span', 'gm-star', '★'));
     if (entry.hotkey !== undefined) li.append(this.hotkeyBadge(entry.hotkey));
     const d = this.host.run()?.dungeon;
     if (entry.item && d?.inventory.forbidden(entry.item)) li.classList.add('forbidden');
@@ -581,9 +622,9 @@ export class GameMenus {
   /** The number key an entry is on; with a controller, the D-pad's arm for the first two. */
   private hotkeyBadge(n: number): HTMLElement {
     const badge = el('span', 'gm-hotkey');
-    if (this.input.mode === 'gamepad' && n < 2) badge.append(padHotkeyGlyph(n));
+    if (this.input.mode === 'gamepad' && n===0) badge.append(...glyphs('quickslot',this.input.mode,this.input.style));
     else badge.textContent = String(n + 1);
-    if (this.input.mode === 'gamepad' && n >= 2) badge.classList.add('dim');
+    if (this.input.mode === 'gamepad' && n >= 1) badge.classList.add('dim');
     return badge;
   }
 
@@ -607,7 +648,7 @@ export class GameMenus {
       if (known && item.attribute !== undefined && item.boost) rows.push([FALLBACK_ATTRIBUTES[item.attribute] ?? 'Attribute', `+${item.boost}`]);
       if (known && item.charges !== undefined) rows.push(['Charges', String(item.charges)]);
       if (known && item.condition !== undefined) rows.push(['Condition', String(item.condition)]);
-      if (item.kind === 'potion') rows.push(['Count', String(entry.count)]);
+      if (item.kind === 'potion' || item.kind === 'ammunition') rows.push(['Count', String(entry.count)]);
       // What it's worth would give away what it is.
       rows.push(['Weight', weight(item.weight)], ['Value', known ? String(item.value) : '?']);
       if (known && item.spell !== undefined) {
@@ -621,7 +662,11 @@ export class GameMenus {
       note = item.unidentified ? `${kind}, not yet identified` : (forbidden ?? (entry.equipped ? `${kind}, equipped` : kind));
       this.card.classList.toggle('forbidden', !!forbidden);
       const frame = itemFrame(item);
-      if (frame !== undefined && this.pictureKey !== entry.key) void this.showPicture(frame, run.character.gender, entry.key);
+      if (this.pictureKey !== entry.key) {
+        if ((item.kind === 'ammunition' && item.material === 1) || (item.kind === 'weapon' && weaponModelDefinition(item)))
+          void this.showWeaponModel(item, entry.key);
+        else if (frame !== undefined) void this.showPicture(frame, run.character.gender, entry.key);
+      }
     } else {
       rows.push(['Count', String(entry.count)]);
       note = 'Opens a locked door in this dungeon';
@@ -635,6 +680,18 @@ export class GameMenus {
       }),
     );
     this.cardNote.textContent = [note, ...effects].join('. ');
+  }
+
+  private async showWeaponModel(item: Item, key: string): Promise<void> {
+    this.pictureKey = key;
+    try {
+      const model = await (item.kind === 'ammunition' ? steelWeapons.arrow() : steelWeapons.loadWeapon(item));
+      if (!model || this.which !== 'items' || this.pictureKey !== key) return;
+      this.picture.hidden = false;
+      if (!this.itemView.showObject(model)) this.picture.hidden = true;
+    } catch (error) {
+      console.warn('Could not show weapon model:', error);
+    }
   }
 
   /** Shows the item's picture from the game as a model to turn, if it is still the one picked when it loads. */
@@ -663,12 +720,13 @@ export class GameMenus {
         const cost = d.spellCost(entry.spell!);
         li.append(el('span', 'gm-count', `${cost}`));
         if (cost > d.stats.magicka) li.classList.add('forbidden');
-        li.addEventListener('mouseenter', () => {
+        li.addEventListener('mousemove', (e) => {
+              if (!this.mouseMoved(e)) return;
           if (this.spellRow === i) return;
           this.spellRow = i;
           this.render();
         });
-        li.addEventListener('click', () => this.use(entry));
+        li.addEventListener('click', () => { this.spellRow = i; this.use(entry); });
         return li;
       }),
     );
@@ -686,14 +744,14 @@ export class GameMenus {
       const element = elementName(spell);
       if (element) rows.push(['Element', element]);
       this.spellStats.replaceChildren(...rows.flatMap(([k, v]) => [el('dt', '', k), el('dd', '', v)]));
-      this.spellNote.textContent = picked.equipped ? 'Readied: cast it with the block button' : 'Costs less at each level';
+      this.spellNote.textContent='Use Assign hotbar to choose a slot. Costs less at each level.';
     }
     this.renderMagicBar(run);
     const hints: Hint[] = [];
     if (picked) {
       hints.push({ action: 'use', label: picked.equipped ? 'Put away' : 'Ready', run: () => this.use(picked) });
-      hints.push({ action: 'favourite', label: picked.favourite ? 'Unfavourite' : 'Favourite', run: () => this.toggleFavourite() });
     }
+    if(picked?.spell)hints.push({action:'assignHotbar',label:'Assign hotbar',run:()=>this.beginAssignment()});
     hints.push({ action: 'back', label: 'Close', run: () => this.back() });
     this.setHints(hints);
   }
@@ -717,12 +775,14 @@ export class GameMenus {
     const portraits = this.host.portraits();
     this.doll.hidden = !portraits;
     void portraits
-      ?.drawDoll(this.doll, { race: c.race, gender: c.gender, face: c.face, robe: !!cls?.spellcaster, equipment: d.inventory.pictureFrames() })
+      ?.drawDoll(this.doll, { race: c.race, gender: c.gender, face: c.face, robe: !!cls?.spellcaster, equipment: d.inventory.pictureFrames(),
+        weapon: d.inventory.weapon,
+      })
       .then((drawn) => drawn !== undefined && (this.doll.hidden = !drawn));
     const title = el('h2', 'gm-title', c.name);
     const sub = el('p', 'gm-sub', `Level ${s.level} ${race?.name ?? ''} ${cls?.name ?? ''}`.replace(/\s+/g, ' '));
     const attributes = el('dl', 'gm-attributes');
-    data.attributes.forEach((name, i) => attributes.append(el('dt', '', name), el('dd', '', String(c.attributes[i] ?? 0))));
+    data.attributes.forEach((name, i) => attributes.append(el('dt', '', name), el('dd', '', String(Math.floor(Math.max(0,Math.min(100,(c.attributes[i] ?? 0) + (d.attributeBonus()[i] ?? 0))))))));
     const next = experienceFor(s.level + 1, hero.experience);
     const [low, high] = s.weapon.damage;
     // Strength, the race's knack with the weapon in hand and a Ranger's level, as they add to a blow now.
@@ -753,12 +813,13 @@ export class GameMenus {
         ? list.map((entry, i) => {
             const li = this.entryRow(entry, i === this.favouriteRow);
             li.querySelector('.gm-star')?.remove();
-            li.addEventListener('mouseenter', () => {
+            li.addEventListener('mousemove', (e) => {
+              if (!this.mouseMoved(e)) return;
               if (this.favouriteRow === i) return;
               this.favouriteRow = i;
               this.render();
             });
-            li.addEventListener('click', () => this.use(entry));
+            li.addEventListener('click', () => { this.favouriteRow = i; this.use(entry); });
             return li;
           })
         : [el('li', 'gm-nothing', 'No favourites yet: press F in the item menu to add one')]),
@@ -767,18 +828,13 @@ export class GameMenus {
     const hints: Hint[] = [];
     if (list.length) {
       hints.push({ action: 'use', label: 'Use', run: () => this.choose() });
-      hints.push({ action: 'setHotkey', label: 'Hotkey', run: () => this.showMessage(this.hotkeyHelp()) });
-      hints.push({ action: 'favourite', label: 'Remove', run: () => this.toggleFavourite() });
+      const picked=list[this.favouriteRow];
+      if(picked&&this.host.run()?.dungeon.hotbarAssignable(picked.key))hints.push({action:'assignHotbar',label:'Assign hotbar',run:()=>this.beginAssignment()});
     }
     hints.push({ action: 'back', label: 'Close', run: () => this.back() });
     this.setHints(hints);
   }
 
-  private hotkeyHelp(): string {
-    return this.input.mode === 'gamepad'
-      ? "Press left or right on the D-pad to put the picked favourite there; in the game, the same press uses it"
-      : `Press a number from 1 to ${HOTKEYS} to put the picked favourite on it; in the game, the same key uses it`;
-  }
 
   /** The bottom bar: the character's level and progress, or what they carry. */
   private renderBar(run: MenuRun, level: boolean): void {
@@ -830,6 +886,16 @@ export class GameMenus {
     if (e.target instanceof HTMLInputElement) return;
     const which = this.which;
     const code = e.code;
+    if(this.assignmentEntry){
+      e.preventDefault();if(e.repeat)return;
+      const slot=/^(?:Digit|Numpad)([1-7])$/.exec(code);
+      if(slot)this.finishAssignment(HOTBAR_ORDER[Number(slot[1])-1]);
+      else if(code==='Escape'||code==='KeyH')this.cancelAssignment();
+      else if(code==='ArrowLeft'||code==='ArrowRight'){this.assignmentSlot=step(this.assignmentSlot,code==='ArrowLeft'?-1:1,7);this.renderAssignment();}
+      else if(code==='Enter')this.finishAssignment(HOTBAR_ORDER[this.assignmentSlot]);
+      return;
+    }
+
     const handled = () => e.preventDefault();
     if (code === 'Tab' || (code === 'KeyI' && which === 'items') || (code === 'KeyP' && which === 'magic') || (code === 'KeyQ' && which === 'favourites')) {
       handled();
@@ -871,25 +937,23 @@ export class GameMenus {
       if (!e.repeat) this.choose();
       return;
     }
-    if (code === 'KeyF') {
-      handled();
-      this.toggleFavourite();
-      return;
-    }
+
     if (code === 'KeyC' && which === 'items') {
       handled();
       this.cast();
       return;
     }
+    if(code==='KeyH'){handled();this.beginAssignment();return;}
     if (code === 'KeyR' && which === 'items') {
       handled();
       this.drop();
       return;
     }
-    const digit = /^(?:Digit|Numpad)([1-8])$/.exec(code);
-    if (digit && (which === 'favourites' || which === 'items' || which === 'magic')) {
-      handled();
-      this.setHotkey(Number(digit[1]) - 1);
+    const digit=/^(?:Digit|Numpad)([1-7])$/.exec(code);
+    if(digit&&['favourites','items','magic'].includes(which)){
+      handled();const slot=Number(digit[1])-1;
+      if(slot<7){this.beginAssignment();if(this.assignmentEntry)this.finishAssignment(HOTBAR_ORDER[slot]);}
+      else this.setHotkey(slot);
     }
   };
 
@@ -929,6 +993,8 @@ function kindWords(item: Item): string {
       return 'Shield';
     case 'weapon':
       return item.twoHanded ? 'Two-handed' : 'One-handed';
+    case 'ammunition':
+      return 'Ammunition';
     case 'potion':
       return 'Potion';
     default:

@@ -24,6 +24,8 @@ interface Actor {
 export class CreatureView {
   readonly group = new THREE.Group();
   private readonly actors: Actor[] = [];
+  private readonly retired=new WeakSet<Creature>();
+  private disposed=false;
 
   private readonly plane = new THREE.PlaneGeometry(1, 1);
   private load: (stem: string) => Promise<CreatureSprite | undefined> = async () => undefined;
@@ -41,15 +43,29 @@ export class CreatureView {
   /** Draws a creature from now on, such as one that came upon the player resting. */
   async add(creature: Creature): Promise<void> {
     const sprite = await this.load(creature.info.animation);
-    if (!sprite) return;
-    const material = new THREE.MeshBasicMaterial({ map: sprite.views[0].frames[0], alphaTest: 0.5, side: THREE.DoubleSide });
+    if (!sprite||this.disposed||this.retired.has(creature)) return;
+    creature.collisionHeight=sprite.views[0].height*1.2/128;
+    const material = new THREE.MeshBasicMaterial({ map: sprite.views[0].frames[0], alphaTest: sprite.spectral ? 1 / 255 : 0.5, transparent: !!sprite.spectral, depthWrite: !sprite.spectral, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(this.plane, material);
     this.group.add(mesh);
     this.actors.push({ creature, sprite, mesh, material });
   }
 
+  /** Retire one practice corpse without freeing shared animation textures. */
+  remove(creature:Creature):void {
+    this.retired.add(creature);
+    const index=this.actors.findIndex(a=>a.creature===creature);if(index<0)return;
+    const [actor]=this.actors.splice(index,1);actor.mesh.removeFromParent();actor.material.dispose();
+  }
+  /** Remove actors without destroying the cache's shared sprite textures. */
+  clear(): void {
+    for (const actor of this.actors) { this.group.remove(actor.mesh); actor.material.dispose(); }
+    this.actors.length = 0;
+  }
+
   /** Frees every animation frame, including those not on screen. */
   dispose(): void {
+    this.disposed=true;
     for (const { sprite, material } of this.actors) {
       for (const file of [...sprite.views, sprite.death]) for (const t of file.frames) t.dispose();
       material.dispose();

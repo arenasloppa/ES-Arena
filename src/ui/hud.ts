@@ -1,19 +1,19 @@
+import {effectTimer, effectClockProgress, type ActiveStatusEffect} from '../game/statusEffects';
 /**
  * The in-game HUD, after Skyrim's: a compass along the top that marks
  * creatures hunting the player and the current objective, the health of the
  * creature being fought beneath it, a small crosshair with the sneak eye
- * above it, the name of what you can use and the button for it, health and
- * stamina bars along the bottom that fade away when full, notes such as
+ * above it, the name of what you can use and the button for it, a portrait and
+ * health, mana and stamina bars in the top-left, notes such as
  * "Key added" and quest objectives in the top corner, titles across the top
  * for places, quests and levels, and the dungeon's messages along the
  * bottom.
  */
-import type { CompassMarker, EngineHud, HudTarget, ReadiedSpell, Vitals } from '../game/engine';
+import type { AbilitySlotView, CompassMarker, EngineHud, HudTarget, ReadiedSpell, Vitals } from '../game/engine';
 
 const MESSAGE_MS = 7000;
 const TIPS_MS = 14000;
 const NOTE_MS = 4500;
-const OBJECTIVE_MS = 7000;
 const MAX_NOTES = 5;
 /** How long each title across the top stays up; the next waits its turn. */
 const BANNER_MS = 4200;
@@ -47,6 +47,10 @@ class Bar {
       else if (this.shownUntil === Infinity) this.shownUntil = now + BAR_FADE_MS;
     }
     this.el.classList.toggle('faded', now > this.shownUntil);
+    const text=this.el.querySelector('.bar-value');
+    const label=`${Math.ceil(Math.max(0,value))} / ${Math.ceil(Math.max(0,max))}`;
+    if(text && text.textContent!==label)text.textContent=label;
+    this.el.setAttribute('aria-valuemin','0');this.el.setAttribute('aria-valuemax',String(Math.max(0,max)));this.el.setAttribute('aria-valuenow',String(Math.max(0,Math.min(max,value))));
   }
 
   /** Shows the bar again for a while, full or not. */
@@ -72,6 +76,7 @@ export class Hud implements EngineHud {
   private readonly messageEl: HTMLElement;
   private readonly tips: HTMLElement;
   private readonly notes: HTMLElement;
+  private readonly questTracker: HTMLElement;
   private readonly hurtEl: HTMLElement;
   private readonly enemyEl: HTMLElement;
   private readonly enemyName: HTMLElement;
@@ -94,6 +99,9 @@ export class Hud implements EngineHud {
   private readonly banners: Array<[string, string | undefined, string | undefined]> = [];
   private bannerTimer: ReturnType<typeof setTimeout> | undefined;
   private eyeOpen = -1;
+  private readonly hotbarArtwork=new Map<string,string>();
+  setHotbarArtwork(key:string,src:string):void {this.hotbarArtwork.set(key,src);}
+  clearHotbarArtwork():void {this.hotbarArtwork.clear();}
 
   constructor(private readonly root: HTMLElement) {
     const $ = (id: string) => root.querySelector<HTMLElement>(`#${id}`)!;
@@ -105,6 +113,8 @@ export class Hud implements EngineHud {
     this.messageEl = $('message');
     this.tips = $('tips');
     this.notes = $('notes');
+    const logLayout=new ResizeObserver(()=>this.trimNotes());logLayout.observe(this.notes);
+    this.questTracker = $('quest-tracker');
     this.hurtEl = $('hurt');
     this.enemyEl = $('enemy');
     this.enemyName = $('enemy-name');
@@ -116,6 +126,21 @@ export class Hud implements EngineHud {
     this.hand = $('hand');
     this.spellEl = $('spell-readied');
     this.effectsEl = $('effects');
+    // Anchor both effect rows to the stamina bar, including after window resizing.
+    const placeEffects=()=>{
+      const bar=$('stamina').getBoundingClientRect(),hud=root.getBoundingClientRect();
+      if(!bar.height)return;
+      this.effectsEl.style.left=`${bar.left-hud.left}px`;
+      this.effectsEl.style.top=`${bar.bottom-hud.top+10}px`;
+      this.effectsEl.style.width=`${bar.width}px`;
+      const map=$('minimap-frame').getBoundingClientRect();
+      this.questTracker.style.left=`${map.left-hud.left}px`;
+      this.questTracker.style.top=`${map.bottom-hud.top+12}px`;
+      this.questTracker.style.width=`${map.width}px`;
+    };
+    const effectsLayout=new ResizeObserver(placeEffects);
+    effectsLayout.observe($('vitals'));effectsLayout.observe(root);effectsLayout.observe($('minimap-frame'));
+
     this.hand.addEventListener('animationend', () => this.hand.classList.remove('cast'));
     this.magickaEl.addEventListener('animationend', () => this.magickaEl.classList.remove('short'));
     this.marks = $('compass-marks');
@@ -185,14 +210,54 @@ export class Hud implements EngineHud {
     });
   }
 
+  character(name:string,level:number):void {
+    this.root.querySelector('#player-name')!.textContent=name;
+    this.root.querySelector('#player-portrait')!.setAttribute('aria-label',`${name}'s portrait`);
+    this.level(level);
+  }
+
+  level(level:number):void {
+    const badge=this.root.querySelector('#player-level')!;
+    if(badge.textContent!==String(level))badge.textContent=String(level);
+    badge.setAttribute('aria-label',`Level ${level}`);
+  }
+
   vitals(v: Vitals): void {
     const now = performance.now();
     this.health.set(v.health, v.maxHealth, now);
     this.stamina.set(v.stamina, v.maxStamina, now);
-    this.magickaEl.hidden = v.maxMagicka <= 0;
+    this.magickaEl.hidden = false;
+    this.magickaEl.classList.toggle('unavailable',v.maxMagicka<=0);
     this.magicka.set(v.magicka, v.maxMagicka, now);
     this.root.classList.toggle('low-health', v.health > 0 && v.health / v.maxHealth < 0.25);
     this.enemyEl.classList.toggle('faded', now > this.enemyUntil);
+  }
+
+  experience(current:number,required:number):void {
+    const bar=this.root.querySelector<HTMLElement>('#xp-bar')!;
+    const earned=Math.max(0,Math.floor(current)),needed=Math.max(1,Math.floor(required));
+    bar.style.setProperty('--xp-fill',String(Math.min(1,earned/needed)));
+    bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax',String(needed));bar.setAttribute('aria-valuenow',String(Math.min(earned,needed)));
+    const text=this.root.querySelector('#xp-value')!,value=`${earned} / ${needed}`;
+    if(text.textContent!==value)text.textContent=value;
+  }
+
+  abilities(slots:AbilitySlotView[],quickslot:{key?:string;name:string;icon?:string}|undefined):void {
+    const paint=(button:HTMLElement,key:string|undefined,name:string|undefined,icon:string|undefined,cost:number|undefined,available:boolean,cooldown=0,duration=1)=>{
+      const image=button.querySelector<HTMLImageElement>('img')!;
+      const artwork=key&&this.hotbarArtwork.get(key),src=artwork||(icon?new URL(`./status-icons/${icon}.png`,document.baseURI).href:undefined);
+      image.hidden=!src;image.classList.toggle('item-artwork',!!artwork);
+      if(src&&image.src!==src)image.src=src;
+      button.querySelector<HTMLElement>('.ability-empty')!.hidden=!!src;
+      button.querySelector('.ability-name')!.textContent=name??'Empty';
+      button.querySelector('.ability-cost')!.textContent=cost===undefined?'':`${cost} SP`;
+      button.title=name?`${name}${cost===undefined?'':` (${cost} SP)`}`:'Choose an item or spell and use Assign hotbar';
+      button.setAttribute('aria-label',button.title);button.setAttribute('aria-disabled',String(!available));
+      button.classList.toggle('unavailable',!!name&&!available);
+      button.style.setProperty('--cooldown-angle',`${Math.min(1,cooldown/duration)*360}deg`);
+    };
+    for(const [i,slot] of slots.entries())paint(this.root.querySelector(`[data-ability="${i}"]`)!,slot.key,slot.name,slot.icon,slot.cost,slot.available,slot.cooldown,slot.duration);
+    paint(this.root.querySelector('[data-quickslot]')!,quickslot?.key,quickslot?.name,quickslot?.icon,undefined,!!quickslot);
   }
 
   readied(spell: ReadiedSpell | undefined): void {
@@ -220,15 +285,60 @@ export class Hud implements EngineHud {
     this.magicka.flash(performance.now());
   }
 
-  effects(names: string[]): void {
-    this.effectsEl.hidden = !names.length;
-    this.effectsEl.replaceChildren(
-      ...names.map((n) => {
-        const li = document.createElement('li');
-        li.textContent = n;
-        return li;
-      }),
-    );
+  effects(effects: ActiveStatusEffect[]): void {
+    this.effectsEl.hidden = !effects.length;
+    const current = new Map([...this.effectsEl.querySelectorAll<HTMLElement>('.status-effect')].map(el => [el.dataset.effect, el]));
+    let buffs = this.effectsEl.querySelector<HTMLElement>('.buffs');
+    let debuffs = this.effectsEl.querySelector<HTMLElement>('.debuffs');
+    if (!buffs || !debuffs) {
+      buffs = document.createElement('ul'); buffs.className = 'effect-row buffs'; buffs.setAttribute('aria-label', 'Beneficial effects');
+      debuffs = document.createElement('ul'); debuffs.className = 'effect-row debuffs'; debuffs.setAttribute('aria-label', 'Harmful effects');
+      this.effectsEl.replaceChildren(buffs, debuffs);
+    }
+    for (const effect of effects) {
+      let li = current.get(effect.id);
+      if (!li) {
+        li = document.createElement('li');
+        li.className = 'status-effect';
+        li.dataset.effect = effect.id;
+        const image = document.createElement('img');
+        image.width = image.height = 28;
+        image.alt = '';
+        image.draggable = false;
+        const timer = document.createElement('span');
+        timer.className = 'effect-timer';
+        const icon=document.createElement('span');icon.className='effect-icon';
+        const gray=document.createElement('img');gray.className='effect-expired';gray.alt='';gray.draggable=false;gray.setAttribute('aria-hidden','true');
+        const hand=document.createElement('span');hand.className='effect-clock';hand.setAttribute('aria-hidden','true');
+        icon.append(image,gray,hand);
+        li.append(icon, timer);
+      }
+      const image = li.querySelector('img')!;
+      if (li.dataset.icon !== effect.icon) {
+        image.src = new URL(`./status-icons/${effect.icon}.png`, document.baseURI).href;
+        li.querySelector<HTMLImageElement>('.effect-expired')!.src=image.src;
+        li.dataset.icon = effect.icon;
+      }
+      const icon=li.querySelector<HTMLElement>('.effect-icon')!;
+      const progress=effectClockProgress(effect),previous=Number(icon.dataset.elapsed??0);
+      icon.classList.toggle('restarted',progress<previous);
+      icon.dataset.elapsed=String(progress);
+      icon.dataset.timed=String(effect.remaining!==undefined && effect.duration!==undefined && effect.duration>0);
+      icon.style.setProperty('--elapsed-angle',`${(progress*360).toFixed(2)}deg`);
+      li.dataset.kind = effect.kind;
+      li.dataset.dispelType = effect.dispelType ?? '';
+      const timer = effectTimer(effect);
+      const timerElement=li.querySelector<HTMLElement>('.effect-timer')!;
+      timerElement.textContent=timer;
+      timerElement.hidden=!timer;
+      li.title = [effect.name, effect.dispelType ?? 'Buff', timer].filter(Boolean).join(' — ');
+      li.setAttribute('aria-label', [effect.name, effect.dispelType ?? 'Buff', timer].filter(Boolean).join(', '));
+      (effect.kind === 'buff' ? buffs : debuffs).append(li);
+      current.delete(effect.id);
+    }
+    for (const li of current.values()) li.remove();
+    buffs.hidden = !buffs.childElementCount;
+    debuffs.hidden = !debuffs.childElementCount;
   }
 
   /** A short note in the corner, such as "Key added". */
@@ -239,8 +349,16 @@ export class Hud implements EngineHud {
     note.addEventListener('animationend', () => note.classList.add('settled'), { once: true });
     this.notes.append(note);
     while (this.notes.children.length > MAX_NOTES) this.notes.firstElementChild?.remove();
+    // Retire whole older entries rather than clipping a line into the hotbar area.
+    this.trimNotes();
     setTimeout(() => note.classList.add('gone'), NOTE_MS);
     setTimeout(() => note.remove(), NOTE_MS + 800);
+  }
+
+  private trimNotes():void {
+    if(!this.notes.clientWidth)return;
+    const height=()=>Array.from(this.notes.children).reduce((n,el)=>n+el.getBoundingClientRect().height,0)+Math.max(0,this.notes.children.length-1)*2;
+    while(this.notes.children.length>1&&height()>80)this.notes.firstElementChild?.remove();
   }
 
   /** Flashes the screen's edges red. */
@@ -252,15 +370,15 @@ export class Hud implements EngineHud {
   }
 
   /** Shows the health of the creature being fought, under the compass. */
-  enemy(name: string, health: number, maxHealth: number): void {
-    const key = `${name}:${health}:${maxHealth}`;
+  enemy(name: string, health: number, maxHealth: number, id?: number): void {
+    const key = `${id ?? name}:${health}:${maxHealth}`;
     this.enemyUntil = performance.now() + (health > 0 ? ENEMY_MS : 1200);
+    this.enemyEl.hidden = false;
+    this.enemyEl.classList.remove('faded');
     if (key === this.enemyKey) return;
     this.enemyKey = key;
     this.enemyName.textContent = name;
-    this.enemyBar.style.setProperty('--fill', String(Math.max(0, health / maxHealth)));
-    this.enemyEl.hidden = false;
-    this.enemyEl.classList.remove('faded');
+    this.enemyBar.style.setProperty('--fill', String(maxHealth > 0 ? Math.max(0, Math.min(1, health / maxHealth)) : 0));
   }
 
   banner(title: string, kicker?: string, sub?: string): void {
@@ -291,19 +409,20 @@ export class Hud implements EngineHud {
     this.bannerTimer = setTimeout(() => this.nextBanner(), BANNER_MS);
   }
 
-  objective(text: string, done: boolean): void {
+  objective(text: string, done: boolean,questName?:string): void {
+    // The current objective stays under the map; completing it replaces it with the next.
+    this.questTracker.hidden = done;
+    this.questTracker.replaceChildren();
+    if (done) return;
+    const title=document.createElement('h3');title.className='quest-title';title.textContent=questName??'Objectives';
+    this.questTracker.append(title);
     const note = document.createElement('p');
-    note.className = done ? 'note objective done' : 'note objective';
-    note.addEventListener('animationend', () => note.classList.add('settled'), { once: true });
+    note.className = 'objective';
     const box = document.createElement('span');
     box.className = 'box';
     box.setAttribute('aria-hidden', 'true');
     note.append(box, text);
-    if (done) note.setAttribute('aria-label', `${text}: done`);
-    this.notes.append(note);
-    while (this.notes.children.length > MAX_NOTES) this.notes.firstElementChild?.remove();
-    setTimeout(() => note.classList.add('gone'), OBJECTIVE_MS);
-    setTimeout(() => note.remove(), OBJECTIVE_MS + 800);
+    this.questTracker.append(note);
   }
 
   detection(level: number | undefined): void {
@@ -351,6 +470,8 @@ export class Hud implements EngineHud {
     this.messageEl.classList.remove('shown');
     this.tips.hidden = true;
     this.notes.replaceChildren();
+    this.questTracker.replaceChildren();
+    this.questTracker.hidden = true;
     this.enemyEl.hidden = true;
     this.enemyKey = '';
     this.enemyUntil = 0;

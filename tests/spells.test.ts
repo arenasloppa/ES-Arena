@@ -60,7 +60,7 @@ describe('spell rules', () => {
   it('casts only spells whose effects the remake can do', () => {
     expect(castable(bolt)).toBe(true);
     expect(castable(mend)).toBe(true);
-    expect(castable(lift)).toBe(false);
+    expect(castable(lift)).toBe(true);
   });
 
   it('rolls damage plus more for every so many levels', () => {

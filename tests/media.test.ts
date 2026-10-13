@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import {spectralRgba} from '../src/formats/palette';
 import { parseCfa } from '../src/formats/cfa';
 import { parseCif } from '../src/formats/cif';
 import { parseVoc } from '../src/formats/voc';
@@ -19,6 +20,17 @@ describe('CFA', () => {
     const pixels = [0, 9, 9, 0, 17, 0];
     expect([...parseCfa(makeCfa(3, 2, [pixels], 2)).frames[0]]).toEqual(pixels);
     expect([...parseCfa(makeCfa(3, 2, [pixels], 7)).frames[0]]).toEqual(pixels);
+  });
+
+  it('decodes 8-bit direct palette frames without a colour table (ghosts and wraiths)', () => {
+    const data = new Uint8Array(0x4c + 10);
+    const header = new DataView(data.buffer);
+    header.setUint16(0, 2, true); header.setUint16(2, 2, true);
+    header.setUint16(4, 2, true); data[10] = 8; data[11] = 2;
+    header.setUint16(12, 0x4c, true); header.setUint16(14, 0x4c + 5, true);
+    header.setUint16(0x4a, data.length, true);
+    data.set([3, 0, 13, 14, 15, 3, 7, 8, 255, 0], 0x4c);
+    expect(parseCfa(data).frames.map(frame => [...frame])).toEqual([[0,13,14,15],[7,8,255,0]]);
   });
 
   it('rejects broken headers', () => {
@@ -58,5 +70,14 @@ describe('VOC', () => {
 
   it('rejects other files', () => {
     expect(() => parseVoc(new Uint8Array(ascii('RIFF....WAVE')))).toThrow();
+  });
+});
+
+describe('spectral creature pixels', () => {
+  it('uses translucent shadow levels and original eye colours instead of the UI palette', () => {
+    const palette = new Uint8Array(1024).fill(255);
+    palette.set([180,20,10,255],158*4); palette.set([250,60,30,255],159*4);
+    const rgba = spectralRgba(new Uint8Array([0,1,7,13,14,15,200]),palette);
+    expect([...rgba]).toEqual([255,255,255,0, 0,0,0,0, 0,0,0,128, 0,0,0,255, 180,20,10,255, 250,60,30,255, 255,255,255,255]);
   });
 });

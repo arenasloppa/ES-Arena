@@ -12,6 +12,8 @@
  *   TAMRIEL.MNU                  the map, with its own palette
  * Pictures without a palette of their own use CHARSHT.COL.
  */
+import { steelWeaponThumbnail } from './steelWeaponThumbnail';
+import {weaponModelDefinition} from './weaponModelDefinitions';
 import type { GameData } from '../data/files';
 import { parseCif } from '../formats/cif';
 import { parseImg, type IndexedImage } from '../formats/img';
@@ -35,6 +37,7 @@ export interface DollLook {
   robe: boolean;
   /** Frames of the equipment pictures, in the order they are drawn (Inventory.pictureFrames). */
   equipment: number[];
+  weapon?: { type?: number; material?: number };
 }
 
 export interface Layer {
@@ -83,6 +86,7 @@ export class Portraits {
     const ticket = ++this.draws;
     this.drawing.set(canvas, ticket);
     const layers = await Promise.all(dollLayers(look).map((l) => this.picture(l)));
+    const steel = look.weapon && weaponModelDefinition(look.weapon) ? await steelWeaponThumbnail(look.weapon) : undefined;
     if (this.drawing.get(canvas) !== ticket) return undefined;
     canvas.width = DOLL_WIDTH;
     canvas.height = DOLL_HEIGHT;
@@ -90,7 +94,30 @@ export class Portraits {
     ctx.clearRect(0, 0, DOLL_WIDTH, DOLL_HEIGHT);
     // Without the background, there is no doll to speak of.
     if (!layers[0]) return false;
-    for (const p of layers) if (p) ctx.drawImage(p.image, p.x - DOLL_LEFT, p.y);
+    for (let i = 0; i < layers.length; i++) {
+      const p = layers[i];
+      if (!p) continue;
+      if (steel && i >= 4 && look.equipment[i - 4] === look.weapon?.type) {
+        ctx.drawImage(steel, p.x - DOLL_LEFT, p.y, p.image.width, p.image.height);
+      } else ctx.drawImage(p.image, p.x - DOLL_LEFT, p.y);
+    }
+    return true;
+  }
+
+  /** Crops the actual paper doll around the chosen face, including worn headgear. */
+  async drawHead(canvas:HTMLCanvasElement,look:DollLook):Promise<boolean|undefined> {
+    const ticket=++this.draws;this.drawing.set(canvas,ticket);
+    const face=await this.picture({file:`${look.gender==='female'?'FACESF1':'FACES1'}${look.race}.CIF`,frame:look.face});
+    if(!face)return false;
+    const doll=document.createElement('canvas');
+    const drawn=await this.drawDoll(doll,{...look,weapon:undefined});
+    if(this.drawing.get(canvas)!==ticket)return undefined;
+    if(!drawn)return false;
+    canvas.width=canvas.height=80;
+    const ctx=canvas.getContext('2d')!;ctx.imageSmoothingEnabled=false;
+    const width=face.image.width+8,height=face.image.height+8,scale=Math.max(80/width,80/(height*PIXEL_ASPECT));
+    const w=width*scale,h=height*PIXEL_ASPECT*scale;
+    ctx.drawImage(doll,face.x-DOLL_LEFT-4,face.y-4,width,height,(80-w)/2,(80-h)/2,w,h);
     return true;
   }
 
