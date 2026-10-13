@@ -3,7 +3,7 @@
 Every release of ES Arena, newest first. Each one is on the
 [Releases page](https://github.com/arenasloppa/ES-Arena/releases) with its downloads.
 
-## 0.5.0 (2026-10-13)
+## 0.4.6 (2026-10-13)
 
 3D weapons, expanded combat and spell effects, a redesigned HUD, and combat and effect testing.
 

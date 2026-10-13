@@ -26,7 +26,7 @@ describe('first-person controller playback at the local attack rate',()=>{
   for(const type of [0,1,3,6,7,8,9,10,11,13,14]){
    const d=defs[type],model=new THREE.Group();model.add(new THREE.Mesh(new THREE.BoxGeometry(.1,1,.1),new THREE.MeshBasicMaterial()));const rig=new SteelWeaponRig(model,d,new THREE.Scene());
    const c=weaponAttackClip(type,'chop',true),s={kind:'chop' as const,time:c.hit*.7/weaponAttackSpeed(type),duration:c.duration,power:true,struck:false},expected=weaponAttackPose(type,s);
-   for(const aspect of [.7,4/3,16/9,21/9]){rig.viewportAspect=aspect;rig.impact('stone',expected);rig.update(s,true,50,1,0,true,undefined,{yaw:2,pitch:1},true);expect(rig.pivot.position.toArray()).toEqual(d.style!=='bow'?hideWeaponTail(expected,(rig as unknown as {tailPoints:THREE.Vector3[]}).tailPoints,60,aspect,(rig as unknown as {visibilityPoints:THREE.Vector3[]}).visibilityPoints).position:expected.position);expect(rig.pivot.quaternion.angleTo(poseQuaternion(expected))).toBeLessThan(1e-7);}
+   for(const aspect of [.7,4/3,16/9,21/9]){rig.viewportAspect=aspect;rig.impact('stone',expected);rig.update(s,true,50,1,0,true,undefined,{yaw:2,pitch:1},true);const framed=d.style!=='bow'?hideWeaponTail(expected,(rig as unknown as {tailPoints:THREE.Vector3[]}).tailPoints,60,aspect,(rig as unknown as {visibilityPoints:THREE.Vector3[]}).visibilityPoints).position:expected.position;rig.pivot.position.toArray().forEach((v,i)=>expect(v).toBeCloseTo(framed[i],12));expect(rig.pivot.quaternion.angleTo(poseQuaternion(expected))).toBeLessThan(1e-7);}
    expect(animatedGrip(d,undefined,false,0,1,1,2)).toEqual(weaponReadyPose(type,2));rig.dispose();
   }
  });

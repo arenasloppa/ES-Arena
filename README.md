@@ -13,7 +13,7 @@ You play it with your own copy of Arena: the game reads the original maps, textu
 
 ## Screenshots
 
-![A goblin raises its axe at the player in the Imperial Dungeons, with its health under the compass, the minimap at the top right and the player's health at the bottom](docs/screenshots/goblin.png)
+![A goblin raises its axe at the player in the Imperial Dungeons, with its health under the compass, the minimap at the top right and the player's portrait and resource bars at the top left](docs/screenshots/goblin.png)
 
 | | |
 |---|---|
@@ -31,6 +31,13 @@ screenshots of earlier versions.
 ## What works so far
 
 - Choose your `ARENA` folder and the game checks that it has everything it needs.
+- Textured 3D Steel weapons and the Silver Dagger, with weapon-specific swings, power attacks, blocks and shoves,
+  bow drawing, arrow surface impacts and recovery, and constrained flail motion. Other material variants keep their existing artwork.
+  Finished 3D weapons also have rotatable inventory previews.
+- A HUD with a character portrait, health/magicka/stamina bars, buff/debuff icons and timers, a seven-slot hotbar,
+  experience progress and quest objectives beneath the minimap.
+- The main menu's Test Area offers Weapon Testing and Effect Testing. It supplies weapons and spells, keeps the
+  player immortal, cycles through monsters, and allows buffs and debuffs to be added together for testing.
 - Make your character in Skyrim's order, in Arena's own words: choose your gender, race and face together, with your
   race's province marked on Arena's map of Tamriel; pick a name (or a random one in your race's style, Arena's own or by
   the race's customs in the lore); answer ten questions or choose from the eighteen classes; and share out bonus points
@@ -49,7 +56,7 @@ screenshots of earlier versions.
   three times the damage. Bows shoot Arena's arrows, as quickly as your Speed lets you nock the next, and do double
   damage from hiding. While you sneak, an eye shows how close the creatures nearby are to noticing you.
 - Arena's own spells, read from your copy: Fire Dart, Fireball, Shock, Heal, Light, Shield, Invisibility, Open,
-  Medusa's Gaze and the rest of the Mages Guild's list that the remake can do so far (30 of its 64). Spellcasting
+  Medusa's Gaze and all 64 spells in the Mages Guild's spell list. Spellcasting
   classes have spell points as in Arena, by their class and Intelligence, and spells cost less at each level. Ready a
   spell in the magic menu and cast it with the block button, as with a spell in Skyrim's left hand; bolts fly, area
   spells burst, and paralysis, poison, shields and light last as many rounds as the game says.
@@ -63,9 +70,8 @@ screenshots of earlier versions.
   magic rings, amulets and other trinkets, and plain, fine and enchanted gear, found unidentified until you use or wear
   it. Open locked doors with their key, pick their locks or break them down.
 - Skyrim's menus: a menu of menus for your character, items, magic and the map, where you aim at one and let go to
-  open it; an item menu with the game's picture of each piece, where you equip, drink, cast from, favourite and drop things; a
-  character sheet with Arena's paper doll wearing what you wear; and favourites you can put on number keys or the
-  D-pad to use mid-fight.
+  open it; an item menu where you equip, drink, cast from and drop things; and a character sheet with Arena's paper doll
+  wearing what you wear. Spells and usable items can be assigned to the seven-slot hotbar for keyboard or controller use.
 - A 3D map that fills in as you explore, a minimap, quest objectives, and markers on the compass for the next
   objective and the creatures nearby.
 - Arena's own sound effects, each coming from where it happens in the dungeon.
@@ -112,7 +118,7 @@ and file name case doesn't matter. The app remembers the folder for next time. Y
 
 ### Run it from the source code
 
-You need [Node.js](https://nodejs.org) 20 or newer.
+Use [Node.js](https://nodejs.org) 22.12 or later in the 22.x series, or Node.js 24.x, for the source build and tests.
 
 ```sh
 npm install
